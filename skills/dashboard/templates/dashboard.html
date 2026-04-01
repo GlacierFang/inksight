@@ -1,0 +1,1539 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>个人工作台</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #f0f2f5; color: #1f2329; font-family: "PingFang SC", "Microsoft YaHei", sans-serif; min-height: 100vh; }
+
+        /* ── Header ── */
+        header {
+            background: #fff; border-bottom: 1px solid #e5e7eb;
+            padding: 16px 32px; display: flex; align-items: center; gap: 12px;
+            position: sticky; top: 0; z-index: 100;
+        }
+        header h1 { font-size: 18px; font-weight: 600; flex: 1; }
+        .header-badge { background: #e8f5e9; color: #07c160; padding: 3px 10px; border-radius: 20px; font-size: 12px; }
+
+        /* ── Container ── */
+        .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+        /* ── Page tabs ── */
+        .page-tabs { display: flex; gap: 4px; margin-bottom: 20px; }
+        .page-tab {
+            padding: 9px 20px; font-size: 14px; cursor: pointer; border: none;
+            background: none; color: #646a73; border-bottom: 2px solid transparent;
+            margin-bottom: -1px; transition: all 0.15s;
+        }
+        .page-tab.active { color: #07c160; border-bottom-color: #07c160; font-weight: 600; }
+
+        /* ── Stat cards ── */
+        .stat-cards {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 14px;
+            margin-bottom: 20px;
+        }
+        .stat-cards.top3 {
+            grid-template-columns: repeat(3, 1fr);
+        }
+        .stat-card {
+            background: #fff; border-radius: 12px; padding: 16px 20px;
+            border: 1px solid #e5e7eb;
+        }
+        .stat-label { font-size: 12px; color: #8f959e; margin-bottom: 6px; }
+        .stat-value { font-size: 26px; font-weight: 700; }
+        .stat-value.green { color: #07c160; }
+        .stat-value.amber { color: #f59e0b; }
+        .stat-value.red { color: #ef4444; }
+        .stat-sub { font-size: 11px; color: #8f959e; margin-top: 3px; }
+
+        /* ── Panels ── */
+        .panel {
+            background: #fff; border-radius: 12px; padding: 20px 24px;
+            border: 1px solid #e5e7eb;
+        }
+        .panel-title {
+            font-size: 14px; font-weight: 600; color: #1f2329; margin-bottom: 16px;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .panel-title .badge {
+            font-size: 11px; font-weight: 400; background: #f0f1f3; color: #646a73;
+            padding: 2px 8px; border-radius: 10px;
+        }
+        .badge.ok { background: #e8f5e9; color: #07c160; }
+        .badge.warn { background: #fff7e6; color: #f59e0b; }
+        .badge.error { background: #fef2f2; color: #ef4444; }
+        .refresh-btn {
+            background: #f0f1f3; border: none; border-radius: 8px;
+            padding: 4px 12px; font-size: 12px; cursor: pointer; color: #4a4f59;
+        }
+        .refresh-btn:hover { background: #e3e4e8; }
+        .cron-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .cron-table th { text-align: left; padding: 8px 12px; color: #8f959e; font-weight: 500; border-bottom: 1px solid #f0f1f3; }
+        .cron-table td { padding: 8px 12px; border-bottom: 1px solid #f8f9fa; }
+        .cron-table tr:last-child td { border-bottom: none; }
+        .cron-badge { padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+        .badge-ok { background: #e8f5e9; color: #07c160; }
+        .badge-warn { background: #fff7e6; color: #f59e0b; }
+        .badge-error { background: #fef2f2; color: #ef4444; }
+        .badge-idle { background: #f0f1f3; color: #8f959e; }
+        .cron-today { font-size: 10px; background: #e3f0ff; color: #1d7df5; padding: 1px 5px; border-radius: 6px; margin-left: 4px; }
+
+        /* ── Grid helpers ── */
+        .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+        .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+
+        /* ── Chart containers ── */
+        .chart-box { width: 100%; }
+        .source-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+        .source-item { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #646a73; }
+        .source-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .no-data { text-align: center; padding: 24px; color: #bfc3c9; font-size: 13px; }
+        .loading { text-align: center; padding: 20px; color: #8f959e; font-size: 13px; }
+        .loading::after { content: '...'; animation: dots 1s infinite; }
+        @keyframes dots { 0%,20%{content:'.'} 40%{content:'..'} 60%,100%{content:'...'} }
+
+        /* ── Calendar ── */
+        .cal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .cal-nav { display: flex; gap: 6px; }
+        .cal-nav button {
+            background: #f7f8fa; border: 1px solid #e5e7eb; color: #1f2329;
+            padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 13px;
+        }
+        .cal-nav button:hover { background: #eef0f3; }
+        .cal-month { font-size: 14px; font-weight: 600; }
+        .cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-bottom: 3px; }
+        .cal-weekday { text-align: center; font-size: 11px; color: #8f959e; padding: 4px 0; font-weight: 500; }
+        .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+        .cal-day {
+            aspect-ratio: 1; display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            border-radius: 8px; font-size: 13px; cursor: pointer;
+            transition: all 0.15s; gap: 2px;
+        }
+        .cal-day:hover:not(.other-month) { background: #f7f8fa; }
+        .cal-day.other-month { color: #d1d5db; }
+        .cal-day.today { background: #e8f5e9; font-weight: 600; }
+        .cal-day.selected { background: #07c160; color: #fff; }
+        .cal-day .dots { display: flex; gap: 2px; justify-content: center; flex-wrap: wrap; }
+        .cal-day .dot { width: 5px; height: 5px; border-radius: 50%; }
+        .dot-success { background: #07c160; }
+        .dot-pending { background: #f59e0b; }
+        .dot-missed { background: #ef4444; }
+
+        /* ── Day detail panel ── */
+        .day-detail { background: #fff; border-radius: 12px; border: 1px solid #e5e7eb; overflow: hidden; }
+        .day-detail-header {
+            padding: 14px 18px; border-bottom: 1px solid #f1f2f5;
+            font-size: 14px; font-weight: 600; display: flex; justify-content: space-between; align-items: center;
+        }
+        .close-btn { background: none; border: none; font-size: 18px; cursor: pointer; color: #8f959e; padding: 0; }
+        .day-detail-body { padding: 12px 18px; }
+        .day-task {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 0; border-bottom: 1px solid #f8f9fa;
+        }
+        .day-task:last-child { border-bottom: none; }
+        .day-task-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .day-task-name { font-size: 13px; color: #1f2329; flex: 1; }
+        .day-task-meta { font-size: 12px; color: #8f959e; white-space: nowrap; }
+        .mark-btn {
+            padding: 4px 10px; background: #07c160; color: #fff;
+            border: none; border-radius: 5px; font-size: 12px; cursor: pointer; flex-shrink: 0;
+        }
+        .mark-btn:hover { background: #06a555; }
+        .day-empty { text-align: center; padding: 24px; color: #8f959e; font-size: 13px; line-height: 1.6; }
+
+        /* ── Books ── */
+        .book-list { display: flex; flex-direction: column; gap: 12px; }
+        .book-header { display: flex; justify-content: space-between; margin-bottom: 4px; }
+        .book-name { font-size: 13px; font-weight: 500; color: #1f2329; }
+        .book-pct { font-size: 13px; color: #07c160; font-weight: 600; }
+        .book-bar { height: 5px; background: #f1f3f5; border-radius: 3px; overflow: hidden; }
+        .book-fill { height: 100%; background: #07c160; border-radius: 3px; }
+        .book-meta { font-size: 11px; color: #8f959e; margin-top: 3px; }
+
+        /* ── Memory ── */
+        .memory-section { margin-bottom: 16px; }
+        .memory-section:last-child { margin-bottom: 0; }
+        .memory-section-title { font-size: 11px; color: #8f959e; padding: 0 0 6px 0; font-weight: 500; }
+        .memory-list { display: flex; flex-direction: column; }
+        .memory-item { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px solid #f5f6f8; }
+        .memory-item:last-child { border-bottom: none; }
+        .memory-name { font-size: 13px; color: #1f2329; }
+        .memory-name .sub { font-size: 11px; color: #8f959e; }
+        .memory-link { color: #1f2329; text-decoration: none; font-size: 13px; }
+        .memory-link:hover { color: #1d7df5; text-decoration: underline; }
+        .cron-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+        .badge-ok { background: #e8f5e9; color: #07c160; }
+        .badge-warn { background: #fff7e6; color: #f59e0b; }
+        .badge-error { background: #fef2f2; color: #ef4444; }
+        .viewer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+        .viewer-box { background: #fff; border-radius: 14px; width: 90vw; max-width: 800px; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+        .viewer-header { display: flex; align-items: center; padding: 14px 20px; border-bottom: 1px solid #e5e7eb; }
+        .viewer-title { font-size: 14px; font-weight: 600; color: #1f2329; flex: 1; }
+        .viewer-close { background: none; border: none; font-size: 22px; cursor: pointer; color: #8f959e; padding: 0 4px; }
+        .viewer-close:hover { color: #1f2329; }
+        .viewer-body { padding: 20px; overflow-y: auto; flex: 1; }
+        .viewer-pre { white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.7; color: #1f2329; margin: 0; font-family: inherit; }
+        .hb-list { display: flex; flex-wrap: wrap; gap: 10px; padding: 4px 0; }
+        .hb-dot { color: #07c160; font-size: 8px; }
+        .hb-time { font-size: 13px; color: #1f2329; }
+        .memory-name { font-size: 13px; }
+        .memory-name .sub { font-size: 11px; color: #8f959e; margin-top: 1px; }
+        .cron-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+        .badge-ok { background: #e8f5e9; color: #07c160; }
+        .badge-warn { background: #fff7e6; color: #f59e0b; }
+
+        /* ── Sessions ── */
+        .session-list { display: flex; flex-direction: column; gap: 8px; }
+        .session-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #f7f8fa; border-radius: 8px; }
+        .session-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .dot-active { background: #07c160; }
+        .dot-running { background: #5bc0de; }
+        .dot-idle { background: #8f959e; }
+        .session-name { font-size: 13px; color: #1f2329; flex: 1; }
+        .session-meta { font-size: 11px; color: #8f959e; }
+
+        /* ── Quick links ── */
+        .quick-links { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .quick-link {
+            display: flex; align-items: center; gap: 8px;
+            padding: 9px 12px; background: #f7f8fa; border: 1px solid #e5e7eb;
+            border-radius: 8px; color: #1f2329; text-decoration: none; font-size: 13px;
+            transition: all 0.15s;
+        }
+        .quick-link:hover { background: #f0f1f3; border-color: #07c160; color: #07c160; }
+
+        /* ── System status ── */
+        .sys-list { display: flex; flex-direction: column; gap: 0; }
+        .sys-item { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid #f5f6f8; }
+        .sys-item:last-child { border-bottom: none; }
+        .sys-name { font-size: 13px; color: #1f2329; }
+        .sys-val { font-size: 12px; font-weight: 600; }
+        .sys-val.ok { color: #07c160; }
+        .sys-val.warn { color: #f59e0b; }
+        .sys-val.error { color: #ef4444; }
+
+        /* ── Footer ── */
+        footer { text-align: center; padding: 16px; font-size: 12px; color: #bfc3c9; }
+
+        /* ── Responsive ── */
+        @media (max-width: 900px) {
+            .stat-cards { grid-template-columns: repeat(3, 1fr); }
+            .two-col, .three-col { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 600px) {
+            .container { padding: 16px; }
+            .stat-cards { grid-template-columns: 1fr 1fr; gap: 10px; }
+            header { padding: 14px 16px; }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <span style="font-size:22px">📊</span>
+    <h1>个人工作台</h1>
+    <span class="header-badge">Dashboard</span>
+</header>
+
+<div class="container">
+
+    <!-- Page tabs -->
+    <div class="page-tabs">
+        <button class="page-tab active" id="tab-overview" onclick="switchTab('overview')">📋 总览</button>
+        <button class="page-tab" id="tab-usage" onclick="switchTab('usage')">📈 用量</button>
+        <button class="page-tab" id="tab-sessions" onclick="switchTab('sessions')">💬 对话</button>
+    </div>
+
+    <!-- ═══════════════════════════════════════ -->
+    <!-- TAB: Overview -->
+    <!-- ═══════════════════════════════════════ -->
+    <div id="page-overview">
+
+        <!-- Top stat cards -->
+        <div class="stat-cards top3" style="margin-bottom:20px">
+            <div class="stat-card">
+                <div class="stat-label">本时段内模型调用量</div>
+                <div class="stat-value" id="statWindowUsed">-</div>
+                <div class="stat-sub" id="statWindowKey">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">本时段内剩余调用量</div>
+                <div class="stat-value green" id="statWindowRemain">-</div>
+                <div class="stat-sub">剩余 / 600</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">当前会话数</div>
+                <div class="stat-value" id="statActiveSessions">-</div>
+                <div class="stat-sub" id="statSessionDetail">-</div>
+            </div>
+        </div>
+
+        <!-- 当前状态 -->
+        <div class="panel" style="margin-bottom:20px">
+            <div class="panel-title">
+                🔴 当前状态
+                <button class="refresh-btn" onclick="try{loadOverview()}catch(e){console.error(e)}" style="margin-left:auto">🔄 刷新</button>
+        <div id="healthzBar" style="display:none;margin-left:12px;font-size:12px;padding:2px 10px;border-radius:12px;background:#f0f1f3;color:#8f959e"></div>
+            </div>
+            <div class="stat-cards" style="grid-template-columns: repeat(3, 1fr); margin-bottom:0;">
+                <div class="stat-card">
+                    <div class="stat-label">本时段活跃会话数</div>
+                    <div class="stat-value" id="curActiveSessions">-</div>
+                    <div class="stat-sub">本时段有活动的 session</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">定时任务数</div>
+                    <div class="stat-value" id="curCronTasks">-</div>
+                    <div class="stat-sub">已配置的任务</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">当前活跃对话数</div>
+                    <div class="stat-value" id="curActiveDialogs">-</div>
+                    <div class="stat-sub">非定时 session 活动</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 当日定时任务推送情况 -->
+        <div class="panel" style="margin-bottom:20px">
+            <div class="panel-title">📬 当日定时任务推送情况</div>
+            <div class="cron-task-list" id="cronTaskList"><div class="loading">加载中</div></div>
+        </div>
+
+        <!-- Cron 可靠性 + Agent 活跃度 -->
+        <div class="two-col" style="margin-bottom:20px">
+            <div class="panel">
+                <div class="panel-title">
+                    📊 Cron 可靠性
+                    <span class="badge" id="cronRelBadge" style="margin-left:8px;font-size:11px"></span>
+                </div>
+                <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px">
+                    <div style="flex:1">
+                        <div style="font-size:36px;font-weight:700;color:#07c160" id="cronRelRate">-</div>
+                        <div style="font-size:12px;color:#8f959e" id="cronRelLabel">加载中...</div>
+                    </div>
+                    <div style="text-align:center">
+                        <div style="font-size:20px;font-weight:700" id="cronRelTotal">-</div>
+                        <div style="font-size:11px;color:#8f959e">总执行</div>
+                    </div>
+                    <div style="text-align:center">
+                        <div style="font-size:20px;font-weight:700;color:#ef4444" id="cronRelFailed">-</div>
+                        <div style="font-size:11px;color:#8f959e">失败</div>
+                    </div>
+                </div>
+                <div id="cronRelJobs"><div class="loading">加载中</div></div>
+            </div>
+            <div class="panel">
+                <div class="panel-title">
+                    🤖 Agent 活跃度
+                    <span id="agentActiveCount" style="margin-left:8px;font-size:11px;color:#8f959e;font-weight:400"></span>
+                </div>
+                <div class="session-list" id="agentList"><div class="loading">加载中</div></div>
+            </div>
+        </div>
+
+        <!-- Cron 历史趋势 -->
+        <div class="panel" style="margin-bottom:20px">
+            <div class="panel-title">
+                📈 Cron 可靠性趋势
+                <span style="margin-left:auto;font-size:12px;color:#8f959e;font-weight:400" id="cronHistDays"></span>
+            </div>
+            <div style="display:flex;align-items:end;gap:4px;height:60px" id="cronHistBars"></div>
+            <div style="display:flex;justify-content:space-between;margin-top:4px" id="cronHistLabels"></div>
+            <div id="cronHistSummary" style="margin-top:10px;font-size:12px;color:#8f959e"></div>
+        </div>
+
+        <!-- 工作数据 -->
+        <div class="panel" style="margin-bottom:20px">
+            <div class="panel-title">📦 工作数据</div>
+            <div class="stat-cards" style="grid-template-columns: repeat(4, 1fr); margin-bottom:0;">
+                <div class="stat-card">
+                    <div class="stat-label">SSD 存储</div>
+                    <div class="stat-value" id="wdSsdFree">-</div>
+                    <div class="stat-sub" id="wdSsdInfo">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">照片</div>
+                    <div class="stat-value" id="wdPhoto">-</div>
+                    <div class="stat-sub">张</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">电子书</div>
+                    <div class="stat-value" id="wdBookTotal">-</div>
+                    <div class="stat-sub">总量</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">已索引</div>
+                    <div class="stat-value" id="wdBookIndexed">-</div>
+                    <div class="stat-sub">已深度学习</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Publish calendar (main action) + day detail -->
+        <div class="two-col" style="margin-bottom:20px">
+            <div class="panel">
+                <div class="panel-title">
+                    📅 发布日历
+                    <span class="badge ok" id="pubCalendarBadge">本月</span>
+                    <span class="badge" id="pubCalendarRate" style="margin-left:auto"></span>
+                </div>
+
+                <div class="cal-weekdays">
+                    <div class="cal-weekday">一</div>
+                    <div class="cal-weekday">二</div>
+                    <div class="cal-weekday">三</div>
+                    <div class="cal-weekday">四</div>
+                    <div class="cal-weekday">五</div>
+                    <div class="cal-weekday">六</div>
+                    <div class="cal-weekday">日</div>
+                </div>
+                <div class="cal-grid" id="calGrid"></div>
+            </div>
+
+            <div class="day-detail">
+                <div class="day-detail-header">
+                    <span id="detailTitle">点击日期查看</span>
+                    <button class="close-btn" id="closeDetail" onclick="closeDetail()" style="display:none">×</button>
+                </div>
+                <div class="day-detail-body" id="detailBody">
+                    <div class="day-empty">点击左侧日历上的日期<br>查看当天发布任务并标记</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Second row: 深入分析 + 记忆状态 -->
+        <div class="two-col" style="margin-bottom:20px">
+            <div class="panel">
+                <div class="panel-title">📚 正在深入分析</div>
+                <div class="book-list" id="bookList"><div class="loading">加载中</div></div>
+            </div>
+            <div class="panel">
+                <div class="panel-title">🧠 记忆状态</div>
+                <div class="memory-section">
+                    <div class="memory-section-title">📁 项目文档</div>
+                    <div id="memoryProjects" class="memory-list"><div class="loading">加载中</div></div>
+                </div>
+                <div class="memory-section">
+                    <div class="memory-section-title">📅 每日记录</div>
+                    <div id="memoryDaily" class="memory-list"><div class="loading">加载中</div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 快速入口 -->
+        <div class="panel">
+            <div class="panel-title">⚡ 快速入口</div>
+            <div class="quick-links" id="quickLinks"><div class="loading">加载中</div></div>
+        </div>
+
+    </div>
+
+    <!-- ═══════════════════════════════════════ -->
+    <!-- TAB: Usage -->
+    <!-- ═══════════════════════════════════════ -->
+    <div id="page-usage" style="display:none">
+
+        <!-- Usage stat cards -->
+        <div class="stat-cards" style="margin-bottom:20px">
+            <div class="stat-card">
+                <div class="stat-label">本期 API 调用</div>
+                <div class="stat-value" id="usageTotal">-</div>
+                <div class="stat-sub" id="usageRange">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">窗口配额</div>
+                <div class="stat-value green" id="usageWindow">-</div>
+                <div class="stat-sub">5小时滚动窗口</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">日均调用</div>
+                <div class="stat-value" id="usageAvg">-</div>
+                <div class="stat-sub">次/天</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Token 剩余</div>
+                <div class="stat-value green" id="usageTokens">-</div>
+                <div class="stat-sub">条</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">会话数</div>
+                <div class="stat-value" id="usageSessions">-</div>
+                <div class="stat-sub">活跃</div>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="two-col" style="margin-bottom:20px">
+            <div class="panel">
+                <div class="panel-title">📊 来源分布</div>
+                <div class="chart-box" id="chartPie"></div>
+                <div class="source-legend" id="sourceLegend"></div>
+            </div>
+            <div class="panel">
+                <div class="panel-title">📈 近30天调用趋势</div>
+                <div class="chart-box" id="chartBar"></div>
+            </div>
+        </div>
+
+        <!-- System status -->
+        <div class="panel">
+            <div class="panel-title">🔌 数据源连接状态</div>
+            <div id="sysList"><div class="loading">加载中</div></div>
+        </div>
+
+        <!-- Disk space -->
+        <div class="panel">
+            <div class="panel-title">💾 磁盘空间</div>
+            <div id="diskSpaceInfo"><div class="loading">加载中</div></div>
+        </div>
+
+        <!-- Burn Rate Token Plan 配额 -->
+        <div class="panel" style="margin-bottom:20px">
+            <div class="panel-title">🔥 Burn Rate <span id="burnRateLabel" style="font-size:12px;font-weight:400;margin-left:8px;color:#8f959e"></span></div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:12px">
+                <div style="text-align:center">
+                    <div style="font-size:22px;font-weight:700" id="burnIntervalLeft">-</div>
+                    <div style="font-size:11px;color:#8f959e">窗口重置倒计时</div>
+                </div>
+                <div style="text-align:center">
+                    <div style="font-size:22px;font-weight:700" id="burnWeeklyLeft">-</div>
+                    <div style="font-size:11px;color:#8f959e">本周剩余配额</div>
+                </div>
+                <div style="text-align:center">
+                    <div style="font-size:22px;font-weight:700" id="burnExhaustHours">-</div>
+                    <div style="font-size:11px;color:#8f959e">配额耗尽预估</div>
+                </div>
+            </div>
+            <!-- 5h窗口进度条 -->
+            <div style="margin-bottom:8px">
+                <div style="display:flex;justify-content:space-between;font-size:11px;color:#8f959e;margin-bottom:4px">
+                    <span>M2.7 5h窗口消耗</span>
+                    <span id="burnIntervalPct">-</span>
+                </div>
+                <div style="background:#f0f1f3;border-radius:4px;height:8px;overflow:hidden">
+                    <div id="burnIntervalBar" style="height:100%;background:#07c160;border-radius:4px;width:0%;transition:width 0.3s"></div>
+                </div>
+            </div>
+            <!-- 本周进度条 -->
+            <div style="margin-bottom:8px">
+                <div style="display:flex;justify-content:space-between;font-size:11px;color:#8f959e;margin-bottom:4px">
+                    <span>本周消耗配额</span>
+                    <span id="burnWeeklyPct">-</span>
+                </div>
+                <div style="background:#f0f1f3;border-radius:4px;height:8px;overflow:hidden">
+                    <div id="burnWeeklyBar" style="height:100%;background:#5bc0de;border-radius:4px;width:0%;transition:width 0.3s"></div>
+                </div>
+            </div>
+            <!-- 其他模型状态 -->
+            <div id="burnOtherModels" style="font-size:11px;color:#8f959e;margin-top:4px"></div>
+        </div>
+
+        <!-- P2: 用量来源拆分 -->
+        <div class="panel" style="margin-bottom:20px">
+            <div class="panel-title">📊 用量来源拆分 <span id="usageBreakdownDays" style="font-size:12px;color:#8f959e;font-weight:400;margin-left:6px"></span></div>
+            <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px">
+                <div>
+                    <div style="font-size:28px;font-weight:700" id="usageTotalTokens">-</div>
+                    <div style="font-size:11px;color:#8f959e">Token总量</div>
+                </div>
+                <div>
+                    <div style="font-size:28px;font-weight:700" id="usageTotalCost">-</div>
+                    <div style="font-size:11px;color:#8f959e">预估费用</div>
+                </div>
+                <div>
+                    <div style="font-size:28px;font-weight:700" id="usageTotalReq">-</div>
+                    <div style="font-size:11px;color:#8f959e">调用次数</div>
+                </div>
+            </div>
+            <div style="margin-bottom:8px;font-size:12px;color:#8f959e">来源分布</div>
+            <div id="usageBySource" style="display:flex;flex-direction:column;gap:6px"></div>
+        </div>
+
+        <!-- P2: Cron任务Token排行 -->
+        <div class="panel" style="margin-bottom:20px">
+            <div class="panel-title">🤖 Cron 任务 Token 排行 <span style="font-size:12px;color:#8f959e;font-weight:400;margin-left:6px">近7天</span></div>
+            <div id="cronJobRanking"><div class="loading">加载中</div></div>
+        </div>
+
+    </div>
+
+    <!-- ═══════════════════════════════════════ -->
+    <!-- TAB: Sessions -->
+    <!-- ═══════════════════════════════════════ -->
+    <div id="page-sessions" style="display:none">
+
+        <!-- Session stat cards -->
+        <div class="stat-cards" style="margin-bottom:20px">
+            <div class="stat-card">
+                <div class="stat-label">总会话数</div>
+                <div class="stat-value" id="sessTotal">-</div>
+                <div class="stat-sub">个</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">🟢 工作中</div>
+                <div class="stat-value green" id="sessActive">-</div>
+                <div class="stat-sub">5分钟内有活动</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">🔵 执行中</div>
+                <div class="stat-value" style="color:#5bc0de" id="sessRunning">-</div>
+                <div class="stat-sub">agent/subagent</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">⚪ 空闲</div>
+                <div class="stat-value" style="color:#8f959e" id="sessIdle">-</div>
+                <div class="stat-sub">无活动</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">订阅窗口</div>
+                <div class="stat-value green" id="sessWindow">-</div>
+                <div class="stat-sub">剩余</div>
+            </div>
+        </div>
+
+        <!-- Context Pressure panel -->
+        <div class="panel" style="margin-bottom:20px">
+            <div class="panel-title">
+                🧠 上下文占用
+                <span id="ctxCriticalCount" style="margin-left:8px;font-size:12px"></span>
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:12px;font-size:12px">
+                <span id="ctxCritical" style="display:none;padding:2px 8px;border-radius:8px;background:#fef2f2;color:#ef4444;font-weight:600"></span>
+                <span id="ctxWarn" style="display:none;padding:2px 8px;border-radius:8px;background:#fff7e6;color:#f59e0b;font-weight:600"></span>
+                <span id="ctxOk" style="display:none;padding:2px 8px;border-radius:8px;background:#e8f5e9;color:#07c160;font-weight:600"></span>
+            </div>
+            <div id="ctxList"><div class="loading">加载中</div></div>
+        </div>
+
+        <!-- Sessions list + mini calendar -->
+        <div class="two-col">
+            <div class="panel">
+                <div class="panel-title">👥 会话详情</div>
+                <div class="session-list" id="sessionList"><div class="loading">加载中</div></div>
+            </div>
+            <div class="panel">
+                <div class="panel-title">📅 发布日历</div>
+                <div class="cal-header">
+                    <div class="cal-nav">
+
+                    </div>
+
+                </div>
+                <div class="cal-weekdays">
+                    <div class="cal-weekday">一</div>
+                    <div class="cal-weekday">二</div>
+                    <div class="cal-weekday">三</div>
+                    <div class="cal-weekday">四</div>
+                    <div class="cal-weekday">五</div>
+                    <div class="cal-weekday">六</div>
+                    <div class="cal-weekday">日</div>
+                </div>
+                <div class="cal-grid" id="calGrid2"></div>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+
+<footer>个人工作台 · <span id="lastUpdate">-</span></footer>
+
+<script>
+// ── State ──
+const SOURCE_COLORS = ['#07c160','#5bc0de','#f39c12','#9b59b6','#e74c3c','#3498db'];
+let calData = {}; // day -> tasks
+let calDaysInMonth = 30;
+
+// ── Tab switching ──
+function switchTab(tab) {
+    ['overview','usage','sessions'].forEach(t => {
+        document.getElementById('page-' + t).style.display = t === tab ? 'block' : 'none';
+        document.getElementById('tab-' + t).classList.toggle('active', t === tab);
+    });
+    if (tab === 'overview') loadOverview();
+    else if (tab === 'usage') loadUsage();
+    else if (tab === 'sessions') loadSessions();
+}
+
+// ── API helper ──
+async function api(url) {
+    const r = await fetch(url);
+    return r.json();
+}
+
+// ═══════════════════════════════════════
+// OVERVIEW TAB
+// ═══════════════════════════════════════
+async function loadOverview() {
+    await Promise.all([loadStats(), loadPublish(), loadAnalysis(), loadMemory(), loadQuickLinks(), loadCronTasks(), loadCronReliability(), loadAgentActivity(), loadCronHistory(), loadWorkData(), loadHealthz(), loadDiskSpace()]);
+    loadCalendarOverview();
+    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('zh-CN');
+}
+
+async function loadHealthz() {
+    try {
+        const d = await api('/dashboard/api/healthz');
+        const bar = document.getElementById('healthzBar');
+        if (!bar) return;
+        // 判断真实状态：snapshot stale 且 gateway 正常 → 数据过期，非系统异常
+        let realStatus = d.status;
+        if (d.snapshot?.status === 'stale' && d.gateway?.connected) {
+            realStatus = 'stale';  // 数据过期，非服务异常
+        }
+        const statusMap = {
+            ok:      { color: '#07c160', bg: '#e8f5e9', text: '🟢 系统正常' },
+            warn:    { color: '#f59e0b', bg: '#fff7e6', text: '🟡 运行预警' },
+            error:   { color: '#ef4444', bg: '#fef2f2', text: '🔴 系统异常' },
+            stale:   { color: '#8f959e', bg: '#f0f1f3', text: '⚫️ 数据过期' },
+            unknown: { color: '#8f959e', bg: '#f0f1f3', text: '⚪️ 状态未知' },
+        };
+        const m = statusMap[realStatus] || statusMap.unknown;
+        bar.style.display = 'inline-block';
+        bar.style.background = m.bg;
+        bar.style.color = m.color;
+        bar.textContent = m.text;
+        bar.title = '版本: ' + (d.version || '?') + ' | 数据年龄: ' + (d.snapshot?.age_seconds ? Math.round(d.snapshot.age_seconds/60) + '分钟前' : '未知');
+    } catch(e) {
+        const bar = document.getElementById('healthzBar');
+        if (bar) { bar.style.display = 'inline-block'; bar.textContent = '🔴 无法获取'; bar.style.background = '#fef2f2'; bar.style.color = '#ef4444'; }
+    }
+}
+
+async function loadDiskSpace() {
+    try {
+        const d = await api('/dashboard/api/disk-space');
+        if (d.error) return;
+        const sys = d.system || {};
+        const gallery = d.modules?.gallery || {};
+        const library = d.modules?.library || {};
+        const dashboard = d.modules?.dashboard || {};
+
+        // 系统总览进度条
+        const sysPct = sys.used_pct || 0;
+        const sysColor = sysPct >= 90 ? '#ef4444' : sysPct >= 70 ? '#f59e0b' : '#07c160';
+
+        document.getElementById('diskSpaceInfo').innerHTML = `
+            <div style="margin-bottom:10px">
+                <div style="display:flex;justify-content:space-between;font-size:12px;color:#8f959e;margin-bottom:4px">
+                    <span>系统磁盘（已用 ${sys.used_gb || 0}G / 共 ${sys.total_gb || 0}G）</span>
+                    <span style="font-weight:600;color:${sysColor}">${sysPct}%</span>
+                </div>
+                <div style="background:#f0f1f3;border-radius:4px;height:6px;overflow:hidden">
+                    <div style="width:${Math.min(sysPct,100)}%;height:100%;background:${sysColor};border-radius:4px"></div>
+                </div>
+                <div style="font-size:11px;color:#8f959e;margin-top:2px">剩余 ${sys.free_gb || 0}G</div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center">
+                <div style="padding:6px;background:#f9fafb;border-radius:8px">
+                    <div style="font-size:14px;font-weight:700;color:#1f2329">${gallery.photos_fmt || '0 MB'}</div>
+                    <div style="font-size:10px;color:#8f959e">Gallery 相册</div>
+                    <div style="font-size:10px;color:#8f959e">inbound ${gallery.inbound_fmt || '0 B'}</div>
+                </div>
+                <div style="padding:6px;background:#f9fafb;border-radius:8px">
+                    <div style="font-size:14px;font-weight:700;color:#1f2329">${library.fmt || '0 B'}</div>
+                    <div style="font-size:10px;color:#8f959e">Library 电子书库</div>
+                </div>
+                <div style="padding:6px;background:#f9fafb;border-radius:8px">
+                    <div style="font-size:14px;font-weight:700;color:#1f2329">${(d.workspace_gb || 0).toFixed(2)}G</div>
+                    <div style="font-size:10px;color:#8f959e">工作空间总计</div>
+                </div>
+            </div>`;
+    } catch(e) { console.error(e); }
+}
+
+async function loadStats() {
+    try {
+        const d = await api('/dashboard/api/current-status');
+        // 本时段内模型调用量
+        document.getElementById('statWindowUsed').textContent = d.used || 0;
+        // token 消耗加到 sub 里
+        const tokens = d.window_total_tokens || 0;
+        document.getElementById('statWindowKey').textContent = '窗口 ' + (d.window_key || '-') + ' | Token ' + tokens.toLocaleString();
+
+        // 本时段内剩余调用量
+        const remain = d.remaining || 0;
+        const pct = Math.round(remain / 600 * 100);
+        const remainEl = document.getElementById('statWindowRemain');
+        remainEl.textContent = remain;
+        remainEl.className = 'stat-value ' + (pct > 50 ? 'green' : pct > 20 ? 'amber' : 'red');
+
+        // 当前会话数
+        document.getElementById('statActiveSessions').textContent = d.active_in_window || 0;
+        document.getElementById('statSessionDetail').textContent = '总会话 ' + (d.total_sessions || 0) + ' / 定时任务 ' + (d.cron_job_count || 0);
+
+        // 当前状态模块
+        document.getElementById('curActiveSessions').textContent = d.active_in_window || 0;
+        document.getElementById('curCronTasks').textContent = d.cron_job_count || 0;
+        document.getElementById('curActiveDialogs').textContent = d.active_dialogs || 0;
+    } catch(e) { console.error(e); }
+}
+
+async function loadPublish() {
+    try {
+        const d = await api('/dashboard/api/publish?period=month');
+        const el = (id) => document.getElementById(id);
+        const setText = (id, text) => { const e = el(id); if (e) e.textContent = text; };
+        setText('pubCount', d.total || 0);
+        setText('pubRate', '按时率 ' + (d.on_time_rate || 0) + '%');
+        setText('pubCalendarRate', d.total ? (d.on_time_rate || 0) + '% 按时' : '');
+    } catch(e) { console.error(e); }
+}
+
+async function loadAnalysis() {
+    try {
+        const d = await api('/dashboard/api/analysis');
+        const el = document.getElementById('bookList');
+        if (!d.books || d.books.length === 0) {
+            el.innerHTML = '<div class="no-data">暂无正在分析的书</div>';
+            return;
+        }
+        el.innerHTML = d.books.map(b => `
+            <div class="book-item">
+                <div class="book-header">
+                    <span class="book-name">${escHtml(b.name)}</span>
+                    <span class="book-pct">${b.progress}%</span>
+                    ${b.source === 'queued' ? '<span class="cron-today">队列中</span>' : ''}
+                </div>
+                <div class="book-bar"><div class="book-fill" style="width:${b.progress}%"></div></div>
+                <div class="book-meta">第 ${b.completed_chunks}/${b.total_chunks} 个卡片</div>
+            </div>`).join('');
+    } catch(e) { console.error(e); }
+}
+
+async function loadMemory() {
+    try {
+        const d = await api('/dashboard/api/memory');
+
+        function renderFileList(files) {
+            if (!files || files.length === 0) return '<div class="no-data">-</div>';
+            return files.map(f => {
+                const age = f.days_ago === 0 ? '今天' : f.days_ago === 1 ? '昨天' : f.days_ago + '天前';
+                const ageClass = f.days_ago <= 1 ? 'badge-ok' : f.days_ago <= 3 ? 'badge-warn' : 'badge-error';
+                return `<div class="memory-item">
+                    <div class="memory-name">
+                        <span class="memory-link" onclick="openMemoryViewer('${encodeURI(f.path)}')">${escHtml(f.name)}</span>
+                        <div class="sub">${f.updated}</div>
+                    </div>
+                    <span class="cron-badge ${ageClass}">${age}</span>
+                </div>`;
+            }).join('');
+        }
+
+        document.getElementById('memoryProjects').innerHTML = renderFileList(d.projects);
+        document.getElementById('memoryDaily').innerHTML = renderFileList(d.daily);
+    } catch(e) { console.error(e); }
+}
+
+function openMemoryViewer(encodedPath) {
+    document.getElementById('memoryViewer').style.display = '';
+    document.getElementById('viewerContent').innerHTML = '<div class="loading">加载中…</div>';
+    const path = decodeURIComponent(encodedPath);
+    document.getElementById('viewerFileName').textContent = path.split('/').pop();
+    fetch('/dashboard/api/memory/' + encodedPath)
+        .then(r => r.ok ? r.text() : Promise.reject())
+        .then(txt => {
+            document.getElementById('viewerContent').innerHTML = '<pre class="viewer-pre">' + escHtml(txt) + '</pre>';
+        })
+        .catch(() => {
+            document.getElementById('viewerContent').innerHTML = '<div class="no-data">加载失败</div>';
+        });
+}
+
+function closeMemoryViewer() {
+    document.getElementById('memoryViewer').style.display = 'none';
+}
+
+async function loadQuickLinks() {
+    try {
+        const d = await api('/dashboard/api/projects');
+        document.getElementById('quickLinks').innerHTML = (d.projects || []).map(p =>
+            `<a href="${p.url}" class="quick-link" target="_blank">${p.icon} ${escHtml(p.name)}</a>`
+        ).join('');
+    } catch(e) { console.error(e); }
+}
+
+async function loadCronTasks() {
+    try {
+        const d = await api('/dashboard/api/cron-runs');
+        const el = document.getElementById('cronTaskList');
+        if (!d.tasks || d.tasks.length === 0) { el.innerHTML = '<div class="no-data">暂无定时推送任务</div>'; return; }
+        const statusBadge = {ok: 'badge-ok', warn: 'badge-warn', error: 'badge-error', idle: 'badge-idle'};
+        const statusText = {ok: '✅', warn: '⚠️', error: '❌', idle: '⏳'};
+        el.innerHTML = '<table class="cron-table"><thead><tr><th>任务</th><th>时间</th><th>渠道</th><th>状态</th></tr></thead><tbody>' +
+            d.tasks.map(t => {
+                const badge = statusBadge[t.status_type] || 'badge-idle';
+                const icon = statusText[t.status_type] || '⏳';
+                const today_tag = t.is_today ? ' <span class="cron-today">今日</span>' : '';
+                return `<tr>
+                    <td>${escHtml(t.name)}${today_tag}</td>
+                    <td>${t.schedule}</td>
+                    <td>${t.channel_icon} ${t.channel}</td>
+                    <td><span class="cron-badge ${badge}">${icon} ${t.status}</span></td>
+                </tr>`;
+            }).join('') + '</tbody></table>';
+    } catch(e) { console.error(e); }
+}
+
+async function loadCronReliability() {
+    // Cron 可靠性 — 读 jsonl 统计当日成功率
+    try {
+        const d = await api('/dashboard/api/cron-reliability');
+        const rate = d.rate || 0;
+        const health = d.health || 'none';
+        const rateEl = document.getElementById('cronRelRate');
+        const labelEl = document.getElementById('cronRelLabel');
+        const badgeEl = document.getElementById('cronRelBadge');
+        const totalEl = document.getElementById('cronRelTotal');
+        const failedEl = document.getElementById('cronRelFailed');
+        const jobsEl = document.getElementById('cronRelJobs');
+
+        rateEl.textContent = rate > 0 ? rate + '%' : '—';
+        labelEl.textContent = d.health_label || '';
+        totalEl.textContent = d.total_slots || 0;
+        failedEl.textContent = d.failed || 0;
+
+        const colorMap = {ok: '#07c160', warn: '#f59e0b', error: '#ef4444', none: '#8f959e'};
+        rateEl.style.color = colorMap[health] || '#8f959e';
+        badgeEl.className = 'badge ' + (health === 'ok' ? 'ok' : health === 'warn' ? 'warn' : health === 'error' ? 'error' : '');
+        badgeEl.textContent = d.date || '';
+
+        if (!d.jobs || d.jobs.length === 0) {
+            jobsEl.innerHTML = '<div class="no-data">暂无任务执行记录</div>';
+            return;
+        }
+        // 健康状态映射（参考 openclaw-control-center cron-overview.ts）
+        const healthMeta = {
+            ok:      { color: '#07c160', bg: '#e8f5e9', label: '正常' },
+            warn:    { color: '#f59e0b', bg: '#fff7e6', label: '警告' },
+            error:   { color: '#ef4444', bg: '#fef2f2', label: '失败' },
+            none:    { color: '#8f959e', bg: '#f0f1f3', label: '无记录' },
+            scheduled: { color: '#07c160', bg: '#e8f5e9', label: '待执行' },
+            due:     { color: '#f59e0b', bg: '#fff7e6', label: '即将' },
+            late:    { color: '#ef4444', bg: '#fef2f2', label: '延迟' },
+            disabled:{ color: '#8f959e', bg: '#f0f1f3', label: '禁用' },
+            unknown: { color: '#8f959e', bg: '#f0f1f3', label: '未知' },
+        };
+        jobsEl.innerHTML = d.jobs.map(j => {
+            const jRate = j.total > 0 ? Math.round(j.success / j.total * 100) : 0;
+            const jColor = jRate >= 90 ? '#07c160' : jRate >= 70 ? '#f59e0b' : '#ef4444';
+            const hm = healthMeta[j.health] || healthMeta.unknown;
+            // 格式化下次执行时间
+            let nextStr = '';
+            if (j.next_run_at && j.health !== 'disabled') {
+                try {
+                    const dt = new Date(j.next_run_at);
+                    const now2 = new Date();
+                    const diffMs = dt - now2;
+                    const diffMin = Math.round(diffMs / 60000);
+                    if (diffMs > 0) {
+                        if (diffMin < 60) nextStr = diffMin + '分钟后';
+                        else if (diffMin < 1440) nextStr = Math.round(diffMin/60) + '小时后';
+                        else nextStr = Math.round(diffMin/1440) + '天后';
+                    } else {
+                        const overdue = Math.abs(diffMin);
+                        if (overdue < 60) nextStr = '逾期' + overdue + '分钟';
+                        else nextStr = '逾期' + Math.round(overdue/60) + '小时';
+                    }
+                } catch(e) { nextStr = ''; }
+            }
+            return `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f5f6f8;font-size:13px">
+                <span style="display:flex;align-items:center;gap:6px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                    <span style="font-size:11px;padding:1px 6px;border-radius:8px;background:${hm.bg};color:${hm.color};font-weight:500">${hm.label}</span>
+                    <span style="overflow:hidden;text-overflow:ellipsis">${escHtml(j.name)}</span>
+                </span>
+                <span style="width:55px;text-align:right;font-size:11px;color:#8f959e;margin-right:6px">${nextStr}</span>
+                <span style="width:40px;text-align:right;color:#8f959e;font-size:12px">${j.total}次</span>
+                <span style="width:45px;text-align:right;font-weight:600;color:${jColor}">${jRate}%</span>
+            </div>`;
+        }).join('');
+    } catch(e) { console.error(e); }
+}
+
+async function loadCronHistory() {
+    // Cron 历史趋势 — 读 SQLite
+    try {
+        const d = await api('/dashboard/api/cron-history?days=14');
+        const barsEl = document.getElementById('cronHistBars');
+        const labelsEl = document.getElementById('cronHistLabels');
+        const summaryEl = document.getElementById('cronHistSummary');
+        const daysEl = document.getElementById('cronHistDays');
+
+        const days = d.by_date || [];
+        daysEl.textContent = '近 ' + d.days + ' 天';
+
+        if (days.length === 0) {
+            barsEl.innerHTML = '<div class="no-data" style="width:100%">暂无历史数据</div>';
+            labelsEl.innerHTML = '';
+            summaryEl.textContent = '';
+            return;
+        }
+
+        // 计算每日 bar 高度（最高 = 60px）
+        const maxTotal = Math.max(...days.map(x => x.total), 1);
+
+        barsEl.innerHTML = days.map(day => {
+            const h = day.total > 0 ? Math.max(4, Math.round(day.total / maxTotal * 58)) : 3;
+            const color = day.total === 0 ? '#e5e7eb' : day.rate >= 90 ? '#07c160' : day.rate >= 70 ? '#f59e0b' : '#ef4444';
+            const title = `${day.date}：${day.success}/${day.total}次 (${day.rate}%)`;
+            return `<div style="flex:1;display:flex;align-items:flex-end;justify-content:center;height:60px" title="${title}">
+                <div style="width:16px;background:${color};border-radius:3px 3px 0 0;height:${h}px;transition:height 0.3s"></div>
+            </div>`;
+        }).join('');
+
+        // 日期标签（只显示部分）
+        const step = Math.ceil(days.length / 7);
+        labelsEl.innerHTML = days.map((day, i) =>
+            `<span style="font-size:10px;color:#8f959e${i % step !== 0 ? ';visibility:hidden' : ''}">${day.date.slice(5)}</span>`
+        ).join('');
+
+        // 汇总
+        const totalExec = days.reduce((s, d) => s + d.total, 0);
+        const totalSuccess = days.reduce((s, d) => s + d.success, 0);
+        const avgRate = totalExec > 0 ? Math.round(totalSuccess / totalExec * 100) : 0;
+        summaryEl.textContent = `合计 ${totalExec} 次执行，平均成功率 ${avgRate}%`;
+    } catch(e) { console.error(e); }
+}
+
+async function loadAgentActivity() {
+    // Agent 活跃度 — 读 sessions 目录 mtime
+    try {
+        const d = await api('/dashboard/api/agent-activity');
+        const el = document.getElementById('agentList');
+        const countEl = document.getElementById('agentActiveCount');
+        const agents = d.agents || [];
+        const active = d.active_count || 0;
+        countEl.textContent = agents.length > 0 ? `${active}/${agents.length} 活跃` : '';
+
+        if (agents.length === 0) {
+            el.innerHTML = '<div class="no-data">暂无 Agent 数据</div>';
+            return;
+        }
+        el.innerHTML = agents.map(a => {
+            const dotClass = a.health === 'active' ? 'dot-active' : 'dot-idle';
+            const healthLabel = a.health === 'active' ? '活跃' : '空闲';
+            return `<div class="session-item">
+                <div class="session-dot ${dotClass}"></div>
+                <div class="session-name">${escHtml(a.name)}</div>
+                <div class="session-meta">${escHtml(a.last_active_ago || '—')}</div>
+                <span class="cron-badge badge-${a.health === 'active' ? 'ok' : 'idle'}">${healthLabel}</span>
+            </div>`;
+        }).join('');
+    } catch(e) { console.error(e); }
+}
+
+async function loadWorkData() {
+    try {
+        const d = await api('/dashboard/api/work-data');
+        document.getElementById('wdSsdFree').textContent = d.ssd_free_gb + 'G';
+        document.getElementById('wdSsdInfo').textContent = `已用 ${d.ssd_used_gb}G / ${d.ssd_total_gb}G`;
+        document.getElementById('wdPhoto').textContent = d.photo_count || 0;
+        document.getElementById('wdBookTotal').textContent = d.book_total || 0;
+        document.getElementById('wdBookIndexed').textContent = d.book_indexed || 0;
+    } catch(e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════
+// CALENDAR
+// ═══════════════════════════════════════
+let calYear, calMonth;
+
+async function loadCalendarOverview() {
+    const now = new Date();
+    calYear = now.getFullYear();
+    calMonth = now.getMonth() + 1;
+    try {
+        const d = await api(`/dashboard/api/publish/calendar?year=${calYear}&month=${calMonth}`);
+        calDaysInMonth = d.days_in_month || 30;
+        calData = {};
+        (d.tasks || []).forEach(t => { if (!calData[t.day]) calData[t.day] = []; calData[t.day].push(t); });
+        renderCalGrid('calGrid');
+        renderCalGrid('calGrid2');
+    } catch(e) { console.error(e); }
+}
+
+function renderCalGrid(gridId) {
+    const grid = document.getElementById(gridId);
+    if (!grid) return;
+    grid.innerHTML = '';
+    const firstDay = new Date(calYear, calMonth - 1, 1).getDay();
+    const startOffset = firstDay === 0 ? 6 : firstDay - 1;
+    const lastMonthDays = new Date(calYear, calMonth - 1, 0).getDate();
+    const today = new Date();
+    const todayDay = today.getDate();
+
+    for (let i = startOffset - 1; i >= 0; i--) {
+        grid.innerHTML += `<div class="cal-day other-month"><span class="day-num">${lastMonthDays - i}</span></div>`;
+    }
+    for (let day = 1; day <= calDaysInMonth; day++) {
+        const tasks = calData[day] || [];
+        const isToday = day === todayDay;
+        let dots = '';
+        if (tasks.length > 0) {
+            const statuses = [...new Set(tasks.map(t => t.status))].slice(0, 3);
+            dots = `<div class="dots">${statuses.map(s =>
+                `<span class="dot dot-${s === 'success' ? 'success' : s === 'missed' ? 'missed' : 'pending'}"></span>`
+            ).join('')}</div>`;
+        }
+        grid.innerHTML += `<div class="cal-day ${isToday ? 'today' : ''}" data-day="${day}" onclick="selectDay(${day})">
+            <span class="day-num">${day}</span>${dots}</div>`;
+    }
+    const filled = startOffset + calDaysInMonth;
+    for (let i = 1; i <= 42 - filled; i++) {
+        grid.innerHTML += `<div class="cal-day other-month"><span class="day-num">${i}</span></div>`;
+    }
+}
+
+function selectDay(day) {
+    document.querySelectorAll('.cal-day').forEach(el => el.classList.remove('selected'));
+    document.querySelectorAll(`.cal-day[data-day="${day}"]`).forEach(el => el.classList.add('selected'));
+    document.getElementById('closeDetail').style.display = '';
+    const tasks = calData[day] || [];
+    document.getElementById('detailTitle').textContent = `${calYear}年${calMonth}月${day}日`;
+    if (tasks.length === 0) {
+        document.getElementById('detailBody').innerHTML = '<div class="day-empty">无发布任务</div>';
+        return;
+    }
+    document.getElementById('detailBody').innerHTML = tasks.map(t => {
+        const color = t.status === 'success' ? '#07c160' : t.status === 'missed' ? '#ef4444' : '#f59e0b';
+        const statusText = t.status === 'success' ? '✓ 已发布' : t.status === 'missed' ? '✗ 漏发' : '○ 待发布';
+        const time = t.timestamp ? new Date(t.timestamp).toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'}) : '-';
+        const btn = t.status !== 'success'
+            ? `<button class="mark-btn" onclick="markPub('${escHtml(t.account)}', ${day})">✓ 标记已发布</button>`
+            : '';
+        return `<div class="day-task">
+            <span class="day-task-dot" style="background:${color}"></span>
+            <span class="day-task-name">${escHtml(t.account)}</span>
+            <span class="day-task-meta">${statusText} ${time}</span>
+            ${btn}
+        </div>`;
+    }).join('');
+}
+
+async function markPub(account, day) {
+    if (!confirm(`确认将「${account}」标记为已发布？`)) return;
+    try {
+        await fetch('/dashboard/api/publish/log', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ account, status: 'success', note: `手动标记 ${calYear}-${String(calMonth).padStart(2,'0')}-${String(day).padStart(2,'0')}` })
+        });
+        if (calData[day]) calData[day].forEach(t => { if (t.account === account) { t.status = 'success'; t.timestamp = new Date().toISOString(); }});
+        selectDay(day);
+    } catch(e) { alert('标记失败: ' + e.message); }
+}
+
+function closeDetail() {
+    document.querySelectorAll('.cal-day').forEach(el => el.classList.remove('selected'));
+    document.getElementById('detailTitle').textContent = '点击日期查看';
+    document.getElementById('detailBody').innerHTML = '<div class="day-empty">点击左侧日历上的日期<br>查看当天发布任务并标记</div>';
+    document.getElementById('closeDetail').style.display = 'none';
+}
+
+// ═══════════════════════════════════════
+// USAGE TAB
+// ═══════════════════════════════════════
+async function loadUsage() {
+    await Promise.all([loadUsageStats(), loadUsageBar(), loadUsageSys(), loadUsageBreakdown(), loadCronJobRanking(), loadBurnRate()]);
+}
+
+async function loadBurnRate() {
+    try {
+        const d = await api('/dashboard/api/burn-rate');
+        if (d.error || !d.connected) {
+            document.getElementById('burnIntervalLeft').textContent = '—';
+            document.getElementById('burnRateLabel').textContent = '未连接';
+            return;
+        }
+
+        const m2 = d.m2 || {};
+        const intervalPct = m2.interval_pct || 0;
+        const weeklyPct = m2.weekly_pct || 0;
+
+        const istatusMap = { ok: '#07c160', warn: '#f59e0b', critical: '#ef4444' };
+        const icolor = istatusMap[m2.interval_status] || '#8f959e';
+
+        // 5h窗口
+        const intervalSecs = m2.interval_seconds_left || 0;
+        const countdownStr = intervalSecs >= 3600
+            ? Math.floor(intervalSecs / 3600) + 'h' + Math.round(intervalSecs % 3600 / 60) + 'm'
+            : intervalSecs >= 60
+            ? Math.floor(intervalSecs / 60) + '分钟'
+            : intervalSecs > 0 ? intervalSecs + '秒' : '已重置';
+        document.getElementById('burnIntervalLeft').textContent = countdownStr;
+        document.getElementById('burnIntervalLeft').style.color = icolor;
+        document.getElementById('burnIntervalPct').textContent = (m2.interval_used || 0) + ' / ' + (m2.interval_total || 0) + ' (' + intervalPct + '%)';
+        document.getElementById('burnIntervalBar').style.width = Math.min(intervalPct, 100) + '%';
+        document.getElementById('burnIntervalBar').style.background = icolor;
+
+        // 本周
+        document.getElementById('burnWeeklyLeft').textContent = (m2.weekly_remain || 0) + '次';
+        document.getElementById('burnWeeklyPct').textContent = (m2.weekly_used || 0) + ' / ' + (m2.weekly_total || 0) + ' (' + weeklyPct + '%)';
+        document.getElementById('burnWeeklyBar').style.width = Math.min(weeklyPct, 100) + '%';
+
+        // 预计耗尽
+        const hoursLeft = m2.interval_hours_left;
+        const exhaustStr = hoursLeft ? (hoursLeft < 1 ? Math.round(hoursLeft * 60) + '分钟' : hoursLeft.toFixed(1) + '小时') : '充足';
+        document.getElementById('burnExhaustHours').textContent = exhaustStr;
+        document.getElementById('burnExhaustHours').style.color = icolor;
+
+        // 标签
+        let label = '';
+        if (m2.interval_status === 'critical') label = '⚠️ M2.7 配额即将耗尽';
+        else if (m2.interval_status === 'warn') label = '🟡 M2.7 配额消耗中';
+        else label = '🟢 M2.7 配额充足';
+        document.getElementById('burnRateLabel').textContent = label;
+        document.getElementById('burnRateLabel').style.color = icolor;
+
+        // 其他模型状态
+        const otherModels = (d.all_models || []).filter(m => !m.model_key.includes('MiniMax-M'));
+        if (otherModels.length > 0) {
+            const modelStatus = otherModels.map(m => {
+                const used = m.interval_used || 0;
+                const total = m.interval_total || 0;
+                const remain = m.interval_remain || 0;
+                if (total === 0) return '';
+                return m.name + ': ' + used + '/' + total + ' (剩' + remain + ')';
+            }).filter(Boolean).join(' · ');
+            document.getElementById('burnOtherModels').innerHTML = '其他模型: ' + modelStatus + ' <span style="color:#8f959e">(语音/图片为滚动窗口，口径与后台日统计可能不一致)</span>';
+        }
+    } catch(e) { console.error(e); }
+}
+
+async function loadUsageStats() {
+    try {
+        const [d, dDaily, dSess, dWin] = await Promise.all([
+            api('/dashboard/api/stats?period=month'),
+            api('/dashboard/api/stats-daily'),
+            api('/dashboard/api/sessions'),
+            api('/dashboard/api/stats?period=day')
+        ]);
+        const remaining = 600 - (dWin.window_calls || 0);
+        const pct = Math.round(remaining / 600 * 100);
+        const winEl = document.getElementById('usageWindow');
+        winEl.textContent = remaining + '/600';
+        winEl.className = 'stat-value ' + (pct > 50 ? 'green' : pct > 20 ? 'amber' : 'red');
+
+        document.getElementById('usageTotal').textContent = d.total_calls || 0;
+        document.getElementById('usageRange').textContent = d.range ? d.range.start + ' 起' : '-';
+
+        const days = (dDaily.daily || []).filter(dd => dd.total > 0).length || 1;
+        document.getElementById('usageAvg').textContent = Math.round((d.total_calls || 0) / days);
+        document.getElementById('usageTokens').textContent = remaining + '';
+        document.getElementById('usageSessions').textContent = (dSess.sessions || []).filter(s => s.status === 'active').length;
+
+        const sources = Object.entries(d.by_source || {});
+        renderPieChart(sources);
+        document.getElementById('sourceLegend').innerHTML = sources.map(([s, c], i) =>
+            `<div class="source-item"><span class="source-dot" style="background:${SOURCE_COLORS[i%SOURCE_COLORS.length]}"></span>${escHtml(s)} (${c})</div>`
+        ).join('');
+    } catch(e) { console.error(e); }
+}
+
+function renderPieChart(data) {
+    const el = document.getElementById('chartPie');
+    el.innerHTML = '';
+    if (!data || data.length === 0) { el.innerHTML = '<div class="no-data">暂无数据</div>'; return; }
+    const w = el.clientWidth || 300, h = 200;
+    const r = Math.min(w, h) / 2 - 25;
+    const svg = d3.select(el).append('svg').attr('viewBox', `0 0 ${w} ${h}`);
+    const g = svg.append('g').attr('transform', `translate(${w/2},${h/2})`);
+    const pie = d3.pie().value(d => d[1]).sort(null);
+    const arc = d3.arc().innerRadius(r * 0.55).outerRadius(r);
+    const total = data.reduce((s, d) => s + d[1], 0);
+    g.selectAll('path').data(pie(data)).join('path')
+        .attr('d', arc).attr('fill', (d, i) => SOURCE_COLORS[i % SOURCE_COLORS.length]).attr('opacity', 0.9)
+        .append('title').text(d => `${d.data[0]}: ${d.data[1]} (${(d.data[1]/total*100).toFixed(0)}%)`);
+}
+
+async function loadUsageBar() {
+    try {
+        const d = await api('/dashboard/api/stats-daily');
+        renderBarChart(d.daily || []);
+    } catch(e) { console.error(e); }
+}
+
+function renderBarChart(data) {
+    const el = document.getElementById('chartBar');
+    el.innerHTML = '';
+    if (!data || data.length === 0) { el.innerHTML = '<div class="no-data">暂无数据</div>'; return; }
+    const w = el.clientWidth || 400, h = 200;
+    const m = { top: 10, right: 10, bottom: 30, left: 35 };
+    const iw = w - m.left - m.right, ih = h - m.top - m.bottom;
+    const svg = d3.select(el).append('svg').attr('viewBox', `0 0 ${w} ${h}`);
+    const g = svg.append('g').attr('transform', `translate(${m.left},${m.top})`);
+    const x = d3.scaleBand().domain(data.map(d => d.date.slice(5))).range([0, iw]).padding(0.2);
+    const y = d3.scaleLinear().domain([0, d3.max(data, d => d.total) || 1]).nice().range([ih, 0]);
+    g.append('g').call(d3.axisLeft(y).tickSize(-iw)).selectAll('line').attr('stroke', '#f1f3f5');
+    g.select('.domain').remove();
+    g.selectAll('rect').data(data).join('rect')
+        .attr('x', d => x(d.date.slice(5))).attr('y', d => y(d.total))
+        .attr('width', x.bandwidth()).attr('height', d => ih - y(d.total))
+        .attr('fill', '#07c160').attr('rx', 3)
+        .append('title').text(d => `${d.date}: ${d.total}次`);
+    const xa = g.append('g').attr('transform', `translate(0,${ih})`).call(d3.axisBottom(x).tickValues(data.filter((_, i) => i % 5 === 0).map(d => d.date.slice(5))));
+    xa.selectAll('text').attr('fill', '#8f959e').attr('font-size', '10px');
+    xa.select('.domain').remove();
+}
+
+async function loadUsageSys() {
+    try {
+        const d = await api('/dashboard/api/connector-status');
+        const el = document.getElementById('sysList');
+        if (!d.connectors || d.connectors.length === 0) {
+            el.innerHTML = '<div class="no-data">暂无数据</div>';
+            return;
+        }
+        const statusMeta = {
+            connected:     { color: '#07c160', bg: '#e8f5e9', icon: '🟢', label: '已连接' },
+            partial:       { color: '#f59e0b', bg: '#fff7e6', icon: '🟡', label: '部分可用' },
+            not_connected: { color: '#ef4444', bg: '#fef2f2', icon: '🔴', label: '未连接' },
+        };
+        el.innerHTML = d.connectors.map(c => {
+            const m = statusMeta[c.status] || statusMeta.not_connected;
+            return `<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid #f5f6f8;font-size:13px">
+                <span style="font-size:16px;flex-shrink:0;margin-top:1px">${m.icon}</span>
+                <div style="flex:1;min-width:0">
+                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+                        <span style="font-weight:600;color:#1f2329">${escHtml(c.name)}</span>
+                        <span style="font-size:11px;padding:1px 6px;border-radius:8px;background:${m.bg};color:${m.color};font-weight:500">${m.label}</span>
+                    </div>
+                    <div style="color:#4a4f59;font-size:12px;margin-bottom:1px">${escHtml(c.message)}</div>
+                    ${c.hint ? `<div style="color:#8f959e;font-size:11px">💡 ${escHtml(c.hint)}</div>` : ''}
+                </div>
+            </div>`;
+        }).join('');
+    } catch(e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════
+// USAGE BREAKDOWN (P2)
+// ═══════════════════════════════════════
+async function loadUsageBreakdown() {
+    try {
+        const d = await api('/dashboard/api/usage-breakdown?days=7');
+        document.getElementById('usageBreakdownDays').textContent = '近 ' + d.days + ' 天';
+        document.getElementById('usageTotalTokens').textContent = d.total_tokens > 0 ? Math.round(d.total_tokens / 1000) + 'K' : '-';
+        document.getElementById('usageTotalCost').textContent = d.total_cost > 0 ? '$' + d.total_cost.toFixed(2) : '-';
+        document.getElementById('usageTotalReq').textContent = d.total_requests || '-';
+
+        const byType = d.by_type || [];
+        const totalTokens = d.total_tokens || 1;
+        const sourceColors = {main: '#07c160', cron: '#5bc0de', feishu: '#9b59b6', wechat: '#f39c12', other: '#8f959e'};
+        const sourceNames = {main: '主会话', cron: '定时任务', feishu: '飞书', wechat: '微信', other: '其他'};
+
+        const el = document.getElementById('usageBySource');
+        if (byType.length === 0) {
+            el.innerHTML = '<div class="no-data">暂无数据</div>';
+            return;
+        }
+
+        el.innerHTML = byType.map(t => {
+            const pct = Math.round(t.total_tokens / totalTokens * 100);
+            const color = sourceColors[t.type] || '#8f959e';
+            const name = sourceNames[t.type] || t.type;
+            const costStr = t.cost > 0 ? '$' + t.cost.toFixed(2) : '';
+            return `<div style="display:flex;align-items:center;gap:10px;font-size:13px">
+                <div style="width:70px;text-align:right;color:#646a73">${name}</div>
+                <div style="flex:1;background:#f0f1f3;border-radius:4px;height:18px;overflow:hidden">
+                    <div style="width:${pct}%;height:100%;background:${color};border-radius:4px"></div>
+                </div>
+                <div style="width:55px;text-align:right;font-weight:600">${Math.round(t.total_tokens/1000)}K</div>
+                <div style="width:45px;text-align:right;color:#8f959e">${pct}%</div>
+                <div style="width:60px;text-align:right;color:#8f959e">${costStr}</div>
+            </div>`;
+        }).join('');
+    } catch(e) { console.error(e); }
+}
+
+async function loadCronJobRanking() {
+    try {
+        const d = await api('/dashboard/api/usage-breakdown?days=7');
+        const cronType = (d.by_type || []).find(t => t.type === 'cron');
+        const el = document.getElementById('cronJobRanking');
+        if (!cronType || !cronType.sources || cronType.sources.length === 0) {
+            el.innerHTML = '<div class="no-data">暂无 Cron 任务数据</div>';
+            return;
+        }
+
+        const totalTokens = cronType.total_tokens || 1;
+        el.innerHTML = cronType.sources.map(s => {
+            const pct = Math.round(s.tokens / totalTokens * 100);
+            const color = pct >= 30 ? '#ef4444' : pct >= 15 ? '#f59e0b' : '#07c160';
+            return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #f5f6f8;font-size:13px">
+                <div style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.label)}</div>
+                <div style="width:55px;text-align:right;color:#8f959e">${Math.round(s.tokens/1000)}K</div>
+                <div style="width:45px;text-align:right;font-weight:600;color:${color}">${pct}%</div>
+            </div>`;
+        }).join('');
+    } catch(e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════
+// SESSIONS TAB
+// ═══════════════════════════════════════
+async function loadSessions() {
+    try {
+        const [dSess, dWin, dCtx] = await Promise.all([
+            api('/dashboard/api/sessions'),
+            api('/dashboard/api/stats?period=day'),
+            api('/dashboard/api/session-context')
+        ]);
+        const sess = dSess.sessions || [];
+        const active = sess.filter(s => s.status === 'active').length;
+        const running = sess.filter(s => s.status === 'running').length;
+        const idle = sess.length - active - running;
+        document.getElementById('sessTotal').textContent = sess.length;
+        document.getElementById('sessActive').textContent = active;
+        document.getElementById('sessRunning').textContent = running;
+        document.getElementById('sessIdle').textContent = idle;
+        const remaining = 600 - (dWin.window_calls || 0);
+        document.getElementById('sessWindow').textContent = remaining + '/600';
+
+        // Build context map: session_key -> context data
+        const ctxMap = {};
+        const ctxSessions = dCtx.sessions || [];
+        ctxSessions.forEach(cs => { ctxMap[cs.session_key] = cs; });
+
+        const el = document.getElementById('sessionList');
+        if (sess.length === 0) { el.innerHTML = '<div class="no-data">暂无会话</div>'; }
+        else {
+            el.innerHTML = sess.map(s => {
+                const dot = s.status === 'active' ? 'dot-active' : s.status === 'running' ? 'dot-running' : 'dot-idle';
+                const label = s.status === 'active' ? '工作中' : s.status === 'running' ? '执行中' : '空闲';
+                const ctx = ctxMap[s.session_key] || {};
+                const usagePct = ctx.usage_pct;
+                const thState = ctx.threshold_state || 'not_connected';
+                // Context pressure badge
+                let ctxBadge = '';
+                if (thState === 'critical') {
+                    ctxBadge = '<span style="margin-left:6px;font-size:11px;padding:1px 5px;border-radius:6px;background:#fef2f2;color:#ef4444">快满了</span>';
+                } else if (thState === 'warn') {
+                    ctxBadge = '<span style="margin-left:6px;font-size:11px;padding:1px 5px;border-radius:6px;background:#fff7e6;color:#f59e0b">' + usagePct + '%</span>';
+                } else if (thState === 'ok' && usagePct !== null) {
+                    ctxBadge = '<span style="margin-left:6px;font-size:11px;padding:1px 5px;border-radius:6px;background:#e8f5e9;color:#07c160">' + usagePct + '%</span>';
+                }
+                // Session type badge
+                const sessType = s.kind || 'main';
+                const typeMap = { main: '主', cron: '定时', feishu: '飞书', wechat: '微信', discord: 'Discord' };
+                const typeColorMap = { main: '#07c160', cron: '#5bc0de', feishu: '#9b59b6', wechat: '#f39c12', discord: '#7289da' };
+                const typeTag = typeMap[sessType] || sessType;
+                const typeBg = typeColorMap[sessType] || '#8f959e';
+                const typeBadge2 = '<span style="margin-right:6px;font-size:10px;padding:1px 5px;border-radius:6px;background:' + typeBg + '22;color:' + typeBg + '">' + typeTag + '</span>';
+                return `<div class="session-item">
+                    <span class="session-dot ${dot}"></span>
+                    <span class="session-name">${escHtml(s.label || s.session_key || '未知')}</span>
+                    <span class="session-meta">${typeBadge2}${label} · ${s.last_active || '-'}${ctxBadge}</span>
+                </div>`;
+            }).join('');
+        }
+
+        // Context Pressure panel
+        const ctxEl = document.getElementById('ctxList');
+        if (!dCtx || !dCtx.sessions) {
+            ctxEl.innerHTML = '<div class="no-data">加载失败: ' + (dCtx.error || 'unknown') + '</div>';
+        }
+        const sc = dCtx.state_counts || {};
+        const totalCtx = dCtx.total || 0;
+        const critical = sc.critical || 0;
+        const warn = sc.warn || 0;
+        const ok = sc.ok || 0;
+
+        if (critical > 0) {
+            document.getElementById('ctxCritical').style.display = 'inline-block';
+            document.getElementById('ctxCritical').textContent = '🔴 ' + critical + ' 个严重';
+        } else {
+            document.getElementById('ctxCritical').style.display = 'none';
+        }
+        if (warn > 0) {
+            document.getElementById('ctxWarn').style.display = 'inline-block';
+            document.getElementById('ctxWarn').textContent = '🟡 ' + warn + ' 个警告';
+        } else {
+            document.getElementById('ctxWarn').style.display = 'none';
+        }
+        if (ok > 0) {
+            document.getElementById('ctxOk').style.display = 'inline-block';
+            document.getElementById('ctxOk').textContent = '🟢 ' + ok + ' 个正常';
+        } else {
+            document.getElementById('ctxOk').style.display = 'none';
+        }
+        // 会话类型分布
+        const typeCounts = dCtx.type_counts || {};
+        const typeNames = { main: '主会话', cron: '定时任务', feishu: '飞书', wechat: '微信', discord: 'Discord', telegram: 'Telegram' };
+        const typeColor = { main: '#07c160', cron: '#5bc0de', feishu: '#9b59b6', wechat: '#f39c12', discord: '#7289da', telegram: '#0088cc' };
+        const typeParts = Object.entries(typeCounts).map(([t, cnt]) => {
+            const name = typeNames[t] || t;
+            const color = typeColor[t] || '#8f959e';
+            return '<span style="padding:1px 6px;border-radius:8px;background:' + color + '22;color:' + color + ';font-weight:500">' + name + ' ' + cnt.total + '</span>';
+        }).join(' ');
+        document.getElementById('ctxCriticalCount').innerHTML = '共 ' + totalCtx + ' 个会话' + (typeParts ? ' · ' + typeParts : '');
+        document.getElementById('ctxCriticalCount').style.fontWeight = '400'; 
+
+        if (!ctxSessions || ctxSessions.length === 0) {
+            ctxEl.innerHTML = '<div class="no-data">暂无 Context 数据</div>';
+        } else {
+            // Show top 10 by usage_pct
+            const top10 = ctxSessions.slice(0, 10);
+            ctxEl.innerHTML = top10.map(cs => {
+                const pct = cs.usage_pct;
+                const thState = cs.threshold_state || 'not_connected';
+                const barColor = thState === 'critical' ? '#ef4444' : thState === 'warn' ? '#f59e0b' : thState === 'ok' ? '#07c160' : '#8f959e';
+                const barWidth = pct !== null ? Math.min(pct, 100) : 0;
+                const label2 = thState === 'critical' ? '快满了' : thState === 'warn' ? '使用中' : thState === 'ok' ? '正常' : '未知';
+                const labelColor = thState === 'critical' ? '#ef4444' : thState === 'warn' ? '#f59e0b' : thState === 'ok' ? '#07c160' : '#8f959e';
+                // Extract short session name
+                const shortName = cs.session_key.split(':').pop() || cs.session_key;
+                return `<div style="display:flex;align-items:center;gap:10px;padding:4px 0;border-bottom:1px solid #f5f6f8;font-size:12px">
+                    <div style="width:70%;display:flex;align-items:center;gap:6px;overflow:hidden">
+                        <span style="font-size:10px;padding:1px 5px;border-radius:6px;background:${barColor}20;color:${barColor};font-weight:600;flex-shrink:0">${label2}</span>
+                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#4a4f59">${escHtml(cs.session_key)}</span>
+                    </div>
+                    <div style="flex:1;background:#f0f1f3;border-radius:4px;height:6px;overflow:hidden;margin:0 6px">
+                        <div style="width:${barWidth}%;height:100%;background:${barColor};border-radius:4px"></div>
+                    </div>
+                    <span style="width:40px;text-align:right;font-weight:600;color:${labelColor}">${pct !== null ? pct + '%' : '—'}</span>
+                </div>`;
+            }).join('');
+        }
+    } catch(e) {
+        console.error('loadSessions error:', e);
+        const el = document.getElementById('sessionList');
+        if (el) el.innerHTML = '<div class="no-data">加载失败: ' + String(e) + '</div>';
+        const ctxEl = document.getElementById('ctxList');
+        if (ctxEl) ctxEl.innerHTML = '<div class="no-data">加载失败: ' + String(e) + '</div>';
+    }
+}
+
+// ── Util ──
+function escHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Init ──
+loadOverview();
+setInterval(() => {
+    const activeTab = document.querySelector('.page-tab.active');
+    if (activeTab && activeTab.id === 'tab-overview') loadOverview();
+}, 60000);
+</script>
+
+<!-- 记忆文件阅读弹层 -->
+<div id="memoryViewer" class="viewer-overlay" style="display:none" onclick="if(event.target===this)closeMemoryViewer()">
+    <div class="viewer-box">
+        <div class="viewer-header">
+            <span class="viewer-title" id="viewerFileName">-</span>
+            <button class="viewer-close" onclick="closeMemoryViewer()">×</button>
+        </div>
+        <div class="viewer-body" id="viewerContent"></div>
+    </div>
+</div>
+</body>
+</html>

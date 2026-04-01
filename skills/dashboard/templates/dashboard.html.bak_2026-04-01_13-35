@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>个人工作台</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #f0f2f5; color: #1f2329; font-family: "PingFang SC", "Microsoft YaHei", sans-serif; min-height: 100vh; }
+
+        /* ── Header ── */
+        header {
+            background: #fff; border-bottom: 1px solid #e5e7eb;
+            padding: 16px 32px; display: flex; align-items: center; gap: 12px;
+            position: sticky; top: 0; z-index: 100;
+        }
+        header h1 { font-size: 18px; font-weight: 600; flex: 1; }
+        .header-badge { background: #e8f5e9; color: #07c160; padding: 3px 10px; border-radius: 20px; font-size: 12px; }
+
+        /* ── Container ── */
+        .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+        /* ── Page tabs ── */
+        .page-tabs { display: flex; gap: 4px; margin-bottom: 20px; }
+        .page-tab {
+            padding: 9px 20px; font-size: 14px; cursor: pointer; border: none;
+            background: none; color: #646a73; border-bottom: 2px solid transparent;
+            margin-bottom: -1px; transition: all 0.15s;
+        }
+        .page-tab.active { color: #07c160; border-bottom-color: #07c160; font-weight: 600; }
+
+        /* ── Stat cards ── */
+        .stat-cards {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 14px;
+            margin-bottom: 20px;
+        }
+        .stat-cards.top3 {
+            grid-template-columns: repeat(3, 1fr);
+        }
+        .stat-card {
+            background: #fff; border-radius: 12px; padding: 16px 20px;
+            border: 1px solid #e5e7eb;
+        }
+        .stat-label { font-size: 12px; color: #8f959e; margin-bottom: 6px; }
+        .stat-value { font-size: 26px; font-weight: 700; }
+        .stat-value.green { color: #07c160; }
+        .stat-value.amber { color: #f59e0b; }
+        .stat-value.red { color: #ef4444; }
+        .stat-sub { font-size: 11px; color: #8f959e; margin-top: 3px; }
+
+        /* ── Panels ── */
+        .panel {
+            background: #fff; border-radius: 12px; padding: 20px 24px;
+            border: 1px solid #e5e7eb;
+        }
+        .panel-title {
+            font-size: 14px; font-weight: 600; color: #1f2329; margin-bottom: 16px;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .panel-title .badge {
+            font-size: 11px; font-weight: 400; background: #f0f1f3; color: #646a73;
+            padding: 2px 8px; border-radius: 10px;
+        }
+        .badge.ok { background: #e8f5e9; color: #07c160; }
+        .badge.warn { background: #fff7e6; color: #f59e0b; }
+        .badge.error { background: #fef2f2; color: #ef4444; }
+        .refresh-btn {
+            background: #f0f1f3; border: none; border-radius: 8px;
+            padding: 4px 12px; font-size: 12px; cursor: pointer; color: #4a4f59;
+        }
+        .refresh-btn:hover { background: #e3e4e8; }
+        .cron-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .cron-table th { text-align: left; padding: 8px 12px; color: #8f959e; font-weight: 500; border-bottom: 1px solid #f0f1f3; }
+        .cron-table td { padding: 8px 12px; border-bottom: 1px solid #f8f9fa; }
+        .cron-table tr:last-child td { border-bottom: none; }
+        .cron-badge { padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+        .badge-ok { background: #e8f5e9; color: #07c160; }
+        .badge-warn { background: #fff7e6; color: #f59e0b; }
+        .badge-error { background: #fef2f2; color: #ef4444; }
+        .badge-idle { background: #f0f1f3; color: #8f959e; }
+        .cron-today { font-size: 10px; background: #e3f0ff; color: #1d7df5; padding: 1px 5px; border-radius: 6px; margin-left: 4px; }
+
+        /* ── Grid helpers ── */
+        .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+        .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+
+        /* ── Chart containers ── */
+        .chart-box { width: 100%; }
+        .source-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+        .source-item { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #646a73; }
+        .source-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .no-data { text-align: center; padding: 24px; color: #bfc3c9; font-size: 13px; }
+        .loading { text-align: center; padding: 20px; color: #8f959e; font-size: 13px; }
+        .loading::after { content: '...'; animation: dots 1s infinite; }
+        @keyframes dots { 0%,20%{content:'.'} 40%{content:'..'} 60%,100%{content:'...'} }
+
+        /* ── Calendar ── */
+        .cal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .cal-nav { display: flex; gap: 6px; }
+        .cal-nav button {
+            background: #f7f8fa; border: 1px solid #e5e7eb; color: #1f2329;
+            padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 13px;
+        }
+        .cal-nav button:hover { background: #eef0f3; }
+        .cal-month { font-size: 14px; font-weight: 600; }
+        .cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-bottom: 3px; }
+        .cal-weekday { text-align: center; font-size: 11px; color: #8f959e; padding: 4px 0; font-weight: 500; }
+        .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+        .cal-day {
+            aspect-ratio: 1; display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            border-radius: 8px; font-size: 13px; cursor: pointer;
+            transition: all 0.15s; gap: 2px;
+        }
+        .cal-day:hover:not(.other-month) { background: #f7f8fa; }
+        .cal-day.other-month { color: #d1d5db; }
+        .cal-day.today { background: #e8f5e9; font-weight: 600; }
+        .cal-day.selected { background: #07c160; color: #fff; }
+        .cal-day .dots { display: flex; gap: 2px; justify-content: center; flex-wrap: wrap; }
+        .cal-day .dot { width: 5px; height: 5px; border-radius: 50%; }
+        .dot-success { background: #07c160; }
+        .dot-pending { background: #f59e0b; }
+        .dot-missed { background: #ef4444; }
+
+        /* ── Day detail panel ── */
+        .day-detail { background: #fff; border-radius: 12px; border: 1px solid #e5e7eb; overflow: hidden; }
+        .day-detail-header {
+            padding: 14px 18px; border-bottom: 1px solid #f1f2f5;
+            font-size: 14px; font-weight: 600; display: flex; justify-content: space-between; align-items: center;
+        }
+        .close-btn { background: none; border: none; font-size: 18px; cursor: pointer; color: #8f959e; padding: 0; }
+        .day-detail-body { padding: 12px 18px; }
+        .day-task {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 0; border-bottom: 1px solid #f8f9fa;
+        }
+        .day-task:last-child { border-bottom: none; }
+        .day-task-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .day-task-name { font-size: 13px; color: #1f2329; flex: 1; }
+        .day-task-meta { font-size: 12px; color: #8f959e; white-space: nowrap; }
+        .mark-btn {
+            padding: 4px 10px; background: #07c160; color: #fff;
+            border: none; border-radius: 5px; font-size: 12px; cursor: pointer; flex-shrink: 0;
+        }
+        .mark-btn:hover { background: #06a555; }
+        .day-empty { text-align: center; padding: 24px; color: #8f959e; font-size: 13px; line-height: 1.6; }
+
+        /* ── Books ── */
+        .book-list { display: flex; flex-direction: column; gap: 12px; }
+        .book-header { display: flex; justify-content: space-between; margin-bottom: 4px; }
+        .book-name { font-size: 13px; font-weight: 500; color: #1f2329; }
+        .book-pct { font-size: 13px; color: #07c160; font-weight: 600; }
+        .book-bar { height: 5px; background: #f1f3f5; border-radius: 3px; overflow: hidden; }
+        .book-fill { height: 100%; background: #07c160; border-radius: 3px; }
+        .book-meta { font-size: 11px; color: #8f959e; margin-top: 3px; }
+
+        /* ── Memory ── */
+        .memory-section { margin-bottom: 16px; }
+        .memory-section:last-child { margin-bottom: 0; }
+        .memory-section-title { font-size: 11px; color: #8f959e; padding: 0 0 6px 0; font-weight: 500; }
+        .memory-list { display: flex; flex-direction: column; }
+        .memory-item { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px solid #f5f6f8; }
+        .memory-item:last-child { border-bottom: none; }
+        .memory-name { font-size: 13px; color: #1f2329; }
+        .memory-name .sub { font-size: 11px; color: #8f959e; }
+        .memory-link { color: #1f2329; text-decoration: none; font-size: 13px; }
+        .memory-link:hover { color: #1d7df5; text-decoration: underline; }
+        .cron-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+        .badge-ok { background: #e8f5e9; color: #07c160; }
+        .badge-warn { background: #fff7e6; color: #f59e0b; }
+        .badge-error { background: #fef2f2; color: #ef4444; }
+        .viewer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+        .viewer-box { background: #fff; border-radius: 14px; width: 90vw; max-width: 800px; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+        .viewer-header { display: flex; align-items: center; padding: 14px 20px; border-bottom: 1px solid #e5e7eb; }
+        .viewer-title { font-size: 14px; font-weight: 600; color: #1f2329; flex: 1; }
+        .viewer-close { background: none; border: none; font-size: 22px; cursor: pointer; color: #8f959e; padding: 0 4px; }
+        .viewer-close:hover { color: #1f2329; }
+        .viewer-body { padding: 20px; overflow-y: auto; flex: 1; }
+        .viewer-pre { white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.7; color: #1f2329; margin: 0; font-family: inherit; }
+        .hb-list { display: flex; flex-wrap: wrap; gap: 10px; padding: 4px 0; }
+        .hb-dot { color: #07c160; font-size: 8px; }
+        .hb-time { font-size: 13px; color: #1f2329; }
+        .memory-name { font-size: 13px; }
+        .memory-name .sub { font-size: 11px; color: #8f959e; margin-top: 1px; }
+        .cron-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+        .badge-ok { background: #e8f5e9; color: #07c160; }
+        .badge-warn { background: #fff7e6; color: #f59e0b; }
+
+        /* ── Sessions ── */
+        .session-list { display: flex; flex-direction: column; gap: 8px; }
+        .session-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #f7f8fa; border-radius: 8px; }
+        .session-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .dot-active { background: #07c160; }
+        .dot-running { background: #5bc0de; }
+        .dot-idle { background: #8f959e; }
+        .session-name { font-size: 13px; color: #1f2329; flex: 1; }
+        .session-meta { font-size: 11px; color: #8f959e; }
+
+        /* ── Quick links ── */
+        .quick-links { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .quick-link {
+            display: flex; align-items: center; gap: 8px;
+            padding: 9px 12px; background: #f7f8fa; border: 1px solid #e5e7eb;
+            border-radius: 8px; color: #1f2329; text-decoration: none; font-size: 13px;
+            transition: all 0.15s;
+        }
+        .quick-link:hover { background: #f0f1f3; border-color: #07c160; color: #07c160; }
+
+        /* ── System status ── */
+        .sys-list { display: flex; flex-direction: column; gap: 0; }
+        .sys-item { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid #f5f6f8; }
+        .sys-item:last-child { border-bottom: none; }
+        .sys-name { font-size: 13px; color: #1f2329; }
+        .sys-val { font-size: 12px; font-weight: 600; }
+        .sys-val.ok { color: #07c160; }
+        .sys-val.warn { color: #f59e0b; }
+        .sys-val.error { color: #ef4444; }
+
+        /* ── Footer ── */
+        footer { text-align: center; padding: 16px; font-size: 12px; color: #bfc3c9; }
+
+        /* ── Responsive ── */
+        @media (max-width: 900px) {
+            .stat-cards { grid-template-columns: repeat(3, 1fr); }
+            .two-col, .three-col { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 600px) {
+            .container { padding: 16px; }
+            .stat-cards { grid-template-columns: 1fr 1fr; gap: 10px; }
+            header { padding: 14px 16px; }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <span style="font-size:22px">📊</span>
+    <h1>个人工作台</h1>
+    <span class="header-badge">Dashboard</span>
+</header>
+
+<div class="container">
+
+    <!-- Page tabs -->
+    <div class="page-tabs">
+        <button class="page-tab active" id="tab-overview" onclick="switchTab('overview')">📋 总览</button>
+        <button class="page-tab" id="tab-usage" onclick="switchTab('usage')">📈 用量</button>
+        <button class="page-tab" id="tab-sessions" onclick="switchTab('sessions')">💬 对话</button>
+    </div>
+
+    <!-- ═══════════════════════════════════════ -->
+    <!-- TAB: Overview -->
+    <!-- ═══════════════════════════════════════ -->
+    <div id="page-overview">
+
+        <!-- Top stat cards -->
+        <div class="stat-cards top3" style="margin-bottom:20px">
+            <div class="stat-card">
+                <div class="stat-label">本时段内模型调用量</div>
+                <div class="stat-value" id="statWindowUsed">-</div>
+                <div class="stat-sub" id="statWindowKey">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">本时段内剩余调用量</div>
+                <div class="stat-value green" id="statWindowRemain">-</div>
+                <div class="stat-sub">剩余 / 600</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">当前会话数</div>
+                <div class="stat-value" id="statActiveSessions">-</div>
+                <div class="stat-sub" id="statSessionDetail">-</div>
+            </div>
+        </div>
+
+        <!-- 当前状态 -->
+        <div class="panel" style="margin-bottom:20px">
+            <div class="panel-title">
+                🔴 当前状态
+                <button class="refresh-btn" onclick="loadOverview()" style="margin-left:auto">🔄 刷新</button>
+            </div>
+            <div class="stat-cards" style="grid-template-columns: repeat(3, 1fr); margin-bottom:0;">
+                <div class="stat-card">
+                    <div class="stat-label">本时段活跃会话数</div>
+                    <div class="stat-value" id="curActiveSessions">-</div>
+                    <div class="stat-sub">本时段有活动的 session</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">定时任务数</div>
+                    <div class="stat-value" id="curCronTasks">-</div>
+                    <div class="stat-sub">已配置的任务</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">当前活跃对话数</div>
+                    <div class="stat-value" id="curActiveDialogs">-</div>
+                    <div class="stat-sub">非定时 session 活动</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 当日定时任务推送情况 -->
+        <div class="panel" style="margin-bottom:20px">
+            <div class="panel-title">📬 当日定时任务推送情况</div>
+            <div class="cron-task-list" id="cronTaskList"><div class="loading">加载中</div></div>
+        </div>
+
+        <!-- Heartbeat 状态 -->
+        <div class="panel" style="margin-bottom:20px">
+            <div class="panel-title">💓 Heartbeat <span id="hbCount" style="font-size:12px;color:#8f959e;font-weight:400"></span></div>
+            <div id="hbList" class="hb-list"><div class="loading">加载中</div></div>
+        </div>
+
+        <!-- 工作数据 -->
+        <div class="panel" style="margin-bottom:20px">
+            <div class="panel-title">📦 工作数据</div>
+            <div class="stat-cards" style="grid-template-columns: repeat(4, 1fr); margin-bottom:0;">
+                <div class="stat-card">
+                    <div class="stat-label">SSD 存储</div>
+                    <div class="stat-value" id="wdSsdFree">-</div>
+                    <div class="stat-sub" id="wdSsdInfo">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">照片</div>
+                    <div class="stat-value" id="wdPhoto">-</div>
+                    <div class="stat-sub">张</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">电子书</div>
+                    <div class="stat-value" id="wdBookTotal">-</div>
+                    <div class="stat-sub">总量</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">已索引</div>
+                    <div class="stat-value" id="wdBookIndexed">-</div>
+                    <div class="stat-sub">已深度学习</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Publish calendar (main action) + day detail -->
+        <div class="two-col" style="margin-bottom:20px">
+            <div class="panel">
+                <div class="panel-title">
+                    📅 发布日历
+                    <span class="badge ok" id="pubCalendarBadge">本月</span>
+                    <span class="badge" id="pubCalendarRate" style="margin-left:auto"></span>
+                </div>
+
+                <div class="cal-weekdays">
+                    <div class="cal-weekday">一</div>
+                    <div class="cal-weekday">二</div>
+                    <div class="cal-weekday">三</div>
+                    <div class="cal-weekday">四</div>
+                    <div class="cal-weekday">五</div>
+                    <div class="cal-weekday">六</div>
+                    <div class="cal-weekday">日</div>
+                </div>
+                <div class="cal-grid" id="calGrid"></div>
+            </div>
+
+            <div class="day-detail">
+                <div class="day-detail-header">
+                    <span id="detailTitle">点击日期查看</span>
+                    <button class="close-btn" id="closeDetail" onclick="closeDetail()" style="display:none">×</button>
+                </div>
+                <div class="day-detail-body" id="detailBody">
+                    <div class="day-empty">点击左侧日历上的日期<br>查看当天发布任务并标记</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Second row: 深入分析 + 记忆状态 -->
+        <div class="two-col" style="margin-bottom:20px">
+            <div class="panel">
+                <div class="panel-title">📚 正在深入分析</div>
+                <div class="book-list" id="bookList"><div class="loading">加载中</div></div>
+            </div>
+            <div class="panel">
+                <div class="panel-title">🧠 记忆状态</div>
+                <div class="memory-section">
+                    <div class="memory-section-title">📁 项目文档</div>
+                    <div id="memoryProjects" class="memory-list"><div class="loading">加载中</div></div>
+                </div>
+                <div class="memory-section">
+                    <div class="memory-section-title">📅 每日记录</div>
+                    <div id="memoryDaily" class="memory-list"><div class="loading">加载中</div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 快速入口 -->
+        <div class="panel">
+            <div class="panel-title">⚡ 快速入口</div>
+            <div class="quick-links" id="quickLinks"><div class="loading">加载中</div></div>
+        </div>
+
+    </div>
+
+    <!-- ═══════════════════════════════════════ -->
+    <!-- TAB: Usage -->
+    <!-- ═══════════════════════════════════════ -->
+    <div id="page-usage" style="display:none">
+
+        <!-- Usage stat cards -->
+        <div class="stat-cards" style="margin-bottom:20px">
+            <div class="stat-card">
+                <div class="stat-label">本期 API 调用</div>
+                <div class="stat-value" id="usageTotal">-</div>
+                <div class="stat-sub" id="usageRange">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">窗口配额</div>
+                <div class="stat-value green" id="usageWindow">-</div>
+                <div class="stat-sub">5小时滚动窗口</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">日均调用</div>
+                <div class="stat-value" id="usageAvg">-</div>
+                <div class="stat-sub">次/天</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Token 剩余</div>
+                <div class="stat-value green" id="usageTokens">-</div>
+                <div class="stat-sub">条</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">会话数</div>
+                <div class="stat-value" id="usageSessions">-</div>
+                <div class="stat-sub">活跃</div>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="two-col" style="margin-bottom:20px">
+            <div class="panel">
+                <div class="panel-title">📊 来源分布</div>
+                <div class="chart-box" id="chartPie"></div>
+                <div class="source-legend" id="sourceLegend"></div>
+            </div>
+            <div class="panel">
+                <div class="panel-title">📈 近30天调用趋势</div>
+                <div class="chart-box" id="chartBar"></div>
+            </div>
+        </div>
+
+        <!-- System status -->
+        <div class="panel">
+            <div class="panel-title">🔧 系统状态</div>
+            <div class="sys-list" id="sysList"><div class="loading">加载中</div></div>
+        </div>
+
+    </div>
+
+    <!-- ═══════════════════════════════════════ -->
+    <!-- TAB: Sessions -->
+    <!-- ═══════════════════════════════════════ -->
+    <div id="page-sessions" style="display:none">
+
+        <!-- Session stat cards -->
+        <div class="stat-cards" style="margin-bottom:20px">
+            <div class="stat-card">
+                <div class="stat-label">总会话数</div>
+                <div class="stat-value" id="sessTotal">-</div>
+                <div class="stat-sub">个</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">🟢 工作中</div>
+                <div class="stat-value green" id="sessActive">-</div>
+                <div class="stat-sub">5分钟内有活动</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">🔵 执行中</div>
+                <div class="stat-value" style="color:#5bc0de" id="sessRunning">-</div>
+                <div class="stat-sub">agent/subagent</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">⚪ 空闲</div>
+                <div class="stat-value" style="color:#8f959e" id="sessIdle">-</div>
+                <div class="stat-sub">无活动</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">订阅窗口</div>
+                <div class="stat-value green" id="sessWindow">-</div>
+                <div class="stat-sub">剩余</div>
+            </div>
+        </div>
+
+        <!-- Sessions list + mini calendar -->
+        <div class="two-col">
+            <div class="panel">
+                <div class="panel-title">👥 会话详情</div>
+                <div class="session-list" id="sessionList"><div class="loading">加载中</div></div>
+            </div>
+            <div class="panel">
+                <div class="panel-title">📅 发布日历</div>
+                <div class="cal-header">
+                    <div class="cal-nav">
+
+                    </div>
+
+                </div>
+                <div class="cal-weekdays">
+                    <div class="cal-weekday">一</div>
+                    <div class="cal-weekday">二</div>
+                    <div class="cal-weekday">三</div>
+                    <div class="cal-weekday">四</div>
+                    <div class="cal-weekday">五</div>
+                    <div class="cal-weekday">六</div>
+                    <div class="cal-weekday">日</div>
+                </div>
+                <div class="cal-grid" id="calGrid2"></div>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+
+<footer>个人工作台 · <span id="lastUpdate">-</span></footer>
+
+<script>
+// ── State ──
+const SOURCE_COLORS = ['#07c160','#5bc0de','#f39c12','#9b59b6','#e74c3c','#3498db'];
+let calData = {}; // day -> tasks
+let calDaysInMonth = 30;
+
+// ── Tab switching ──
+function switchTab(tab) {
+    ['overview','usage','sessions'].forEach(t => {
+        document.getElementById('page-' + t).style.display = t === tab ? 'block' : 'none';
+        document.getElementById('tab-' + t).classList.toggle('active', t === tab);
+    });
+    if (tab === 'overview') loadOverview();
+    else if (tab === 'usage') loadUsage();
+    else if (tab === 'sessions') loadSessions();
+}
+
+// ── API helper ──
+async function api(url) {
+    const r = await fetch(url);
+    return r.json();
+}
+
+// ═══════════════════════════════════════
+// OVERVIEW TAB
+// ═══════════════════════════════════════
+async function loadOverview() {
+    await Promise.all([loadStats(), loadPublish(), loadAnalysis(), loadMemory(), loadQuickLinks(), loadCronTasks(), loadHeartbeat(), loadWorkData()]);
+    loadCalendarOverview();
+    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('zh-CN');
+}
+
+async function loadStats() {
+    try {
+        const d = await api('/dashboard/api/current-status');
+        // 本时段内模型调用量
+        document.getElementById('statWindowUsed').textContent = d.used || 0;
+        // token 消耗加到 sub 里
+        const tokens = d.window_total_tokens || 0;
+        document.getElementById('statWindowKey').textContent = '窗口 ' + (d.window_key || '-') + ' | Token ' + tokens.toLocaleString();
+
+        // 本时段内剩余调用量
+        const remain = d.remaining || 0;
+        const pct = Math.round(remain / 600 * 100);
+        const remainEl = document.getElementById('statWindowRemain');
+        remainEl.textContent = remain;
+        remainEl.className = 'stat-value ' + (pct > 50 ? 'green' : pct > 20 ? 'amber' : 'red');
+
+        // 当前会话数
+        document.getElementById('statActiveSessions').textContent = d.active_in_window || 0;
+        document.getElementById('statSessionDetail').textContent = '总会话 ' + (d.total_sessions || 0) + ' / 定时任务 ' + (d.cron_job_count || 0);
+
+        // 当前状态模块
+        document.getElementById('curActiveSessions').textContent = d.active_in_window || 0;
+        document.getElementById('curCronTasks').textContent = d.cron_job_count || 0;
+        document.getElementById('curActiveDialogs').textContent = d.active_dialogs || 0;
+    } catch(e) { console.error(e); }
+}
+
+async function loadPublish() {
+    try {
+        const d = await api('/dashboard/api/publish?period=month');
+        document.getElementById('pubCount').textContent = d.total || 0;
+        document.getElementById('pubRate').textContent = '按时率 ' + (d.on_time_rate || 0) + '%';
+        document.getElementById('pubCalendarRate').textContent = d.total ? (d.on_time_rate || 0) + '% 按时' : '';
+    } catch(e) { console.error(e); }
+}
+
+async function loadAnalysis() {
+    try {
+        const d = await api('/dashboard/api/analysis');
+        const el = document.getElementById('bookList');
+        if (!d.books || d.books.length === 0) {
+            el.innerHTML = '<div class="no-data">暂无正在分析的书</div>';
+            return;
+        }
+        el.innerHTML = d.books.map(b => `
+            <div class="book-item">
+                <div class="book-header">
+                    <span class="book-name">${escHtml(b.name)}</span>
+                    <span class="book-pct">${b.progress}%</span>
+                    ${b.source === 'queued' ? '<span class="cron-today">队列中</span>' : ''}
+                </div>
+                <div class="book-bar"><div class="book-fill" style="width:${b.progress}%"></div></div>
+                <div class="book-meta">第 ${b.completed_chunks}/${b.total_chunks} 个卡片</div>
+            </div>`).join('');
+    } catch(e) { console.error(e); }
+}
+
+async function loadMemory() {
+    try {
+        const d = await api('/dashboard/api/memory');
+
+        function renderFileList(files) {
+            if (!files || files.length === 0) return '<div class="no-data">-</div>';
+            return files.map(f => {
+                const age = f.days_ago === 0 ? '今天' : f.days_ago === 1 ? '昨天' : f.days_ago + '天前';
+                const ageClass = f.days_ago <= 1 ? 'badge-ok' : f.days_ago <= 3 ? 'badge-warn' : 'badge-error';
+                return `<div class="memory-item">
+                    <div class="memory-name">
+                        <span class="memory-link" onclick="openMemoryViewer('${encodeURI(f.path)}')">${escHtml(f.name)}</span>
+                        <div class="sub">${f.updated}</div>
+                    </div>
+                    <span class="cron-badge ${ageClass}">${age}</span>
+                </div>`;
+            }).join('');
+        }
+
+        document.getElementById('memoryProjects').innerHTML = renderFileList(d.projects);
+        document.getElementById('memoryDaily').innerHTML = renderFileList(d.daily);
+    } catch(e) { console.error(e); }
+}
+
+function openMemoryViewer(encodedPath) {
+    document.getElementById('memoryViewer').style.display = '';
+    document.getElementById('viewerContent').innerHTML = '<div class="loading">加载中…</div>';
+    const path = decodeURIComponent(encodedPath);
+    document.getElementById('viewerFileName').textContent = path.split('/').pop();
+    fetch('/dashboard/api/memory/' + encodedPath)
+        .then(r => r.ok ? r.text() : Promise.reject())
+        .then(txt => {
+            document.getElementById('viewerContent').innerHTML = '<pre class="viewer-pre">' + escHtml(txt) + '</pre>';
+        })
+        .catch(() => {
+            document.getElementById('viewerContent').innerHTML = '<div class="no-data">加载失败</div>';
+        });
+}
+
+function closeMemoryViewer() {
+    document.getElementById('memoryViewer').style.display = 'none';
+}
+
+async function loadQuickLinks() {
+    try {
+        const d = await api('/dashboard/api/projects');
+        document.getElementById('quickLinks').innerHTML = (d.projects || []).map(p =>
+            `<a href="${p.url}" class="quick-link" target="_blank">${p.icon} ${escHtml(p.name)}</a>`
+        ).join('');
+    } catch(e) { console.error(e); }
+}
+
+async function loadCronTasks() {
+    try {
+        const d = await api('/dashboard/api/cron-runs');
+        const el = document.getElementById('cronTaskList');
+        if (!d.tasks || d.tasks.length === 0) { el.innerHTML = '<div class="no-data">暂无定时推送任务</div>'; return; }
+        const statusBadge = {ok: 'badge-ok', warn: 'badge-warn', error: 'badge-error', idle: 'badge-idle'};
+        const statusText = {ok: '✅', warn: '⚠️', error: '❌', idle: '⏳'};
+        el.innerHTML = '<table class="cron-table"><thead><tr><th>任务</th><th>时间</th><th>渠道</th><th>状态</th></tr></thead><tbody>' +
+            d.tasks.map(t => {
+                const badge = statusBadge[t.status_type] || 'badge-idle';
+                const icon = statusText[t.status_type] || '⏳';
+                const today_tag = t.is_today ? ' <span class="cron-today">今日</span>' : '';
+                return `<tr>
+                    <td>${escHtml(t.name)}${today_tag}</td>
+                    <td>${t.schedule}</td>
+                    <td>${t.channel_icon} ${t.channel}</td>
+                    <td><span class="cron-badge ${badge}">${icon} ${t.status}</span></td>
+                </tr>`;
+            }).join('') + '</tbody></table>';
+    } catch(e) { console.error(e); }
+}
+
+async function loadHeartbeat() {
+    try {
+        const d = await api('/dashboard/api/heartbeat-status');
+        const el = document.getElementById('hbList');
+        const count = d.count || 0;
+        document.getElementById('hbCount').textContent = count > 0 ? `今日 ${count} 次` : '';
+        if (!d.heartbeats || d.heartbeats.length === 0) {
+            el.innerHTML = '<div class="no-data">暂无心跳记录</div>';
+            return;
+        }
+        el.innerHTML = d.heartbeats.map(t => `<span class="hb-dot">●</span><span class="hb-time">${t}</span>`).join('');
+    } catch(e) { console.error(e); }
+}
+
+async function loadWorkData() {
+    try {
+        const d = await api('/dashboard/api/work-data');
+        document.getElementById('wdSsdFree').textContent = d.ssd_free_gb + 'G';
+        document.getElementById('wdSsdInfo').textContent = `已用 ${d.ssd_used_gb}G / ${d.ssd_total_gb}G`;
+        document.getElementById('wdPhoto').textContent = d.photo_count || 0;
+        document.getElementById('wdBookTotal').textContent = d.book_total || 0;
+        document.getElementById('wdBookIndexed').textContent = d.book_indexed || 0;
+    } catch(e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════
+// CALENDAR
+// ═══════════════════════════════════════
+let calYear, calMonth;
+
+async function loadCalendarOverview() {
+    const now = new Date();
+    calYear = now.getFullYear();
+    calMonth = now.getMonth() + 1;
+    try {
+        const d = await api(`/dashboard/api/publish/calendar?year=${calYear}&month=${calMonth}`);
+        calDaysInMonth = d.days_in_month || 30;
+        calData = {};
+        (d.tasks || []).forEach(t => { if (!calData[t.day]) calData[t.day] = []; calData[t.day].push(t); });
+        renderCalGrid('calGrid');
+        renderCalGrid('calGrid2');
+    } catch(e) { console.error(e); }
+}
+
+function renderCalGrid(gridId) {
+    const grid = document.getElementById(gridId);
+    if (!grid) return;
+    grid.innerHTML = '';
+    const firstDay = new Date(calYear, calMonth - 1, 1).getDay();
+    const startOffset = firstDay === 0 ? 6 : firstDay - 1;
+    const lastMonthDays = new Date(calYear, calMonth - 1, 0).getDate();
+    const today = new Date();
+    const todayDay = today.getDate();
+
+    for (let i = startOffset - 1; i >= 0; i--) {
+        grid.innerHTML += `<div class="cal-day other-month"><span class="day-num">${lastMonthDays - i}</span></div>`;
+    }
+    for (let day = 1; day <= calDaysInMonth; day++) {
+        const tasks = calData[day] || [];
+        const isToday = day === todayDay;
+        let dots = '';
+        if (tasks.length > 0) {
+            const statuses = [...new Set(tasks.map(t => t.status))].slice(0, 3);
+            dots = `<div class="dots">${statuses.map(s =>
+                `<span class="dot dot-${s === 'success' ? 'success' : s === 'missed' ? 'missed' : 'pending'}"></span>`
+            ).join('')}</div>`;
+        }
+        grid.innerHTML += `<div class="cal-day ${isToday ? 'today' : ''}" data-day="${day}" onclick="selectDay(${day})">
+            <span class="day-num">${day}</span>${dots}</div>`;
+    }
+    const filled = startOffset + calDaysInMonth;
+    for (let i = 1; i <= 42 - filled; i++) {
+        grid.innerHTML += `<div class="cal-day other-month"><span class="day-num">${i}</span></div>`;
+    }
+}
+
+function selectDay(day) {
+    document.querySelectorAll('.cal-day').forEach(el => el.classList.remove('selected'));
+    document.querySelectorAll(`.cal-day[data-day="${day}"]`).forEach(el => el.classList.add('selected'));
+    document.getElementById('closeDetail').style.display = '';
+    const tasks = calData[day] || [];
+    document.getElementById('detailTitle').textContent = `${calYear}年${calMonth}月${day}日`;
+    if (tasks.length === 0) {
+        document.getElementById('detailBody').innerHTML = '<div class="day-empty">无发布任务</div>';
+        return;
+    }
+    document.getElementById('detailBody').innerHTML = tasks.map(t => {
+        const color = t.status === 'success' ? '#07c160' : t.status === 'missed' ? '#ef4444' : '#f59e0b';
+        const statusText = t.status === 'success' ? '✓ 已发布' : t.status === 'missed' ? '✗ 漏发' : '○ 待发布';
+        const time = t.timestamp ? new Date(t.timestamp).toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'}) : '-';
+        const btn = t.status !== 'success'
+            ? `<button class="mark-btn" onclick="markPub('${escHtml(t.account)}', ${day})">✓ 标记已发布</button>`
+            : '';
+        return `<div class="day-task">
+            <span class="day-task-dot" style="background:${color}"></span>
+            <span class="day-task-name">${escHtml(t.account)}</span>
+            <span class="day-task-meta">${statusText} ${time}</span>
+            ${btn}
+        </div>`;
+    }).join('');
+}
+
+async function markPub(account, day) {
+    if (!confirm(`确认将「${account}」标记为已发布？`)) return;
+    try {
+        await fetch('/dashboard/api/publish/log', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ account, status: 'success', note: `手动标记 ${calYear}-${String(calMonth).padStart(2,'0')}-${String(day).padStart(2,'0')}` })
+        });
+        if (calData[day]) calData[day].forEach(t => { if (t.account === account) { t.status = 'success'; t.timestamp = new Date().toISOString(); }});
+        selectDay(day);
+    } catch(e) { alert('标记失败: ' + e.message); }
+}
+
+function closeDetail() {
+    document.querySelectorAll('.cal-day').forEach(el => el.classList.remove('selected'));
+    document.getElementById('detailTitle').textContent = '点击日期查看';
+    document.getElementById('detailBody').innerHTML = '<div class="day-empty">点击左侧日历上的日期<br>查看当天发布任务并标记</div>';
+    document.getElementById('closeDetail').style.display = 'none';
+}
+
+// ═══════════════════════════════════════
+// USAGE TAB
+// ═══════════════════════════════════════
+async function loadUsage() {
+    await Promise.all([loadUsageStats(), loadUsageBar(), loadUsageSys()]);
+}
+
+async function loadUsageStats() {
+    try {
+        const [d, dDaily, dSess, dWin] = await Promise.all([
+            api('/dashboard/api/stats?period=month'),
+            api('/dashboard/api/stats-daily'),
+            api('/dashboard/api/sessions'),
+            api('/dashboard/api/stats?period=day')
+        ]);
+        const remaining = 600 - (dWin.window_calls || 0);
+        const pct = Math.round(remaining / 600 * 100);
+        const winEl = document.getElementById('usageWindow');
+        winEl.textContent = remaining + '/600';
+        winEl.className = 'stat-value ' + (pct > 50 ? 'green' : pct > 20 ? 'amber' : 'red');
+
+        document.getElementById('usageTotal').textContent = d.total_calls || 0;
+        document.getElementById('usageRange').textContent = d.range ? d.range.start + ' 起' : '-';
+
+        const days = (dDaily.daily || []).filter(dd => dd.total > 0).length || 1;
+        document.getElementById('usageAvg').textContent = Math.round((d.total_calls || 0) / days);
+        document.getElementById('usageTokens').textContent = remaining + '';
+        document.getElementById('usageSessions').textContent = (dSess.sessions || []).filter(s => s.status === 'active').length;
+
+        const sources = Object.entries(d.by_source || {});
+        renderPieChart(sources);
+        document.getElementById('sourceLegend').innerHTML = sources.map(([s, c], i) =>
+            `<div class="source-item"><span class="source-dot" style="background:${SOURCE_COLORS[i%SOURCE_COLORS.length]}"></span>${escHtml(s)} (${c})</div>`
+        ).join('');
+    } catch(e) { console.error(e); }
+}
+
+function renderPieChart(data) {
+    const el = document.getElementById('chartPie');
+    el.innerHTML = '';
+    if (!data || data.length === 0) { el.innerHTML = '<div class="no-data">暂无数据</div>'; return; }
+    const w = el.clientWidth || 300, h = 200;
+    const r = Math.min(w, h) / 2 - 25;
+    const svg = d3.select(el).append('svg').attr('viewBox', `0 0 ${w} ${h}`);
+    const g = svg.append('g').attr('transform', `translate(${w/2},${h/2})`);
+    const pie = d3.pie().value(d => d[1]).sort(null);
+    const arc = d3.arc().innerRadius(r * 0.55).outerRadius(r);
+    const total = data.reduce((s, d) => s + d[1], 0);
+    g.selectAll('path').data(pie(data)).join('path')
+        .attr('d', arc).attr('fill', (d, i) => SOURCE_COLORS[i % SOURCE_COLORS.length]).attr('opacity', 0.9)
+        .append('title').text(d => `${d.data[0]}: ${d.data[1]} (${(d.data[1]/total*100).toFixed(0)}%)`);
+}
+
+async function loadUsageBar() {
+    try {
+        const d = await api('/dashboard/api/stats-daily');
+        renderBarChart(d.daily || []);
+    } catch(e) { console.error(e); }
+}
+
+function renderBarChart(data) {
+    const el = document.getElementById('chartBar');
+    el.innerHTML = '';
+    if (!data || data.length === 0) { el.innerHTML = '<div class="no-data">暂无数据</div>'; return; }
+    const w = el.clientWidth || 400, h = 200;
+    const m = { top: 10, right: 10, bottom: 30, left: 35 };
+    const iw = w - m.left - m.right, ih = h - m.top - m.bottom;
+    const svg = d3.select(el).append('svg').attr('viewBox', `0 0 ${w} ${h}`);
+    const g = svg.append('g').attr('transform', `translate(${m.left},${m.top})`);
+    const x = d3.scaleBand().domain(data.map(d => d.date.slice(5))).range([0, iw]).padding(0.2);
+    const y = d3.scaleLinear().domain([0, d3.max(data, d => d.total) || 1]).nice().range([ih, 0]);
+    g.append('g').call(d3.axisLeft(y).tickSize(-iw)).selectAll('line').attr('stroke', '#f1f3f5');
+    g.select('.domain').remove();
+    g.selectAll('rect').data(data).join('rect')
+        .attr('x', d => x(d.date.slice(5))).attr('y', d => y(d.total))
+        .attr('width', x.bandwidth()).attr('height', d => ih - y(d.total))
+        .attr('fill', '#07c160').attr('rx', 3)
+        .append('title').text(d => `${d.date}: ${d.total}次`);
+    const xa = g.append('g').attr('transform', `translate(0,${ih})`).call(d3.axisBottom(x).tickValues(data.filter((_, i) => i % 5 === 0).map(d => d.date.slice(5))));
+    xa.selectAll('text').attr('fill', '#8f959e').attr('font-size', '10px');
+    xa.select('.domain').remove();
+}
+
+async function loadUsageSys() {
+    try {
+        const d = await api('/dashboard/api/system');
+        const el = document.getElementById('sysList');
+        el.innerHTML = (d.items || []).map(item => `
+            <div class="sys-item">
+                <span class="sys-name">${escHtml(item.name)}</span>
+                <span class="sys-val ${item.status}">${item.status === 'ok' ? '✓ ' + item.message : item.message}</span>
+            </div>`).join('');
+    } catch(e) { console.error(e); }
+}
+
+// ═══════════════════════════════════════
+// SESSIONS TAB
+// ═══════════════════════════════════════
+async function loadSessions() {
+    try {
+        const [dSess, dWin] = await Promise.all([
+            api('/dashboard/api/sessions'),
+            api('/dashboard/api/stats?period=day')
+        ]);
+        const sess = dSess.sessions || [];
+        const active = sess.filter(s => s.status === 'active').length;
+        const running = sess.filter(s => s.status === 'running').length;
+        const idle = sess.length - active - running;
+        document.getElementById('sessTotal').textContent = sess.length;
+        document.getElementById('sessActive').textContent = active;
+        document.getElementById('sessRunning').textContent = running;
+        document.getElementById('sessIdle').textContent = idle;
+        const remaining = 600 - (dWin.window_calls || 0);
+        document.getElementById('sessWindow').textContent = remaining + '/600';
+
+        const el = document.getElementById('sessionList');
+        if (sess.length === 0) { el.innerHTML = '<div class="no-data">暂无会话</div>'; }
+        else {
+            el.innerHTML = sess.map(s => {
+                const dot = s.status === 'active' ? 'dot-active' : s.status === 'running' ? 'dot-running' : 'dot-idle';
+                const label = s.status === 'active' ? '工作中' : s.status === 'running' ? '执行中' : '空闲';
+                return `<div class="session-item">
+                    <span class="session-dot ${dot}"></span>
+                    <span class="session-name">${escHtml(s.label || s.session_key || '未知')}</span>
+                    <span class="session-meta">${label} · ${s.last_active || '-'}</span>
+                </div>`;
+            }).join('');
+        }
+    } catch(e) { console.error(e); }
+}
+
+// ── Util ──
+function escHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Init ──
+loadOverview();
+setInterval(() => {
+    const activeTab = document.querySelector('.page-tab.active');
+    if (activeTab && activeTab.id === 'tab-overview') loadOverview();
+}, 60000);
+</script>
+
+<!-- 记忆文件阅读弹层 -->
+<div id="memoryViewer" class="viewer-overlay" style="display:none" onclick="if(event.target===this)closeMemoryViewer()">
+    <div class="viewer-box">
+        <div class="viewer-header">
+            <span class="viewer-title" id="viewerFileName">-</span>
+            <button class="viewer-close" onclick="closeMemoryViewer()">×</button>
+        </div>
+        <div class="viewer-body" id="viewerContent"></div>
+    </div>
+</div>
+</body>
+</html>
