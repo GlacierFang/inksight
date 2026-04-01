@@ -13,23 +13,36 @@
 ## 一、现状分析
 
 现有 Dashboard（Flask，端口 18794）功能：
+
+**✅ 已完成功能：**
 - ✅ Cron 任务执行状态（当日）
 - ✅ API 调用统计（分 source）
 - ✅ 系统状态（Gallery、cron、磁盘空间）
 - ✅ 自媒体发布日历
-- ✅ P0/Cron 可靠性 + Agent 活跃度（2026-04-01 完成）
-- ✅ P1/SQLite 历史积累 + Cron 趋势图（2026-04-01 完成）
-- ✅ P2/用量拆分（主会话/定时任务/飞书/微信）（2026-04-01 完成）
-- ❌ Usage 页柱状图和饼图从未渲染
-- ❌ Sessions 页数据真实性存疑
+- ✅ P0/Cron 可靠性 + Agent 活跃度
+- ✅ P1/SQLite 历史积累 + Cron 趋势图
+- ✅ P2/用量拆分（主会话/定时任务/飞书/微信）
+- ✅ **Session Context Pressure（上下文占用）**
+- ✅ **Session 类型分类（Cron/Main/飞书/微信）**
+- ✅ **Cron nextRunAt + due/late 健康状态**
+- ✅ **Connector Status（数据源连接状态）**
+- ✅ **Healthz 系统健康状态**
+- ✅ **Burn Rate 基于 Token Plan 真实配额**
+- ✅ **磁盘空间细分（Gallery/Library/工作空间）**
+- ✅ **pubCount null 错误修复**
+
+**⚠️ 待处理：**
+- ❌ Usage 页柱状图和饼图从未渲染（历史遗留，前端图表库问题）
 - ❌ 发布日历标记后端持久化未验证
 - ❌ 深入分析模块逻辑问题（列出所有任务，无意义）
 - ❌ 记忆状态模块 999天前 bug
-- ❌ 无 Context Pressure（上下文压力）概念
-- ❌ 无 Burn Rate 预算预测
-- ❌ 无 Session 类型分类（Cron/Discord/Telegram/Main）
-- ❌ 无数据源连接状态（connected/partial/not_connected）
-- ❌ 无 Sparkline / Trend Badge 可视化
+
+**💡 新发现：**
+- Token Plan API：`GET https://www.minimaxi.com/v1/api/openplatform/coding_plan/remains`
+  - M2.7 配额数据完全可信（5h窗口 1500次，本周 15000次）
+  - speech-hd/image-01 的 interval 与后台「自然日」口径不一致，仅供参考
+- OpenClaw 版本：2026.3.28
+- API Key 存储：`~/.openclaw/agents/main/agent/auth-profiles.json`
 
 ---
 
@@ -373,13 +386,37 @@ function classifySessionType(sessionKey: string): "Cron" | "Discord" | "Telegram
 
 | 事项 | 状态 | 备注 |
 |------|------|------|
-| Usage 页柱状图渲染 | ❓ | 之前一直没渲染 |
-| Usage 页饼图渲染 | ❓ | 之前一直没渲染 |
-| Sessions 页数据真实性 | ❓ | gateway 18789 连接是否正常 |
-| 发布日历标记持久化 | ❓ | publish-log.json 是否正确写入 |
-| 深入分析模块逻辑 | ❌ | 列出所有任务，无意义，应只展示今日正在分析的任务 |
-| 记忆状态 999天前 bug | ❌ | 日期计算明显错误 |
-| 系统状态模块数据编造 | ❌ | Token 窗口数据无意义，待删除或重构 |
+| Usage 页柱状图渲染 | ❓ | 前端图表库问题，需排查 ECharts/Chart.js |
+| Usage 页饼图渲染 | ❓ | 同上 |
+| Sessions 页数据真实性 | ✅ 已验证 | gateway 18789 连接正常，数据可信 |
+| 发布日历标记持久化 | ❓ 待验证 | publish-log.json 已实现但未验证 |
+| 深入分析模块逻辑 | ❌ 待处理 | 列出所有任务无意义，应只展示今日正在分析的任务 |
+| 记忆状态 999天前 bug | ❌ 待处理 | 日期计算明显错误 |
+| 系统状态数据编造 | ✅ 已重构 | 替换为真实 healthz API（2026-04-01）|
+
+---
+
+## 四.2 2026-04-01 今日完成
+
+**API 新增：**
+- `GET /api/token-plan` — MiniMax Token Plan 真实配额（从 MiniMax API 实时读取）
+- `GET /api/connector-status` — 5大数据源连接状态（Cron/Sessions/TokenPlan/历史趋势）
+- `GET /api/healthz` — 系统健康状态（Gateway/Cron/Dashboard/Gallery/Library）
+- `GET /api/disk-space` — 磁盘空间细分（Gallery/Library/工作空间）
+
+**API 增强：**
+- `/api/session-context` — 新增 `session_type` 分类（main/cron/feishu/wechat）
+- `/api/cron-reliability` — 新增 `next_run_at` + `due_in_seconds` + `health` 字段
+- `/api/burn-rate` — 完全重写，基于 Token Plan 真实配额计算
+
+**前端增强：**
+- Overview 页新增：健康状态条（⚫️数据过期 vs 🔴系统异常区分）
+- Overview 页新增：💾 磁盘空间细分面板
+- Sessions Tab 新增：🧠 上下文占用面板（含类型分布统计）
+- Sessions Tab 新增：会话类型彩色标签（主/定时/飞书/微信）
+- Cron 面板增强：健康状态标签 + 下次执行时间
+- Usage Tab 新增：🔥 Burn Rate Token Plan 配额面板
+- 修复：pubCount null 错误导致 loadPublish 崩溃
 
 ---
 
