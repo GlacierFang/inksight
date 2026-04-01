@@ -56,7 +56,6 @@
         .btn-green { background: #27ae60; }
         .btn-red { background: #e74c3c; }
         .btn-gray { background: #555; }
-        .btn-ai { background: #7b2ff7; }
         .btn:hover { opacity: 0.9; }
         .actions { display: flex; gap: 10px; margin-top: 20px; padding-top: 20px; border-top: 1px solid #333; }
         .toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #27ae60; padding: 12px 24px; border-radius: 8px; font-size: 14px; z-index: 500; display: none; }
@@ -104,7 +103,6 @@
             </div>
 
             <div class="actions">
-                <button class="btn btn-ai" onclick="toAIWorks()">🎨 AI 风格转换</button>
                 <button class="btn btn-red" onclick="deletePhoto()">🗑️ 删除</button>
             </div>
         </div>
@@ -226,13 +224,7 @@
         }
     }
 
-    // ============== AI 风格 ==============
-    function toAIWorks() {
-        if (!photoData) return;
-        // photoData.filename is like "2026-04-01/uuid.jpg"
-        window.location.href = '/gallery/ai-works?photo=' + encodeURIComponent(photoData.filename);
-    }
-
+    // ============== 删除)
     // ============== 删除 ==============
     async function deletePhoto() {
         if (!confirm('确定删除这张照片？此操作不可恢复。')) return;
