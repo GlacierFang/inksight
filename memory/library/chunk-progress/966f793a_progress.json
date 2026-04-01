@@ -1,0 +1,12 @@
+{
+  "doc_id": "966f793a",
+  "doc_name": "我是猫.pdf",
+  "total_chunks": 210,
+  "completed_chunks": 6,
+  "processed_indices": [
+    5
+  ],
+  "status": "processing",
+  "started_at": "2026-03-31T13:13:19.530613",
+  "last_updated": "2026-03-31T13:14:57.247489"
+}

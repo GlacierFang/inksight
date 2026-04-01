@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenClaw Media Source Watcher
+After=network.target
+
+[Service]
+Type=simple
+User=open
+ExecStart=/usr/bin/python3 /home/open/.openclaw/workspace/skills/gallery/media-watcher.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

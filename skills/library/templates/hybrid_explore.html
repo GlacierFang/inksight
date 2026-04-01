@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>知识探索 - 电子书库</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1419; color: #e7e9ea; min-height: 100vh; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        
+        /* Header */
+        header { display: flex; align-items: center; margin-bottom: 28px; gap: 12px; }
+        .back-link { color: #8b949e; text-decoration: none; font-size: 14px; }
+        .back-link:hover { color: #e7e9ea; }
+        header h1 { font-size: 20px; color: #e7e9ea; }
+        
+        /* 导航 */
+        .nav { display: flex; gap: 8px; margin-bottom: 24px; }
+        .nav a { padding: 8px 16px; background: #1c2128; border-radius: 8px; color: #8b949e; text-decoration: none; font-size: 14px; }
+        .nav a.active { background: #07c160; color: #fff; }
+        
+        /* 搜索框 */
+        .search-box { background: #1c2128; border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+        .search-box h2 { font-size: 15px; color: #8b949e; margin-bottom: 12px; }
+        .input-row { display: flex; gap: 10px; }
+        #queryInput { flex: 1; padding: 14px 16px; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; color: #e7e9ea; font-size: 15px; outline: none; }
+        #queryInput:focus { border-color: #07c160; }
+        #queryInput::placeholder { color: #484f58; }
+        .btn { padding: 12px 28px; background: #07c160; border: none; border-radius: 8px; color: #fff; font-size: 14px; cursor: pointer; }
+        .btn:hover { background: #06a555; }
+        .btn:disabled { background: #1c3d2a; color: #4a7a5e; cursor: not-allowed; }
+        
+        /* 状态 */
+        .status { color: #8b949e; font-size: 13px; margin-top: 10px; }
+        
+        /* 结果区 */
+        .results { display: none; }
+        .results-header { display: flex; gap: 16px; margin-bottom: 16px; }
+        .results-header span { background: #1c2128; padding: 6px 14px; border-radius: 20px; font-size: 13px; color: #8b949e; }
+        .results-header span strong { color: #e7e9ea; }
+        
+        /* 两栏布局 */
+        .results-grid { display: grid; grid-template-columns: 1fr 340px; gap: 20px; align-items: start; }
+        
+        /* 知识卡片 */
+        .cards-section h3 { font-size: 14px; color: #8b949e; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+        .cards-list { display: flex; flex-direction: column; gap: 12px; }
+        .card { background: #1c2128; border-radius: 10px; padding: 16px; border-left: 3px solid #238636; }
+        .card-book { color: #58a6ff; font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+        .card-concepts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+        .concept-tag { background: #1c2d1e; color: #3fb950; border-radius: 4px; padding: 2px 8px; font-size: 12px; }
+        .card-summary { color: #e7e9ea; font-size: 14px; line-height: 1.6; margin-bottom: 8px; }
+        .card-text { color: #8b949e; font-size: 13px; line-height: 1.5; }
+        
+        /* 照片 */
+        .photos-section h3 { font-size: 14px; color: #8b949e; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+        .photos-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .photo-item { background: #1c2128; border-radius: 8px; overflow: hidden; cursor: pointer; transition: transform 0.2s; }
+        .photo-item:hover { transform: scale(1.02); }
+        .photo-item img { width: 100%; height: 120px; object-fit: cover; display: block; }
+        .photo-caption { padding: 8px; }
+        .photo-tag { color: #58a6ff; font-size: 12px; margin-bottom: 2px; }
+        .photo-desc { color: #8b949e; font-size: 11px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        
+        /* 空白状态 */
+        .empty-section { text-align: center; padding: 40px 20px; color: #484f58; font-size: 14px; background: #1c2128; border-radius: 10px; }
+        
+        /* 加载 */
+        .loading { text-align: center; padding: 40px; color: #8b949e; }
+        .loading::after { content: '...'; animation: dots 1.5s infinite; }
+        @keyframes dots { 0%,20%{content:'.'} 40%{content:'..'} 60%,100%{content:'...'} }
+        
+        /* 错误 */
+        .error-msg { background: #3d1d1d; border: 1px solid #f85149; border-radius: 8px; padding: 16px; color: #f85149; font-size: 14px; }
+        
+        /* 弹窗 */
+        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 1000; justify-content: center; align-items: center; }
+        .modal.active { display: flex; }
+        .modal img { max-width: 90%; max-height: 90%; object-fit: contain; border-radius: 4px; }
+        .modal-close { position: absolute; top: 16px; right: 16px; color: #fff; font-size: 28px; cursor: pointer; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.1); border-radius: 50%; }
+        .modal-close:hover { background: rgba(255,255,255,0.2); }
+        
+        /* 示例快捷词 */
+        .examples { margin-top: 12px; }
+        .examples-label { font-size: 12px; color: #484f58; margin-right: 8px; }
+        .example-tag { display: inline-block; background: #1c2128; border: 1px solid #30363d; border-radius: 20px; padding: 5px 12px; color: #8b949e; font-size: 13px; cursor: pointer; margin-right: 6px; }
+        .example-tag:hover { border-color: #07c160; color: #07c160; }
+        
+        /* 响应式 */
+        @media (max-width: 800px) {
+            .results-grid { grid-template-columns: 1fr; }
+            .photos-grid { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (max-width: 500px) {
+            .photos-grid { grid-template-columns: 1fr 1fr; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <a href="/library/" class="back-link">← 电子书库</a>
+        <h1>🔍 知识探索</h1>
+    </header>
+    
+    <div class="nav">
+        <a href="/library/" class="">📚 资料库</a>
+        <a href="/library/hybrid" class="active">🔍 知识探索</a>
+        <a href="/library/explore">📊 专题探究</a>
+        <a href="/library/network">🕸️ 知识网络</a>
+    </div>
+    
+    <div class="search-box">
+        <h2>输入探索主题</h2>
+        <div class="input-row">
+            <input type="text" id="queryInput" placeholder="例如：北宋皇陵、丰子恺、石刻艺术..." onkeydown="if(event.key==='Enter')doSearch()">
+            <button class="btn" id="searchBtn" onclick="doSearch()">探索</button>
+        </div>
+        <div class="examples">
+            <span class="examples-label">试试：</span>
+            <span class="example-tag" onclick="quickSearch('北宋皇陵')">北宋皇陵</span>
+            <span class="example-tag" onclick="quickSearch('宋代石刻')">宋代石刻</span>
+            <span class="example-tag" onclick="quickSearch('丰子恺')">丰子恺</span>
+            <span class="example-tag" onclick="quickSearch('北宋政治')">北宋政治</span>
+        </div>
+        <div class="status" id="status"></div>
+    </div>
+    
+    <div class="results" id="results">
+        <div class="results-header">
+            <span>📚 知识卡片 <strong id="cardsCount">0</strong> 条</span>
+            <span>🖼️ 相关照片 <strong id="photosCount">0</strong> 张</span>
+        </div>
+        <div class="results-grid">
+            <!-- 左侧：知识卡片 -->
+            <div class="cards-section">
+                <h3>📚 知识卡片</h3>
+                <div class="cards-list" id="cardsList"></div>
+            </div>
+            <!-- 右侧：照片 -->
+            <div class="photos-section">
+                <h3>🖼️ 相关照片</h3>
+                <div class="photos-grid" id="photosGrid"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="loading" class="loading" style="display:none">正在检索中</div>
+    <div id="error" class="error-msg" style="display:none"></div>
+</div>
+
+<!-- 图片放大弹窗 -->
+<div class="modal" id="imgModal" onclick="closeModal()">
+    <span class="modal-close">&times;</span>
+    <img id="modalImg" src="">
+</div>
+
+<script>
+function $(id) { return document.getElementById(id); }
+
+async function doSearch() {
+    const q = $('queryInput').value.trim();
+    if (!q) return;
+    
+    $('results').style.display = 'none';
+    $('error').style.display = 'none';
+    $('loading').style.display = 'block';
+    $('searchBtn').disabled = true;
+    $('status').textContent = '';
+
+    try {
+        const res = await fetch('/library/api/hybrid/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: q })
+        });
+        const data = await res.json();
+
+        $('loading').style.display = 'none';
+        $('searchBtn').disabled = false;
+
+        if (data.error) {
+            $('error').textContent = data.error;
+            $('error').style.display = 'block';
+            return;
+        }
+
+        $('cardsCount').textContent = data.cards_count;
+        $('photosCount').textContent = data.photos_count;
+        
+        // 渲染知识卡片
+        const cardsList = $('cardsList');
+        if (data.cards && data.cards.length > 0) {
+            cardsList.innerHTML = data.cards.map(card => `
+                <div class="card">
+                    <div class="card-book">📖 ${card.book_name} 第${card.chunk_idx + 1}节</div>
+                    <div class="card-concepts">
+                        ${(card.key_concepts || []).map(c => `<span class="concept-tag">${c}</span>`).join('')}
+                    </div>
+                    <div class="card-summary">${card.summary || ''}</div>
+                    <div class="card-text">${card.text || ''}</div>
+                </div>
+            `).join('');
+        } else {
+            cardsList.innerHTML = '<div class="empty-section">暂无相关知识卡片</div>';
+        }
+
+        // 渲染照片
+        const photosGrid = $('photosGrid');
+        if (data.photos && data.photos.length > 0) {
+            photosGrid.innerHTML = data.photos.map(photo => `
+                <div class="photo-item" onclick="showPhoto('/library/photo/${photo.filepath}')">
+                    <img src="/library/photo/${photo.filepath}" alt="${photo.tag}">
+                    <div class="photo-caption">
+                        <div class="photo-tag">#${photo.tag}</div>
+                        <div class="photo-desc">${photo.ai_desc || photo.tag}</div>
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            photosGrid.innerHTML = '<div class="empty-section" style="grid-column:1/-1">暂无相关照片</div>';
+        }
+
+        $('results').style.display = 'block';
+    } catch(e) {
+        $('loading').style.display = 'none';
+        $('searchBtn').disabled = false;
+        $('error').textContent = '请求失败：' + e.message;
+        $('error').style.display = 'block';
+    }
+}
+
+function quickSearch(q) {
+    $('queryInput').value = q;
+    doSearch();
+}
+
+function showPhoto(url) {
+    $('modalImg').src = url;
+    $('imgModal').classList.add('active');
+}
+
+function closeModal() {
+    $('imgModal').classList.remove('active');
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeModal();
+});
+</script>
+</body>
+</html>

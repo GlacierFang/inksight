@@ -1,0 +1,11 @@
+[Unit]
+Description=OpenClaw AI Tagger Timer - 每10分钟检查新照片
+After=network.target
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

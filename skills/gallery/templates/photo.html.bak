@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>照片详情 - OpenClaw</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a1a; color: #fff; min-height: 100vh; }
+        a { color: #07c160; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        header { background: #2d2d2d; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
+        .back-btn { color: #fff; background: #3d3d3d; padding: 8px 16px; border-radius: 6px; font-size: 14px; }
+        .back-btn:hover { text-decoration: none; background: #4d4d4d; }
+        .photo-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .photo-viewer { text-align: center; margin-bottom: 20px; }
+        .photo-viewer img { max-width: 100%; max-height: 75vh; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+        .photo-viewer video { max-width: 100%; max-height: 75vh; border-radius: 8px; }
+        .nav-bar { display: flex; justify-content: space-between; align-items: center; padding: 15px 0; border-top: 1px solid #333; border-bottom: 1px solid #333; margin-bottom: 20px; }
+        .nav-btn { background: #3d3d3d; padding: 8px 16px; border-radius: 6px; color: #fff; cursor: pointer; border: none; font-size: 14px; }
+        .nav-btn:hover { background: #4d4d4d; }
+        .nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .photo-info { background: #2d2d2d; border-radius: 8px; padding: 20px; }
+        .info-row { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 15px; font-size: 14px; }
+        .info-item { display: flex; align-items: center; gap: 8px; }
+        .info-label { color: #888; }
+        .info-value { color: #fff; }
+        .source-badge { padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+        .source-feishu { background: #1677ff; }
+        .source-weixin { background: #07c160; }
+        .source-网页 { background: #ff6b00; }
+        .source-飞书 { background: #1677ff; }
+        .section-title { font-size: 16px; font-weight: 600; margin: 20px 0 10px; color: #fff; }
+        .tags-container { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 15px; }
+        .tag { display: inline-block; padding: 4px 10px; background: #3d3d3d; border-radius: 4px; font-size: 13px; }
+        .tag-remove { color: #e74c3c; margin-left: 5px; cursor: pointer; }
+        .tag-input-wrap { display: flex; gap: 8px; margin-top: 10px; }
+        .tag-input { flex: 1; padding: 8px 12px; background: #3d3d3d; border: 1px solid #555; border-radius: 6px; color: #fff; font-size: 14px; }
+        .btn { padding: 8px 16px; border: none; border-radius: 6px; color: #fff; font-size: 14px; cursor: pointer; }
+        .btn-green { background: #27ae60; }
+        .btn-red { background: #e74c3c; }
+        .btn-gray { background: #555; }
+        .btn:hover { opacity: 0.9; }
+        .actions { display: flex; gap: 10px; margin-top: 20px; padding-top: 20px; border-top: 1px solid #333; }
+        .toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #27ae60; padding: 12px 24px; border-radius: 8px; font-size: 14px; z-index: 500; display: none; }
+        .toast.error { background: #e74c3c; }
+    </style>
+</head>
+<body>
+    <header>
+        <a href="/gallery" class="back-btn">← 返回相册</a>
+        <span style="color:#888; font-size:14px;">OpenClaw 相册</span>
+    </header>
+
+    <div class="photo-container">
+        <div class="photo-viewer" id="photoViewer"></div>
+
+        <div class="nav-bar">
+            <a id="prevBtn" class="nav-btn" href="#">← 上一张</a>
+            <span id="navInfo" style="color:#888; font-size:14px;"></span>
+            <a id="nextBtn" class="nav-btn" href="#">下一张 →</a>
+        </div>
+
+        <div class="photo-info">
+            <div class="info-row">
+                <div class="info-item">
+                    <span class="info-label">日期：</span>
+                    <span class="info-value" id="infoDate">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">来源：</span>
+                    <span class="source-badge" id="infoSource">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">文件名：</span>
+                    <span class="info-value" id="infoFilename" style="font-size:12px; color:#888;"></span>
+                </div>
+            </div>
+
+            <div class="section-title">🏷️ 标签</div>
+            <div class="tags-container" id="tagsContainer"></div>
+            <div class="tag-input-wrap">
+                <input type="text" class="tag-input" id="tagInput" placeholder="输入标签后按回车添加" onkeydown="if(event.key==='Enter')addTag()">
+                <button class="btn btn-green" onclick="addTag()">添加</button>
+            </div>
+
+            <div class="actions">
+                <button class="btn btn-red" onclick="deletePhoto()">🗑️ 删除</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+    // ============== 数据 ==============
+    let photoData = null;
+    let tags = [];
+
+    // ============== 初始化 ==============
+    async function init() {
+        const pathParts = window.location.pathname.split('/');
+        // /gallery/photo/filename 或 /gallery/video/filename
+        const typeIdx = pathParts.indexOf('photo') !== -1 ? pathParts.indexOf('photo') : pathParts.indexOf('video');
+        const filename = decodeURIComponent(pathParts.slice(typeIdx + 1).join('/'));
+
+        const res = await fetch('/gallery/api/photo/' + encodeURIComponent(filename));
+        if (!res.ok) { document.getElementById('photoViewer').innerHTML = '<p style="color:#e74c3c;">照片不存在或已被删除</p>'; return; }
+        photoData = await res.json();
+        tags = photoData.tags || [];
+
+        renderViewer();
+        renderInfo();
+        renderTags();
+        renderNav();
+    }
+
+    function renderViewer() {
+        const viewer = document.getElementById('photoViewer');
+        if (photoData.type === 'video') {
+            viewer.innerHTML = `<video src="${photoData.path}" controls autoplay style="max-width:100%; max-height:75vh;"></video>`;
+        } else {
+            viewer.innerHTML = `<img src="${photoData.path}" alt="${photoData.name}">`;
+        }
+    }
+
+    function getSourceClass(source) {
+        const map = { '飞书': 'source-feishu', '微信': 'source-weixin', '网页': 'source-网页' };
+        return map[source] || '';
+    }
+
+    function renderInfo() {
+        document.getElementById('infoDate').textContent = photoData.date;
+        document.getElementById('infoFilename').textContent = photoData.name;
+        const sourceEl = document.getElementById('infoSource');
+        sourceEl.textContent = photoData.source || '未知';
+        sourceEl.className = 'source-badge ' + getSourceClass(photoData.source);
+        document.title = photoData.name + ' - OpenClaw 相册';
+    }
+
+    function renderTags() {
+        const container = document.getElementById('tagsContainer');
+        container.innerHTML = tags.map(t =>
+            `<span class="tag">🏷️ ${t}<span class="tag-remove" onclick="removeTag('${t}')"> ×</span></span>`
+        ).join('');
+        if (!tags.length) container.innerHTML = '<span style="color:#555; font-size:13px;">暂无标签</span>';
+    }
+
+    function renderNav() {
+        const prevBtn = document.getElementById('prevBtn');
+        const nextBtn = document.getElementById('nextBtn');
+        if (photoData.prev) {
+            prevBtn.href = '/gallery/photo/' + photoData.prev;
+            prevBtn.style.visibility = 'visible';
+        } else {
+            prevBtn.href = '#';
+            prevBtn.style.visibility = 'hidden';
+        }
+        if (photoData.next) {
+            nextBtn.href = '/gallery/photo/' + photoData.next;
+            nextBtn.style.visibility = 'visible';
+        } else {
+            nextBtn.href = '#';
+            nextBtn.style.visibility = 'hidden';
+        }
+        document.getElementById('navInfo').textContent = photoData.name;
+    }
+
+    // ============== 标签操作 ==============
+    async function addTag() {
+        const input = document.getElementById('tagInput');
+        const tag = input.value.trim();
+        if (!tag || tags.includes(tag)) { input.value = ''; return; }
+        tags.push(tag);
+        await saveTags();
+        input.value = '';
+    }
+
+    async function removeTag(tag) {
+        tags = tags.filter(t => t !== tag);
+        await saveTags();
+    }
+
+    async function saveTags() {
+        const res = await fetch('/gallery/api/photo-tags/' + encodeURIComponent(photoData.name), {
+            method: 'PUT', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ tags })
+        });
+        if (res.ok) {
+            renderTags();
+            showToast('保存成功');
+        } else {
+            showToast('保存失败', true);
+        }
+    }
+
+    // ============== 删除 ==============
+    async function deletePhoto() {
+        if (!confirm('确定删除这张照片？此操作不可恢复。')) return;
+        const res = await fetch('/gallery/api/delete/' + encodeURIComponent(photoData.name), { method: 'DELETE' });
+        if (res.ok) {
+            showToast('已删除');
+            setTimeout(() => {
+                if (photoData.next) window.location.href = '/gallery/photo/' + photoData.next;
+                else window.location.href = '/gallery';
+            }, 1000);
+        } else {
+            showToast('删除失败', true);
+        }
+    }
+
+    // ============== 工具 ==============
+    function showToast(msg, isError = false) {
+        const toast = document.getElementById('toast');
+        toast.textContent = msg;
+        toast.className = 'toast' + (isError ? ' error' : '');
+        toast.style.display = 'block';
+        setTimeout(() => toast.style.display = 'none', 2000);
+    }
+
+    // ============== 键盘导航 ==============
+    document.addEventListener('keydown', e => {
+        if (e.target.tagName === 'INPUT') return;
+        if (e.key === 'ArrowLeft' && photoData?.prev) window.location.href = '/gallery/photo/' + photoData.prev;
+        if (e.key === 'ArrowRight' && photoData?.next) window.location.href = '/gallery/photo/' + photoData.next;
+        if (e.key === 'Escape') window.location.href = '/gallery';
+    });
+
+    init();
+    </script>
+</body>
+</html>

@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🎨 AI作品 - OpenClaw 相册</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #0d0d0d; --card: #1a1a1a; --border: #2d2d2d;
+  --text: #e0e0e0; --sub: #888; --accent: #07c160;
+}
+body.light {
+  --bg: #f5f5f5; --card: #fff; --border: #e0e0e0;
+  --text: #333; --sub: #888; --accent: #07c160;
+}
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  min-height: 100vh;
+}
+.header {
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  padding: 16px 24px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.header-content {
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.header h1 { font-size: 20px; font-weight: 700; }
+.back-btn {
+  background: var(--border);
+  border: none;
+  color: var(--text);
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  text-decoration: none;
+}
+.back-btn:hover { background: #3d3d3d; }
+main { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
+.info-bar {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+  font-size: 14px;
+  color: var(--sub);
+}
+.info-bar span { color: var(--accent); font-weight: 600; }
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+}
+.work-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.work-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+}
+.work-card img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  display: block;
+}
+.work-meta {
+  padding: 12px 16px;
+  font-size: 13px;
+}
+.work-style {
+  color: var(--accent);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.work-date { color: var(--sub); font-size: 12px; }
+.work-original { color: var(--sub); font-size: 12px; margin-top: 4px; }
+.empty {
+  text-align: center;
+  padding: 80px 0;
+  color: var(--sub);
+  font-size: 16px;
+}
+.empty-icon { font-size: 48px; margin-bottom: 16px; }
+.loading { text-align: center; padding: 60px 0; color: var(--sub); font-size: 14px; }
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  z-index: 200;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.modal-overlay.active { display: flex; }
+.modal {
+  background: var(--card);
+  border-radius: 16px;
+  max-width: 900px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 24px;
+}
+.modal h2 { font-size: 18px; margin-bottom: 16px; }
+.modal-close {
+  float: right;
+  background: none;
+  border: none;
+  color: var(--sub);
+  font-size: 24px;
+  cursor: pointer;
+  line-height: 1;
+}
+.preview-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.preview-grid img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.preview-grid .arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  color: var(--accent);
+}
+.styles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.style-btn {
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: center;
+  transition: all 0.2s;
+}
+.style-btn:hover { border-color: var(--accent); }
+.style-btn.selected { border-color: var(--accent); background: rgba(7,193,96,0.1); color: var(--accent); }
+.style-btn .style-name { font-weight: 600; margin-bottom: 2px; }
+.style-btn .style-en { font-size: 11px; color: var(--sub); }
+.generate-btn {
+  width: 100%;
+  padding: 14px;
+  background: var(--accent);
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.generate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.result-img {
+  width: 100%;
+  border-radius: 12px;
+  margin-bottom: 12px;
+}
+.result-actions {
+  display: flex;
+  gap: 10px;
+}
+.result-actions a, .result-actions button {
+  flex: 1;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 14px;
+  text-align: center;
+  cursor: pointer;
+  text-decoration: none;
+}
+.download-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+}
+.feishu-btn {
+  background: var(--border);
+  color: var(--text);
+  border: none;
+}
+.lightbox {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.9);
+  z-index: 300;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+.lightbox.active { display: flex; }
+.lightbox img { max-width: 90vw; max-height: 90vh; border-radius: 8px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-content">
+    <h1>🎨 AI作品集</h1>
+    <a href="/gallery/" class="back-btn">← 返回相册</a>
+  </div>
+</div>
+
+<main>
+  <div class="info-bar">
+    📅 每日 50 张 AI 图片额度 · 风格转换不会消耗标签队列 · <a href="/gallery/" style="color:var(--accent)">去上传新照片 →</a>
+  </div>
+
+  <div id="workList">
+    <div class="loading">加载中...</div>
+  </div>
+</main>
+
+<!-- 风格选择弹窗 -->
+<div class="modal-overlay" id="styleModal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>🎨 选择风格</h2>
+
+    <div class="preview-grid">
+      <div>
+        <img id="originalImg" src="" alt="原图">
+        <div style="text-align:center;font-size:12px;color:var(--sub);margin-top:6px;">原图</div>
+      </div>
+      <div class="arrow">→</div>
+      <div>
+        <img id="previewResult" src="" alt="效果图" style="opacity:0.3">
+        <div style="text-align:center;font-size:12px;color:var(--sub);margin-top:6px;">效果图</div>
+      </div>
+    </div>
+
+    <div class="styles-grid" id="stylesGrid"></div>
+
+    <button class="generate-btn" id="generateBtn" onclick="generate()">🎨 生成 AI 作品</button>
+  </div>
+</div>
+
+<!-- 生成结果弹窗 -->
+<div class="modal-overlay" id="resultModal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeResultModal()">×</button>
+    <h2>✅ AI 作品已生成</h2>
+    <img class="result-img" id="resultImg" src="" alt="AI作品">
+    <div class="result-actions">
+      <a class="download-btn" id="downloadLink" href="" download>⬇️ 下载</a>
+      <button class="feishu-btn" id="feishuBtn" onclick="sendToFeishu()">📤 发送到飞书</button>
+    </div>
+  </div>
+</div>
+
+<!-- 大图预览 -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <img id="lightboxImg" src="" alt="">
+</div>
+
+<script>
+// 状态
+let works = [];
+let styles = [];
+let selectedStyle = null;
+let currentPhoto = null;
+let generating = false;
+let currentResultFilename = null;
+
+// 加载 AI 作品
+async function loadWorks() {
+  const r = await fetch('/gallery/api/ai-works');
+  const d = await r.json();
+  works = d.works || [];
+  renderWorks();
+}
+
+function renderWorks() {
+  const el = document.getElementById('workList');
+  if (!works.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🎨</div>还没有 AI 作品<br><br><a href="/gallery/" style="color:var(--accent)">去相册选照片生成 →</a></div>`;
+    return;
+  }
+  el.innerHTML = `<div class="gallery">${works.map(w => `
+    <div class="work-card" onclick="openLightbox('${w.url}')">
+      <img src="${w.thumb_url || w.url}" alt="${w.style_name}" loading="lazy">
+      <div class="work-meta">
+        <div class="work-style">${w.style_name || '未知风格'}</div>
+        <div class="work-date">${fmtDate(w.generated_at)}</div>
+        ${w.original ? `<div class="work-original">📷 ${w.original}</div>` : ''}
+      </div>
+    </div>
+  `).join('')}</div>`;
+}
+
+// 加载风格列表
+async function loadStyles() {
+  const r = await fetch('/gallery/api/ai-styles');
+  const d = await r.json();
+  styles = d.styles || [];
+  renderStyles();
+}
+
+function renderStyles() {
+  const grid = document.getElementById('stylesGrid');
+  grid.innerHTML = styles.map(s => `
+    <button class="style-btn" onclick="selectStyle('${s.id}')">
+      <div class="style-name">${s.name}</div>
+      <div class="style-en">${s.prompt.substring(0, 30)}...</div>
+    </button>
+  `).join('');
+}
+
+function selectStyle(id) {
+  selectedStyle = styles.find(s => s.id === id);
+  document.querySelectorAll('.style-btn').forEach(b => b.classList.remove('selected'));
+  event.currentTarget.classList.add('selected');
+  document.getElementById('generateBtn').disabled = false;
+}
+
+// 打开风格选择弹窗（从相册页面传入参数）
+const params = new URLSearchParams(window.location.search);
+const photoParam = params.get('photo');
+const styleParam = params.get('style');
+
+async function init() {
+  await loadStyles();
+  await loadWorks();
+
+  if (photoParam) {
+    currentPhoto = { filename: photoParam };
+    document.getElementById('originalImg').src = `/gallery/media/photo/${photoParam}`;
+    openModal();
+  }
+}
+
+// 弹窗控制
+function openModal() {
+  document.getElementById('styleModal').classList.add('active');
+  document.getElementById('previewResult').style.opacity = '0.3';
+  document.getElementById('generateBtn').disabled = true;
+  selectedStyle = null;
+}
+
+function closeModal() {
+  document.getElementById('styleModal').classList.remove('active');
+}
+
+function openResultModal(imgUrl, filename) {
+  currentResultFilename = filename;
+  document.getElementById('resultImg').src = imgUrl;
+  document.getElementById('downloadLink').href = imgUrl;
+  document.getElementById('resultModal').classList.add('active');
+}
+
+function closeResultModal() {
+  document.getElementById('resultModal').classList.remove('active');
+  // 刷新作品列表
+  loadWorks();
+}
+
+function openLightbox(url) {
+  document.getElementById('lightboxImg').src = url;
+  document.getElementById('lightbox').classList.add('active');
+}
+
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('active');
+}
+
+// 生成
+async function generate() {
+  if (!selectedStyle || !currentPhoto || generating) return;
+  const btn = document.getElementById('generateBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ 生成中...';
+  generating = true;
+
+  try {
+    const r = await fetch('/gallery/api/ai-generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        photo_filename: currentPhoto.filename,
+        style_id: selectedStyle.id,
+        style_name: selectedStyle.name,
+        style_prompt: selectedStyle.prompt,
+      }),
+    });
+    const d = await r.json();
+    if (d.error) {
+      alert('生成失败: ' + d.error);
+    } else {
+      closeModal();
+      openResultModal(d.url, d.filename);
+    }
+  } catch(e) {
+    alert('生成失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🎨 生成 AI 作品';
+    generating = false;
+  }
+}
+
+// 发送到飞书（需要先实现）
+async function sendToFeishu() {
+  if (!currentResultFilename) return;
+  const btn = document.getElementById('feishuBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ 发送中...';
+  try {
+    const r = await fetch('/gallery/api/ai-send-feishu', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: currentResultFilename }),
+    });
+    const d = await r.json();
+    if (d.success) {
+      btn.textContent = '✅ 已发送';
+    } else {
+      btn.textContent = '📤 发送到飞书';
+      alert('发送失败: ' + (d.error || '未知错误'));
+    }
+  } catch(e) {
+    btn.textContent = '📤 发送到飞书';
+    alert('发送失败: ' + e.message);
+  }
+  btn.disabled = false;
+}
+
+function fmtDate(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  return `${d.getMonth()+1}月${d.getDate()}日 ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeModal(); closeResultModal(); closeLightbox(); }
+});
+
+init();
+</script>
+</body>
+</html>
