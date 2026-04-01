@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>专题探究 - 电子书库</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1419; color: #e7e9ea; min-height: 100vh; }
+        .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+        header { display: flex; align-items: center; margin-bottom: 24px; padding: 16px; background: #1c2128; border-radius: 12px; }
+        header h1 { font-size: 20px; color: #e7e9ea; }
+        .back-link { color: #8b949e; text-decoration: none; font-size: 14px; margin-right: 16px; }
+        .back-link:hover { color: #e7e9ea; }
+        .search-box { margin-bottom: 24px; }
+        .search-box h2 { font-size: 16px; color: #8b949e; margin-bottom: 12px; }
+        .input-row { display: flex; gap: 10px; }
+        #queryInput { flex: 1; padding: 14px 16px; background: #1c2128; border: 1px solid #30363d; border-radius: 8px; color: #e7e9ea; font-size: 15px; outline: none; }
+        #queryInput:focus { border-color: #58a6ff; }
+        #queryInput::placeholder { color: #484f58; }
+        .btn { padding: 12px 24px; background: #238636; border: none; border-radius: 8px; color: #fff; font-size: 14px; cursor: pointer; transition: background 0.2s; }
+        .btn:hover { background: #2ea043; }
+        .btn:disabled { background: #1c2128; color: #484f58; cursor: not-allowed; }
+        .status { color: #8b949e; font-size: 13px; margin-top: 8px; }
+        .result { margin-top: 24px; }
+        .result-meta { display: flex; gap: 16px; margin-bottom: 16px; font-size: 13px; color: #8b949e; }
+        .result-meta span { background: #1c2128; padding: 6px 12px; border-radius: 20px; }
+        .answer { background: #1c2128; border-radius: 12px; padding: 24px; line-height: 1.8; font-size: 15px; white-space: pre-wrap; }
+        .answer p { margin-bottom: 12px; }
+        .sources { margin-top: 24px; }
+        .sources h3 { font-size: 14px; color: #8b949e; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+        .source-item { background: #1c2128; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; border-left: 3px solid #238636; }
+        .source-book { color: #58a6ff; font-size: 13px; font-weight: 500; margin-bottom: 4px; }
+        .source-excerpt { color: #8b949e; font-size: 13px; line-height: 1.5; }
+        .error { background: #3d1d1d; border: 1px solid #f85149; border-radius: 8px; padding: 16px; color: #f85149; }
+        .loading { text-align: center; padding: 40px; color: #8b949e; }
+        .loading::after { content: '...'; animation: dots 1.5s infinite; }
+        @keyframes dots { 0%,20%{content:'.'} 40%{content:'..'} 60%,100%{content:'...'} }
+        .examples { margin-top: 32px; }
+        .examples h3 { font-size: 14px; color: #8b949e; margin-bottom: 12px; }
+        .example-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+        .example-tag { background: #1c2128; border: 1px solid #30363d; border-radius: 20px; padding: 8px 14px; color: #8b949e; font-size: 13px; cursor: pointer; transition: all 0.2s; }
+        .example-tag:hover { border-color: #58a6ff; color: #58a6ff; }
+        .books-used { margin-bottom: 16px; }
+        .book-badge { display: inline-block; background: #1c2128; border: 1px solid #30363d; border-radius: 6px; padding: 4px 10px; font-size: 12px; color: #58a6ff; margin-right: 8px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <a href="/library/" class="back-link">← 返回书库</a>
+        <h1>🔍 专题探究</h1>
+        <a href="/library/explore/history" class="back-link" style="margin-left:auto;">📜 查看历史</a>
+    </header>
+
+    <div class="search-box">
+        <h2>输入你想探究的历史问题</h2>
+        <div class="input-row">
+            <input type="text" id="queryInput" placeholder="例如：宋代城市生活、宋代经济发展、宋代文化繁荣" />
+            <button class="btn" id="searchBtn" onclick="doSearch()">探究</button>
+        </div>
+        <div class="status" id="statusBar"></div>
+    </div>
+
+    <div id="resultArea"></div>
+
+    <div class="examples">
+        <h3>试试这些问题</h3>
+        <div class="example-tags">
+            <span class="example-tag" onclick="useExample('宋代城市生活')">宋代城市生活</span>
+            <span class="example-tag" onclick="useExample('宋代经济发展')">宋代经济发展</span>
+            <span class="example-tag" onclick="useExample('宋代文化繁荣')">宋代文化繁荣</span>
+            <span class="example-tag" onclick="useExample('宋代社会阶层')">宋代社会阶层</span>
+            <span class="example-tag" onclick="useExample('宋代对外交流')">宋代对外交流</span>
+            <span class="example-tag" onclick="useExample('宋代科技成就')">宋代科技成就</span>
+        </div>
+    </div>
+</div>
+
+<script>
+let searching = false;
+
+async function doSearch() {
+    if (searching) return;
+    const query = document.getElementById('queryInput').value.trim();
+    if (!query) return;
+
+    const btn = document.getElementById('searchBtn');
+    const status = document.getElementById('statusBar');
+    const resultArea = document.getElementById('resultArea');
+
+    btn.disabled = true;
+    searching = true;
+    status.textContent = '正在检索知识库...';
+    resultArea.innerHTML = '<div class="loading">正在综合分析</div>';
+
+    try {
+        const res = await fetch('/library/api/explore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query }),
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+            resultArea.innerHTML = `<div class="error">错误: ${data.error || '请求失败'}</div>`;
+            status.textContent = '';
+            return;
+        }
+
+        // 渲染结果
+        const bookBadges = data.books.map(b =>
+            `<span class="book-badge">${b.name}</span>`
+        ).join('');
+
+        let sourcesHtml = '';
+        if (data.sources && data.sources.length > 0) {
+            const sourceItems = data.sources.map(s => `
+                <div class="source-item">
+                    <div class="source-book">📖 ${s.book}</div>
+                    <div class="source-excerpt">${escapeHtml(s.excerpt || s.text || '')}</div>
+                </div>
+            `).join('');
+            sourcesHtml = `
+                <div class="sources">
+                    <h3>参考资料（共 ${data.sources.length} 条）</h3>
+                    ${sourceItems}
+                </div>
+            `;
+        }
+
+        resultArea.innerHTML = `
+            <div class="result">
+                <div class="books-used" style="margin-bottom:12px;">${bookBadges || ''}</div>
+                <div class="result-meta">
+                    <span>📚 ${data.books_count || 0} 本书</span>
+                    <span>🔍 ${data.chunks_count || 0} 个相关片段</span>
+                </div>
+                <div class="answer">${formatAnswer(data.answer || '（无内容）')}</div>
+                ${sourcesHtml}
+            </div>
+        `;
+        status.textContent = `已完成，找到 ${data.books_count} 本相关书籍`;
+
+    } catch (e) {
+        resultArea.innerHTML = `<div class="error">请求失败: ${e.message}</div>`;
+        status.textContent = '';
+    } finally {
+        btn.disabled = false;
+        searching = false;
+    }
+}
+
+function useExample(query) {
+    document.getElementById('queryInput').value = query;
+    doSearch();
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function formatAnswer(text) {
+    // 简单处理：把换行转换成 <br>，处理 **bold**
+    return text
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n/g, '<br>');
+}
+
+// 回车触发展开
+document.getElementById('queryInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doSearch();
+});
+</script>
+</body>
+</html>

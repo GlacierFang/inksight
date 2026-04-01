@@ -1,0 +1,369 @@
+#!/usr/bin/env python3
+"""
+生成参观记录的本地 HTML 备份
+与飞书文档同步生成，双重保险
+"""
+
+import json
+from pathlib import Path
+from datetime import datetime
+
+DOCS_DIR = Path("/home/open/.openclaw/workspace/memory/visit-docs")
+PHOTOS_BASE = Path("/home/open/.openclaw/openclaw_safe_storage/.openclaw/media/photos")
+
+def generate_html_doc(tag, photos_data, background_info, feishu_doc_url=None, known_tags=None):
+    """
+    生成 HTML 备份文档
+    
+    Args:
+        tag: 标签（如"永昌陵"）
+        photos_data: 照片信息列表 [{id, path, desc, source, date}]
+        background_info: 背景资料文本
+        feishu_doc_url: 飞书文档URL（可选）
+        known_tags: 已知标签库（可选，用于获取标签描述）
+    """
+    DOCS_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # 生成安全的文件名
+    safe_tag = tag.replace('/', '_').replace('\\', '_').replace(' ', '_')
+    html_path = DOCS_DIR / f"{safe_tag}.html"
+    
+    # 准备照片 HTML
+    photos_html = ""
+    for photo in photos_data:
+        photo_path = photo.get('path', '')
+        photo_desc = photo.get('desc', '')
+        photo_source = photo.get('source', '')
+        photo_date = photo.get('date', '')
+        
+        # 获取相对路径
+        rel_path = ""
+        for base in [PHOTOS_BASE, Path("/home/open/.openclaw/media/photos")]:
+            try:
+                rel_path = str(Path(photo_path).relative_to(base))
+                break
+            except:
+                pass
+        
+        photos_html += f"""
+        <div class="photo-item">
+            <div class="photo-img">
+                <img src="/visit/photo/{rel_path}" alt="{photo_desc}" onclick="showFull('/visit/photo/{rel_path}')">
+            </div>
+            <div class="photo-info">
+                <div class="photo-desc">{photo_desc}</div>
+                <div class="photo-meta">
+                    <span class="source">来源：{photo_source}</span>
+                    <span class="date">日期：{photo_date}</span>
+                </div>
+            </div>
+        </div>
+        """
+    
+    if not photos_html:
+        photos_html = "<div class='empty'>暂无照片记录</div>"
+    
+    # 生成时间
+    gen_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # 飞书链接
+    if feishu_doc_url:
+        feishu_link = f'<a href="{feishu_doc_url}" target="_blank" class="feishu-link" style="background:#07c160;margin-left:10px">🔗 飞书原文档</a>'
+    else:
+        feishu_link = ""
+    
+    # HTML 模板
+    html_content = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{tag} - 参观记录</title>
+    <style>
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{
+            background: #0f1117;
+            color: #e0e3e8;
+            font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+            min-height: 100vh;
+            padding: 20px;
+            line-height: 1.6;
+        }}
+        .header {{
+            background: linear-gradient(135deg, #1a1d27 0%, #141720 100%);
+            border-bottom: 1px solid #2a2d3a;
+            padding: 20px 32px;
+            margin: -20px -20px 30px -20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }}
+        .header-icon {{ font-size: 24px; }}
+        .header h1 {{ font-size: 18px; font-weight: 600; flex: 1; }}
+        .container {{ max-width: 900px; margin: 0 auto; }}
+        .section {{
+            background: #1a1d27;
+            border: 1px solid #2a2d3a;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }}
+        .section-title {{
+            font-size: 14px;
+            color: #5b8def;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+        .info-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 12px;
+        }}
+        .info-item {{
+            background: #141720;
+            padding: 12px 16px;
+            border-radius: 8px;
+        }}
+        .info-label {{
+            font-size: 12px;
+            color: #6b7280;
+            margin-bottom: 4px;
+        }}
+        .info-value {{
+            font-size: 14px;
+            color: #fff;
+        }}
+        .tag-list {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }}
+        .tag {{
+            background: #1a2332;
+            border: 1px solid #2a3a5c;
+            color: #5b8def;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+        }}
+        .photo-item {{
+            background: #141720;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+            display: flex;
+            gap: 16px;
+        }}
+        .photo-img {{
+            width: 120px;
+            height: 120px;
+            flex-shrink: 0;
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+        }}
+        .photo-img img {{
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }}
+        .photo-info {{
+            flex: 1;
+        }}
+        .photo-desc {{
+            color: #e0e3e8;
+            margin-bottom: 8px;
+        }}
+        .photo-meta {{
+            font-size: 12px;
+            color: #6b7280;
+            display: flex;
+            gap: 16px;
+        }}
+        .background-text {{
+            color: #d1d5db;
+            line-height: 1.8;
+        }}
+        .background-text p {{
+            margin-bottom: 12px;
+        }}
+        .feishu-link {{
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #5b8def;
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 14px;
+        }}
+        .feishu-link:hover {{
+            background: #4a7cd8;
+        }}
+        .gen-time {{
+            text-align: center;
+            color: #6b7280;
+            font-size: 12px;
+            margin-top: 20px;
+        }}
+        .empty {{
+            text-align: center;
+            color: #6b7280;
+            padding: 40px;
+        }}
+        .back-link {{
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: #5b8def;
+            text-decoration: none;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }}
+        .back-link:hover {{
+            text-decoration: underline;
+        }}
+        /* 图片放大弹窗 */
+        .modal {{
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.9);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }}
+        .modal.active {{
+            display: flex;
+        }}
+        .modal img {{
+            max-width: 90%;
+            max-height: 90%;
+            object-fit: contain;
+        }}
+        .modal-close {{
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: #fff;
+            font-size: 30px;
+            cursor: pointer;
+        }}
+        @media (max-width: 600px) {{
+            .photo-item {{
+                flex-direction: column;
+            }}
+            .photo-img {{
+                width: 100%;
+                height: 200px;
+            }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <span class="header-icon">📚</span>
+        <h1>{tag} - 参观记录</h1>
+    </div>
+    
+    <div class="container">
+        <a href="/visit/" class="back-link">← 返回列表</a>
+        
+        <div class="section">
+            <div class="section-title">📋 基本信息</div>
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label">标签</div>
+                    <div class="info-value">
+                        <div class="tag-list">
+                            <span class="tag">{tag}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">照片数量</div>
+                    <div class="info-value">{len(photos_data)} 张</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">参观时间</div>
+                    <div class="info-value">{datetime.now().strftime('%Y-%m-%d')}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">本地备份</div>
+                    <div class="info-value">✅ 已保存</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <div class="section-title">📷 照片记录</div>
+            {photos_html}
+        </div>
+        
+        <div class="section">
+            <div class="section-title">📖 背景资料</div>
+            <div class="background-text">
+                {background_info}
+            </div>
+        </div>
+        
+        <div class="section">
+            <div class="section-title">🔗 相关链接</div>
+            <a href="/visit/" class="feishu-link">📄 查看所有本地备份</a>
+            {feishu_link}
+        </div>
+        
+        <div class="gen-time">
+            本地备份生成时间：{gen_time}
+        </div>
+    </div>
+    
+    <!-- 图片放大弹窗 -->
+    <div class="modal" id="imgModal" onclick="closeModal()">
+        <span class="modal-close">&times;</span>
+        <img id="modalImg" src="">
+    </div>
+    
+    <script>
+        function showFull(src) {{
+            document.getElementById('modalImg').src = src;
+            document.getElementById('imgModal').classList.add('active');
+        }}
+        function closeModal() {{
+            document.getElementById('imgModal').classList.remove('active');
+        }}
+        document.addEventListener('keydown', function(e) {{
+            if (e.key === 'Escape') closeModal();
+        }});
+    </script>
+</body>
+</html>"""
+    
+    # 写入文件
+    with open(html_path, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+    
+    return str(html_path)
+
+
+if __name__ == "__main__":
+    # 测试
+    result = generate_html_doc(
+        tag="永昌陵",
+        photos_data=[
+            {
+                'path': '/home/open/.openclaw/openclaw_safe_storage/.openclaw/media/photos/2026-03-29/xxx.jpg',
+                'desc': '永昌陵石刻艺术',
+                'source': '飞书',
+                'date': '2026-03-29'
+            }
+        ],
+        background_info="<p>永昌陵是宋太祖赵匡胤的陵墓...</p>"
+    )
+    print(f"HTML 文档已生成: {result}")

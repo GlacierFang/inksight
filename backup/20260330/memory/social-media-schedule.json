@@ -1,0 +1,23 @@
+{
+  "accounts": [
+    {
+      "name": "AI视频内容创作",
+      "intervalDays": 3,
+      "lastUpdate": "2026-03-27",
+      "nextUpdate": "2026-03-30"
+    },
+    {
+      "name": "AI发展个人思考",
+      "intervalDays": 4,
+      "lastUpdate": "2026-03-28",
+      "nextUpdate": "2026-04-01"
+    },
+    {
+      "name": "手工制作视频",
+      "intervalDays": 2,
+      "lastUpdate": "2026-03-29",
+      "nextUpdate": "2026-03-31"
+    }
+  ],
+  "updatedAt": "2026-03-29"
+}

@@ -1,0 +1,14 @@
+[Unit]
+Description=OpenClaw Media Gallery
+After=network.target
+
+[Service]
+Type=simple
+User=open
+WorkingDirectory=/home/open/.openclaw/workspace/skills/gallery
+ExecStart=/usr/bin/python3 /home/open/.openclaw/workspace/skills/gallery/app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>书籍详情 - 个人电子书库</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f0f; color: #fff; min-height: 100vh; }
+        .container { max-width: 800px; margin: 0 auto; padding: 20px; }
+        .header { display: flex; align-items: center; gap: 12px; padding: 20px 0; border-bottom: 1px solid #222; margin-bottom: 24px; }
+        .back-btn { background: #2d2d2d; border: none; color: #fff; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+        .back-btn:hover { background: #3d3d3d; }
+        h1 { font-size: 20px; font-weight: 600; }
+        .book-info { background: #1a1a1a; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
+        .info-row { display: flex; gap: 24px; margin-bottom: 16px; flex-wrap: wrap; }
+        .info-item { flex: 1; min-width: 150px; }
+        .info-label { font-size: 12px; color: #666; margin-bottom: 4px; }
+        .info-value { font-size: 14px; }
+        .book-name { font-size: 18px; font-weight: 600; margin-bottom: 16px; }
+        .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+        .tag { padding: 4px 10px; background: #2d2d2d; border-radius: 6px; font-size: 12px; color: #aaa; }
+        .preview { background: #1a1a1a; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+        .section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: #888; }
+        .preview-text { font-size: 14px; line-height: 1.8; color: #aaa; white-space: pre-wrap; max-height: 200px; overflow: hidden; }
+        .preview-toggle { color: #07c160; cursor: pointer; font-size: 13px; margin-top: 8px; display: inline-block; }
+        .actions { display: flex; gap: 12px; margin-bottom: 20px; }
+        .action-btn { flex: 1; padding: 12px; border-radius: 10px; border: none; font-size: 14px; cursor: pointer; font-weight: 500; text-align: center; }
+        .action-btn.primary { background: #07c160; color: #fff; }
+        .action-btn.secondary { background: #2d2d2d; color: #aaa; }
+        .action-btn:hover:not(:disabled) { opacity: 0.9; }
+        .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .chunk-section { background: #1a1a1a; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+        .chunk-status { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .status-dot.pending { background: #666; }
+        .status-dot.processing { background: #f39c12; animation: pulse 1s infinite; }
+        .status-dot.ready { background: #07c160; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .knowledge-ready { color: #07c160; font-size: 14px; }
+        .loading { text-align: center; padding: 40px; color: #666; }
+        .error { color: #e74c3c; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <button class="back-btn" onclick="location.href='/library/'">← 返回</button>
+            <h1>📖 书籍详情</h1>
+        </div>
+
+        <div id="content">
+            <div class="loading">加载中...</div>
+        </div>
+    </div>
+
+    <script>
+        const bookId = window.location.pathname.split('/').pop();
+
+        async function loadBook() {
+            const res = await fetch(`/library/api/book/${bookId}`);
+            window.bookData = await res.json();
+            const data = window.bookData;
+            currentTags = data.tags || [];
+            if (data.error) {
+                document.getElementById('content').innerHTML = `<div class="error">${data.error}</div>`;
+                return;
+            }
+
+            const chunkLabels = {
+                'pending': '待深度检索',
+                'processing': '处理中...',
+                'ready': '知识库已就绪',
+                'error': '处理失败'
+            };
+
+            let html = `
+                <div class="book-info">
+                    <div class="book-name">${data.original_name}</div>
+                    <div class="info-row">
+                        <div class="info-item">
+                            <div class="info-label">格式</div>
+                            <div class="info-value">${data.format_icon} ${data.format.toUpperCase()}</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">大小</div>
+                            <div class="info-value">${data.size_mb} MB</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">上传日期</div>
+                            <div class="info-value">${data.uploaded_at}</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">分类</div>
+                            <div class="info-value">${data.category}</div>
+                        </div>
+                    </div>
+                    ${data.tags.length > 0 ? `<div class="tags" id="tagList">${data.tags.map(t => `<span class="tag"><span onclick="removeTag('${t}')" style="cursor:pointer;margin-right:4px;">×</span>${t}</span>`).join('')}</div>` : ''}
+                    <div class="tag-edit" style="margin-top:8px;display:flex;gap:6px;">
+                        <input type="text" id="newTagInput" placeholder="添加标签..." style="flex:1;background:#2d2d2d;border:1px solid #444;color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;" onkeydown="if(event.key==='Enter')addTag()">
+                        <button onclick="addTag()" style="padding:6px 12px;background:#3d3d3d;border:none;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;">+ 添加</button>
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <button class="action-btn primary" onclick="readBook()">📖 阅读</button>
+                    <button class="action-btn secondary" onclick="window.location.href='/library/file/${data.id}'">📥 下载</button>
+                    ${(data.status === 'uploaded' || (data.status === 'classified' && data.tags && data.tags.length === 0)) ? `<button class="action-btn primary" id="classifyBtn" onclick="triggerClassify()">🔖 打标签</button>` : ''}
+                    ${data.status === 'classifying' ? `<button class="action-btn secondary" id="classifyBtn" disabled>处理中...</button>` : ''}
+                    <button class="action-btn secondary" onclick="deleteBook()">🗑️ 删除</button>
+                </div>
+
+                <div class="chunk-section">
+                    <div class="chunk-status">
+                        <span class="status-dot ${data.chunk_status}"></span>
+                        <span>${chunkLabels[data.chunk_status] || data.chunk_status}</span>
+                    </div>
+                    ${data.chunk_status === 'pending' ? `<button class="action-btn primary" id="chunkBtn" onclick="triggerChunk()">🔍 深度检索（生成知识库）</button>` : ''}
+                    ${data.chunk_status === 'processing' ? `<button class="action-btn secondary" id="chunkBtn" disabled>处理中，请稍候...</button>` : ''}
+                    ${data.chunk_status === 'ready' ? `<div class="knowledge-ready">✓ 知识库已就绪，可直接提问</div>
+                        <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+                            <button class="action-btn secondary" onclick="exportBook('md')">📥 导出笔记(MD)</button>
+                            <button class="action-btn secondary" onclick="exportBook('json')">📥 导出数据(JSON)</button>
+                        </div>` : ''}
+                </div>
+            `;
+
+            if (data.preview) {
+                html += `
+                    <div class="preview">
+                        <div class="section-title">内容预览</div>
+                        <div class="preview-text" id="previewText">${data.preview}</div>
+                        <span class="preview-toggle" onclick="togglePreview()">展开全部 ↓</span>
+                    </div>
+                `;
+            }
+
+            if (data.summary) {
+                html += `
+                    <div class="preview">
+                        <div class="section-title">内容摘要</div>
+                        <div class="preview-text">${data.summary}</div>
+                    </div>
+                `;
+            }
+
+            document.getElementById('content').innerHTML = html;
+        }
+
+        function readBook() {
+            if (window.bookData && window.bookData.format === 'epub') {
+                window.location.href = `/library/reader/${bookId}`;
+            } else {
+                window.open(`/library/file/${bookId}`, '_blank');
+            }
+        }
+
+        function deleteBook() {
+            if (!confirm('确定删除这本书吗？')) return;
+            fetch(`/library/api/book/${bookId}`, { method: 'DELETE' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) location.href = '/library/';
+                });
+        }
+
+        function triggerChunk() {
+            const btn = document.getElementById('chunkBtn');
+            btn.disabled = true;
+            btn.textContent = '处理中...';
+            fetch(`/library/api/book/${bookId}/chunk`, { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        setTimeout(loadBook, 1000);
+                    }
+                });
+        }
+
+        function triggerClassify() {
+            const btn = document.getElementById('classifyBtn');
+            if (!btn) return;
+            btn.disabled = true;
+            btn.textContent = '处理中...';
+            fetch(`/library/api/book/${bookId}/classify`, { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        setTimeout(loadBook, 3000);
+                    } else if (data.error) {
+                        alert(data.error);
+                        btn.disabled = false;
+                        btn.textContent = '🔖 打标签';
+                    }
+                })
+                .catch(() => {
+                    btn.disabled = false;
+                    btn.textContent = '🔖 打标签';
+                });
+        }
+
+        async function exportBook(fmt) {
+            const url = fmt === 'md'
+                ? `/library/api/export/${bookId}`
+                : `/library/api/export/${bookId}/json`;
+            try {
+                const res = await fetch(url);
+                if (!res.ok) { alert('导出失败'); return; }
+                const blob = await res.blob();
+                const filename = res.headers.get('content-disposition')
+                    ? decodeURIComponent(res.headers.get('content-disposition').match(/filename\*?=['"]?(?:UTF-8'')?([^;\n"']+)/i)?.[1] || `${bookId}.${fmt}`)
+                    : `${bookId}.${fmt}`;
+                const objUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = objUrl;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(objUrl);
+            } catch(e) {
+                alert('导出失败：' + e.message);
+            }
+        }
+
+        let previewExpanded = false;
+        let currentTags = [];
+
+        function togglePreview() {
+            const el = document.getElementById('previewText');
+            if (previewExpanded) {
+                el.style.maxHeight = '200px';
+                el.style.overflow = 'hidden';
+                document.querySelector('.preview-toggle').textContent = '展开全部 ↓';
+            } else {
+                el.style.maxHeight = 'none';
+                el.style.overflow = 'visible';
+                document.querySelector('.preview-toggle').textContent = '收起 ↑';
+            }
+            previewExpanded = !previewExpanded;
+        }
+
+        async function addTag() {
+            const input = document.getElementById('newTagInput');
+            const newTag = input.value.trim();
+            if (!newTag) return;
+            const tags = currentTags.includes(newTag) ? currentTags : [...currentTags, newTag];
+            input.value = '';
+            await updateTags(tags);
+        }
+
+        async function removeTag(tag) {
+            const tags = currentTags.filter(t => t !== tag);
+            await updateTags(tags);
+        }
+
+        async function updateTags(tags) {
+            await fetch(`/library/api/book/${bookId}/tags`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tags })
+            });
+            currentTags = tags;
+            renderTags();
+        }
+
+        function renderTags() {
+            const container = document.getElementById('tagList') || document.querySelector('.tags');
+            if (!container) return;
+            container.innerHTML = currentTags.map(t =>
+                `<span class="tag"><span onclick="removeTag('${t}')" style="cursor:pointer;margin-right:4px;">×</span>${t}</span>`
+            ).join('');
+            // Also update or create tagList div
+            let tagList = document.getElementById('tagList');
+            if (!tagList) {
+                tagList = document.createElement('div');
+                tagList.id = 'tagList';
+                tagList.className = 'tags';
+                const tagEdit = document.querySelector('.tag-edit');
+                tagEdit.parentNode.insertBefore(tagList, tagEdit);
+            }
+            tagList.innerHTML = currentTags.map(t =>
+                `<span class="tag"><span onclick="removeTag('${t}')" style="cursor:pointer;margin-right:4px;">×</span>${t}</span>`
+            ).join('');
+        }
+
+        loadBook();
+    </script>
+</body>
+</html>

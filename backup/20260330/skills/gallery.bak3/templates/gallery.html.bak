@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenClaw 相册</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a1a; color: #fff; min-height: 100vh; }
+        header { background: #2d2d2d; padding: 20px; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 10px rgba(0,0,0,0.3); }
+        .header-content { max-width: 1400px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+        h1 { font-size: 24px; }
+        .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        select, input { padding: 8px 12px; background: #3d3d3d; border: 1px solid #555; border-radius: 6px; color: #fff; font-size: 14px; }
+        button { padding: 8px 12px; border: none; border-radius: 6px; color: #fff; font-size: 14px; cursor: pointer; }
+        .btn-upload { background: #07c160; }
+        .btn-tags { background: #9c27b0; }
+        .count { color: #888; font-size: 14px; }
+        main { max-width: 1400px; margin: 20px auto; padding: 0 20px; }
+        .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 15px; }
+        .gallery-item { position: relative; border-radius: 8px; overflow: hidden; background: #2d2d2d; cursor: pointer; transition: transform 0.2s; text-decoration: none; color: inherit; display: block; }
+        .gallery-item:hover { transform: scale(1.02); }
+        .gallery-item img, .gallery-item video { width: 100%; height: 250px; object-fit: cover; display: block; }
+        .overlay { position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,0.8)); padding: 30px 10px 10px; display: flex; justify-content: space-between; font-size: 12px; }
+        .source-badge { padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+        .source-feishu { background: #1677ff; }
+        .source-weixin { background: #07c160; }
+        .source-网页 { background: #ff6b00; }
+        .source-飞书 { background: #1677ff; }
+        .source-未知 { background: #666; }
+        .loading, .empty { text-align: center; padding: 50px; color: #888; }
+        .loading { display: flex; flex-direction: column; align-items: center; gap: 15px; }
+        .spinner { width: 40px; height: 40px; border: 4px solid #333; border-top-color: #07c160; border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .pagination { display: flex; justify-content: center; align-items: center; gap: 10px; padding: 30px 0; }
+        .pagination button { padding: 8px 16px; background: #3d3d3d; }
+        .pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+        .pagination span { color: #888; }
+        .tag { display: inline-block; padding: 2px 8px; background: #3d3d3d; border-radius: 4px; font-size: 11px; margin: 2px; }
+        footer { text-align: center; padding: 20px; color: #555; font-size: 12px; }
+        .day-cell { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; border-radius: 6px; font-size: 13px; cursor: pointer; }
+        .day-empty { }
+        .day-no-data { color: #555; cursor: default; }
+        .day-has-data { color: #fff; background: #3d3d3d; }
+        .day-has-data:hover { background: #4d4d4d; }
+        .day-today { border: 2px solid #07c160; }
+        .day-selected { background: #07c160 !important; color: #fff !important; font-weight: 600; }
+        .day-future { color: #444; cursor: not-allowed; }
+        .day-disabled { color: #333; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <h1>📷 OpenClaw 相册</h1>
+            <div class="filters">
+                <select id="typeFilter"><option value="all">全部类型</option><option value="photo">照片</option><option value="video">视频</option></select>
+                <div style="position:relative;">
+                    <div id="dateFilterBtn" onclick="toggleDatePicker()" style="padding:8px 12px; background:#3d3d3d; border:1px solid #555; border-radius:6px; color:#fff; font-size:14px; cursor:pointer; min-width:110px; display:flex; align-items:center; gap:6px; justify-content:space-between;">
+                        <span id="dateFilterLabel">全部日期</span>
+                        <span style="font-size:10px;">▼</span>
+                    </div>
+                    <div id="datePicker" style="display:none; position:absolute; top:100%; left:0; margin-top:4px; background:#2d2d2d; border:1px solid #555; border-radius:8px; padding:12px; z-index:500; box-shadow:0 8px 24px rgba(0,0,0,0.4);">
+                        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+                            <button onclick="changeMonth(-1)" style="background:#3d3d3d; border:none; color:#fff; width:28px; height:28px; border-radius:6px; cursor:pointer; font-size:14px;">‹</button>
+                            <span id="pickerMonthLabel" style="font-size:14px; font-weight:600; color:#fff; min-width:140px; text-align:center;"></span>
+                            <button onclick="changeMonth(1)" style="background:#3d3d3d; border:none; color:#fff; width:28px; height:28px; border-radius:6px; cursor:pointer; font-size:14px;">›</button>
+                        </div>
+                        <div style="display:grid; grid-template-columns:repeat(7, 1fr); gap:2px; text-align:center;">
+                            <div style="font-size:11px; color:#888; padding:4px;">一</div>
+                            <div style="font-size:11px; color:#888; padding:4px;">二</div>
+                            <div style="font-size:11px; color:#888; padding:4px;">三</div>
+                            <div style="font-size:11px; color:#888; padding:4px;">四</div>
+                            <div style="font-size:11px; color:#888; padding:4px;">五</div>
+                            <div style="font-size:11px; color:#888; padding:4px;">六</div>
+                            <div style="font-size:11px; color:#888; padding:4px;">日</div>
+                        </div>
+                        <div id="pickerDays" style="display:grid; grid-template-columns:repeat(7, 1fr); gap:2px;"></div>
+                        <div style="margin-top:8px; text-align:center;">
+                            <button onclick="clearDateFilter()" style="background:#555; border:none; color:#fff; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:12px;">清除选择</button>
+                        </div>
+                    </div>
+                </div>
+                <select id="sourceFilter"><option value="">全部来源</option></select>
+                <input type="text" id="tagSearch" placeholder="搜索标签..." autocomplete="off" style="width:140px;">
+                <button id="clearTagBtn" onclick="clearTagFilter()" style="display:none; padding:8px 10px; background:#555; border:none; border-radius:6px; color:#fff; cursor:pointer; font-size:14px;">× 清除</button>
+                <div id="tagDropdown" style="display:none; position:absolute; background:#2d2d2d; border:1px solid #555; border-radius:6px; max-height:200px; overflow-y:auto; min-width:200px; z-index:200;"></div>
+                <span class="count" id="count">共 0 项</span>
+                <button class="btn-tags" onclick="openTagManager()">🏷️ 标签管理</button>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <div class="gallery" id="gallery">
+            <div class="loading"><div class="spinner"></div>加载中...</div>
+        </div>
+        <div class="pagination" id="pagination"></div>
+    </main>
+
+    <!-- 标签管理弹窗 -->
+    <div class="modal" id="tagManagerModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:300; align-items:center; justify-content:center;">
+        <div class="modal-box" style="background:#2d2d2d; border-radius:12px; padding:24px; max-width:700px; width:95%; max-height:85vh; overflow-y:auto;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <h2>🏷️ 标签管理</h2>
+                <button onclick="closeTagManager()" style="background:#555; border:none; color:#fff; font-size:20px; cursor:pointer; width:32px; height:32px; border-radius:6px;">×</button>
+            </div>
+            <div style="display:flex; gap:10px; margin-bottom:20px; align-items:center;">
+                <input type="text" id="newTagName" placeholder="新标签名" style="flex:1; padding:10px 14px; background:#3d3d3d; border:1px solid #555; border-radius:6px; color:#fff; font-size:14px;">
+                <input type="text" id="newTagAlias" placeholder="别名（可选，逗号分隔）" style="flex:1; padding:10px 14px; background:#3d3d3d; border:1px solid #555; border-radius:6px; color:#fff; font-size:14px;">
+                <button onclick="addTag()" style="background:#27ae60; border:none; color:#fff; padding:10px 18px; border-radius:6px; cursor:pointer; font-size:14px; white-space:nowrap;">+ 添加</button>
+            </div>
+            <input type="text" id="tagManagerSearch" placeholder="搜索标签..." oninput="renderTagList(this.value)" style="width:100%; padding:10px 14px; background:#3d3d3d; border:1px solid #555; border-radius:6px; color:#fff; font-size:14px; margin-bottom:16px; box-sizing:border-box;">
+            <div id="tagList" style="display:flex; flex-direction:column; gap:8px; max-height:50vh; overflow-y:auto;"></div>
+        </div>
+    </div>
+
+    <!-- 标签编辑弹窗 -->
+    <div class="modal" id="editTagModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:400; align-items:center; justify-content:center;">
+        <div class="modal-box" style="background:#2d2d2d; border-radius:12px; padding:24px; max-width:450px; width:95%;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <h2 id="editTagTitle">编辑标签</h2>
+                <button onclick="closeEditTag()" style="background:#555; border:none; color:#fff; font-size:20px; cursor:pointer; width:32px; height:32px; border-radius:6px;">×</button>
+            </div>
+            <div style="margin-bottom:14px;">
+                <label style="font-size:13px; color:#888; display:block; margin-bottom:6px;">标签名</label>
+                <input type="text" id="editTagNameInput" style="width:100%; padding:10px 14px; background:#3d3d3d; border:1px solid #555; border-radius:6px; color:#fff; font-size:14px; box-sizing:border-box;">
+            </div>
+            <div style="margin-bottom:14px;">
+                <label style="font-size:13px; color:#888; display:block; margin-bottom:8px;">别名</label>
+                <div id="aliasTagContainer" style="display:flex; flex-wrap:wrap; gap:6px; padding:8px; background:#3d3d3d; border-radius:6px; min-height:44px; margin-bottom:8px;"></div>
+                <div style="display:flex; gap:8px;">
+                    <input type="text" id="editAliasInput" placeholder="输入别名后按回车添加" onkeydown="if(event.key==='Enter'){event.preventDefault();addAliasTag()}" style="flex:1; padding:8px 12px; background:#3d3d3d; border:1px solid #555; border-radius:6px; color:#fff; font-size:14px;">
+                    <button onclick="addAliasTag()" style="background:#27ae60; border:none; color:#fff; padding:8px 14px; border-radius:6px; cursor:pointer; font-size:13px;">添加</button>
+                </div>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+                <button onclick="closeEditTag()" style="background:#555; border:none; color:#fff; padding:10px 18px; border-radius:6px; cursor:pointer; font-size:14px;">取消</button>
+                <button onclick="saveTagEdit()" style="background:#27ae60; border:none; color:#fff; padding:10px 18px; border-radius:6px; cursor:pointer; font-size:14px;">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <footer>OpenClaw Gallery</footer>
+
+    <script>
+    // ============== 状态 ==============
+    let allTags = [];
+    let selectedTag = '';
+    let currentPage = 1;
+    let totalPages = 1;
+    let currentType = 'all';
+    let currentDate = '';
+    let currentSource = '';
+    let canonicalTags = [];
+    let availableDates = new Set();  // 有数据的日期
+    let pickerYear = new Date().getFullYear();
+    let pickerMonth = new Date().getMonth();  // 0-based
+
+    // ============== 日历选取 ==============
+    function toggleDatePicker() {
+        const picker = document.getElementById('datePicker');
+        picker.style.display = picker.style.display === 'none' ? 'block' : 'none';
+        if (picker.style.display === 'block') renderDatePicker();
+    }
+
+    function closeDatePicker(e) {
+        if (!e.target.closest('#dateFilterBtn') && !e.target.closest('#datePicker')) {
+            document.getElementById('datePicker').style.display = 'none';
+        }
+    }
+    document.addEventListener('click', closeDatePicker);
+
+    function changeMonth(delta) {
+        pickerMonth += delta;
+        if (pickerMonth < 0) { pickerMonth = 11; pickerYear--; }
+        if (pickerMonth > 11) { pickerMonth = 0; pickerYear++; }
+        renderDatePicker();
+    }
+
+    function renderDatePicker() {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const year = pickerYear;
+        const month = pickerMonth; // 0-based
+        const monthNames = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
+        document.getElementById('pickerMonthLabel').textContent = year + '年 ' + monthNames[month];
+
+        // 获取当月第一天是星期几（0=周日，转为1=周一...7=周日）
+        const firstDay = new Date(year, month, 1);
+        // weekday: 1=周一, 2=周二, ..., 7=周日
+        let weekday = firstDay.getDay();
+        if (weekday === 0) weekday = 7;
+        const startOffset = weekday - 1; // 周一作为起始
+
+        // 获取当月天数
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+        const container = document.getElementById('pickerDays');
+        let html = '';
+
+        // 空白格子
+        for (let i = 0; i < startOffset; i++) {
+            html += '<div class="day-cell day-empty"></div>';
+        }
+
+        // 日期格子
+        for (let d = 1; d <= daysInMonth; d++) {
+            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            const date = new Date(year, month, d);
+            date.setHours(0, 0, 0, 0);
+            const isFuture = date > today;
+            const hasData = availableDates.has(dateStr);
+            const isSelected = dateStr === currentDate;
+            const isToday = date.getTime() === today.getTime();
+
+            let cls = 'day-cell';
+            if (isFuture) {
+                cls += ' day-future';
+            } else if (isSelected) {
+                cls += ' day-selected' + (isToday ? ' day-today' : '');
+            } else if (hasData) {
+                cls += ' day-has-data' + (isToday ? ' day-today' : '');
+            } else {
+                cls += ' day-no-data';
+            }
+
+            html += `<div class="${cls}" ${!isFuture && hasData ? `onclick="selectDate('${dateStr}')"` : ''} title="${dateStr}">${d}</div>`;
+        }
+
+        container.innerHTML = html;
+    }
+
+    function selectDate(dateStr) {
+        currentDate = currentDate === dateStr ? '' : dateStr;
+        currentPage = 1;
+        const label = document.getElementById('dateFilterLabel');
+        label.textContent = currentDate || '全部日期';
+        document.getElementById('datePicker').style.display = 'none';
+        loadMedia();
+    }
+
+    function clearDateFilter() {
+        currentDate = '';
+        currentPage = 1;
+        document.getElementById('dateFilterLabel').textContent = '全部日期';
+        document.getElementById('datePicker').style.display = 'none';
+        loadMedia();
+    }
+
+    // ============== 工具函数 ==============
+    function getSourceClass(source) {
+        const map = { '飞书': 'source-feishu', '微信': 'source-weixin', '网页': 'source-网页' };
+        return map[source] || 'source-未知';
+    }
+
+    function getSourceText(source) {
+        return source || '未知';
+    }
+
+    // ============== 加载筛选器 ==============
+    async function loadFilters() {
+        const [datesRes, sourcesRes, tagsRes] = await Promise.all([
+            fetch('/gallery/api/dates'),
+            fetch('/gallery/api/sources'),
+            fetch('/gallery/api/tags')
+        ]);
+        const datesData = await datesRes.json();
+        const sourcesData = await sourcesRes.json();
+        const tagsData = await tagsRes.json();
+
+        // 填充日历可用日期
+        availableDates = new Set(datesData.dates || []);
+
+        // 填充来源筛选
+        const sourceFilter = document.getElementById('sourceFilter');
+        sourceFilter.innerHTML = '<option value="">全部来源</option>';
+        sourcesData.sources.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s; opt.textContent = s; sourceFilter.appendChild(opt);
+        });
+
+        allTags = tagsData.tags;
+    }
+
+    // ============== 加载媒体列表 ==============
+    async function loadMedia() {
+        const gallery = document.getElementById('gallery');
+        gallery.innerHTML = '<div class="loading"><div class="spinner"></div>加载中...</div>';
+
+        const params = new URLSearchParams({ page: currentPage, limit: 30 });
+        if (currentType !== 'all') params.set('type', currentType);
+        if (currentDate) params.set('date', currentDate);
+        if (currentSource) params.set('source', currentSource);
+        if (selectedTag) params.set('tag', selectedTag);
+
+        const res = await fetch('/gallery/api/media?' + params.toString());
+        const data = await res.json();
+
+        totalPages = data.totalPages;
+        document.getElementById('count').textContent = `共 ${data.total} 项 · 第 ${data.page}/${totalPages} 页`;
+
+        renderGallery(data.media);
+        renderPagination(data.page, data.totalPages, data.hasPrev, data.hasNext);
+    }
+
+    // ============== 渲染网格 ==============
+    function renderGallery(media) {
+        const gallery = document.getElementById('gallery');
+        if (!media || media.length === 0) {
+            gallery.innerHTML = '<div class="empty">暂无内容</div>';
+            return;
+        }
+        gallery.innerHTML = media.map(m => `
+            <a href="/gallery/photo/${m.name}" class="gallery-item" onclick="return goToPhoto(event, '${m.name}', '${m.type}')">
+                ${m.type === 'photo'
+                    ? `<img src="${m.thumb || '/gallery/media/' + m.type + '/' + m.date + '/' + m.name}" loading="lazy" alt="${m.name}">`
+                    : `<video src="/gallery/media/${m.type}/${m.date}/${m.name}" loading="lazy"></video>`
+                }
+                <div class="overlay">
+                    <span class="source-badge ${getSourceClass(m.source)}">${getSourceText(m.source)}</span>
+                    <span>${m.date}</span>
+                </div>
+            </a>
+        `).join('');
+    }
+
+    function goToPhoto(e, name, type) {
+        e.preventDefault();
+        window.location.href = '/gallery/' + type + '/' + name;
+        return false;
+    }
+
+    // ============== 渲染分页 ==============
+    function renderPagination(page, total, hasPrev, hasNext) {
+        const pg = document.getElementById('pagination');
+        pg.innerHTML = `
+            <button onclick="goPage(${page - 1})" ${!hasPrev ? 'disabled' : ''}>上一页</button>
+            <span>第 ${page} / ${total} 页</span>
+            <button onclick="goPage(${page + 1})" ${!hasNext ? 'disabled' : ''}>下一页</button>
+        `;
+    }
+
+    function goPage(p) {
+        if (p < 1 || p > totalPages) return;
+        currentPage = p;
+        loadMedia();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    // ============== 标签搜索下拉 ==============
+    function renderTagDropdown(filter) {
+        const dropdown = document.getElementById('tagDropdown');
+        const tags = allTags.filter(t => t.includes(filter) || t === selectedTag);
+        if (!tags.length) { dropdown.style.display = 'none'; return; }
+        dropdown.innerHTML = tags.slice(0, 50).map(t =>
+            `<div onclick="selectTag('${t}')" style="padding:8px 12px; cursor:pointer; font-size:14px; ${t === selectedTag ? 'background:#3d3d3d;' : ''}">🏷️ ${t}</div>`
+        ).join('');
+        dropdown.style.display = 'block';
+        dropdown.style.position = 'fixed';
+        const input = document.getElementById('tagSearch');
+        const rect = input.getBoundingClientRect();
+        dropdown.style.top = (rect.bottom + window.scrollY + 5) + 'px';
+        dropdown.style.left = rect.left + 'px';
+    }
+
+    function selectTag(tag) {
+        selectedTag = selectedTag === tag ? '' : tag;
+        document.getElementById('tagSearch').value = selectedTag;
+        document.getElementById('tagDropdown').style.display = 'none';
+        document.getElementById('clearTagBtn').style.display = selectedTag ? 'inline-block' : 'none';
+        currentPage = 1;
+        loadMedia();
+    }
+
+    function clearTagFilter() {
+        selectedTag = '';
+        document.getElementById('tagSearch').value = '';
+        document.getElementById('clearTagBtn').style.display = 'none';
+        currentPage = 1;
+        loadMedia();
+    }
+
+    // ============== 标签管理 ==============
+    async function openTagManager() {
+        document.getElementById('tagManagerModal').style.display = 'flex';
+        await loadCanonicalTags();
+        renderTagList();
+    }
+    function closeTagManager() { document.getElementById('tagManagerModal').style.display = 'none'; }
+
+    async function loadCanonicalTags() {
+        const res = await fetch('/gallery/api/canonical-tags');
+        const data = await res.json();
+        canonicalTags = data.tags || [];
+    }
+
+    function renderTagList(filter = '') {
+        const list = document.getElementById('tagList');
+        const f = filter.toLowerCase();
+        const filtered = canonicalTags.filter(t =>
+            t.name.toLowerCase().includes(f) ||
+            (t.aliases || []).some(a => a.toLowerCase().includes(f)) ||
+            (t.category || '').toLowerCase().includes(f)
+        );
+        if (!filtered.length) {
+            list.innerHTML = '<div style="color:#666; padding:20px; text-align:center;">暂无标签</div>';
+            return;
+        }
+        list.innerHTML = filtered.map(t => `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background:#3d3d3d; border-radius:8px; gap:12px;">
+                <div style="flex:1; min-width:0;">
+                    <div style="font-size:15px; color:#fff; font-weight:500;">🏷️ ${t.name}</div>
+                    ${(t.aliases && t.aliases.length) ? '<div style="font-size:12px; color:#888; margin-top:4px;">别名: ' + t.aliases.join(', ') + '</div>' : ''}
+                    ${t.category ? '<div style="font-size:12px; color:#07c160; margin-top:2px;">分类: ' + t.category + '</div>' : ''}
+                </div>
+                <div style="display:flex; gap:8px; flex-shrink:0;">
+                    <button onclick="editTag('${t.name}')" style="background:#555; border:none; color:#fff; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:13px;">编辑</button>
+                    <button onclick="deleteTag('${t.name}')" style="background:#c0392b; border:none; color:#fff; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:13px;">删除</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async function addTag() {
+        const name = document.getElementById('newTagName').value.trim();
+        const aliasStr = document.getElementById('newTagAlias').value.trim();
+        const aliases = aliasStr ? aliasStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+        if (!name) return;
+        const res = await fetch('/gallery/api/canonical-tags', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ name, aliases, category: '' })
+        });
+        if (res.ok) {
+            document.getElementById('newTagName').value = '';
+            document.getElementById('newTagAlias').value = '';
+            await loadCanonicalTags();
+            renderTagList(document.getElementById('tagManagerSearch').value);
+        } else { alert('添加失败'); }
+    }
+
+    let editingTagName = '';
+    let editingAliases = [];
+    function editTag(name) {
+        editingTagName = name;
+        const tag = canonicalTags.find(t => t.name === name);
+        editingAliases = [...(tag?.aliases || [])];
+        document.getElementById('editTagTitle').textContent = '编辑标签: ' + name;
+        document.getElementById('editTagNameInput').value = name;
+        renderAliasTags();
+        document.getElementById('editTagModal').style.display = 'flex';
+    }
+
+    function closeEditTag() { document.getElementById('editTagModal').style.display = 'none'; }
+
+    function renderAliasTags() {
+        const container = document.getElementById('aliasTagContainer');
+        if (!editingAliases.length) {
+            container.innerHTML = '<div style="color:#666; font-size:13px; padding:4px;">暂无别名</div>';
+            return;
+        }
+        container.innerHTML = editingAliases.map(a =>
+            `<span style="display:inline-flex; align-items:center; gap:4px; padding:4px 10px; background:#555; border-radius:4px; font-size:13px;">
+                ${a}
+                <span onclick="removeAliasTag('${a}')" style="cursor:pointer; color:#e74c3c; font-size:14px; line-height:1;">×</span>
+            </span>`
+        ).join('');
+    }
+
+    function addAliasTag() {
+        const input = document.getElementById('editAliasInput');
+        const alias = input.value.trim();
+        if (!alias || editingAliases.includes(alias)) { input.value = ''; return; }
+        editingAliases.push(alias);
+        input.value = '';
+        renderAliasTags();
+    }
+
+    function removeAliasTag(alias) {
+        editingAliases = editingAliases.filter(a => a !== alias);
+        renderAliasTags();
+    }
+
+    async function saveTagEdit() {
+        const newName = document.getElementById('editTagNameInput').value.trim();
+        if (!newName) { alert('标签名不能为空'); return; }
+        const res = await fetch('/gallery/api/canonical-tags/' + editingTagName, {
+            method: 'PUT', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ name: newName, aliases: editingAliases, category: '' })
+        });
+        if (res.ok) {
+            closeEditTag();
+            await loadCanonicalTags();
+            renderTagList(document.getElementById('tagManagerSearch').value);
+        } else { alert('保存失败'); }
+    }
+
+    async function deleteTag(name) {
+        if (!confirm('确定删除标签 "' + name + '"？')) return;
+        const res = await fetch('/gallery/api/canonical-tags/' + name, { method: 'DELETE' });
+        if (res.ok) {
+            await loadCanonicalTags();
+            renderTagList(document.getElementById('tagManagerSearch').value);
+        } else { alert('删除失败'); }
+    }
+
+    // ============== 事件绑定 ==============
+    document.getElementById('typeFilter').addEventListener('change', e => { currentType = e.target.value; currentPage = 1; loadMedia(); });
+    document.getElementById('sourceFilter').addEventListener('change', e => { currentSource = e.target.value; currentPage = 1; loadMedia(); });
+
+    const tagSearch = document.getElementById('tagSearch');
+    tagSearch.addEventListener('focus', () => renderTagDropdown(''));
+    tagSearch.addEventListener('input', e => renderTagDropdown(e.target.value));
+    tagSearch.addEventListener('blur', () => setTimeout(() => document.getElementById('tagDropdown').style.display = 'none', 200));
+
+    document.getElementById('tagManagerModal').addEventListener('click', e => { if (e.target.id === 'tagManagerModal') closeTagManager(); });
+    document.getElementById('editTagModal').addEventListener('click', e => { if (e.target.id === 'editTagModal') closeEditTag(); });
+
+    // ============== 初始化 ==============
+    window.addEventListener('DOMContentLoaded', async () => {
+        await loadFilters();
+        await loadMedia();
+    }, false);
+    </script>
+</body>
+</html>

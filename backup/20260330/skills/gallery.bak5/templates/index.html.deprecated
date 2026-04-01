@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenClaw 相册</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a1a; color: #fff; min-height: 100vh; }
+        header { background: #2d2d2d; padding: 20px; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 10px rgba(0,0,0,0.3); }
+        .header-content { max-width: 1400px; margin: 0 auto; }
+        h1 { font-size: 24px; margin-bottom: 15px; }
+        .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        select, input { padding: 8px 12px; background: #3d3d3d; border: 1px solid #555; border-radius: 6px; color: #fff; font-size: 14px; }
+        button { padding: 8px 12px; border: none; border-radius: 6px; color: #fff; font-size: 14px; cursor: pointer; }
+        .btn-upload { background: #07c160; }
+        .btn-tags { background: #9c27b0; }
+        .count { color: #888; font-size: 14px; }
+        main { max-width: 1400px; margin: 20px auto; padding: 0 20px; }
+        .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 15px; }
+        .gallery-item { position: relative; border-radius: 8px; overflow: hidden; background: #2d2d2d; cursor: pointer; transition: transform 0.2s; }
+        .gallery-item:hover { transform: scale(1.02); }
+        .gallery-item img, .gallery-item video { width: 100%; height: 250px; object-fit: cover; display: block; }
+        .overlay { position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, rgba(0,0,0,0.8)); padding: 30px 10px 10px; display: flex; justify-content: space-between; font-size: 12px; }
+        .source-badge { padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+        .source-feishu { background: #1677ff; }
+        .source-weixin { background: #07c160; }
+        .source-网页 { background: #ff6b00; }
+        .source-未知 { background: #666; }
+        .loading, .empty { text-align: center; padding: 50px; color: #888; }
+        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); z-index: 1000; justify-content: center; align-items: center; }
+        .modal.active { display: flex; }
+        .modal-content { max-width: 90vw; max-height: 90vh; position: relative; }
+        .modal-content img, .modal-content video { max-width: 100%; max-height: 85vh; object-fit: contain; }
+        .modal-actions { position: absolute; top: -40px; right: 0; display: flex; gap: 10px; }
+        .modal-actions button { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; }
+        .modal-close { background: #666; }
+        .modal-delete { background: #e74c3c; }
+        .modal-info { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); padding: 10px 15px; display: flex; gap: 15px; font-size: 13px; flex-wrap: wrap; }
+        .modal-info span { display: flex; align-items: center; gap: 5px; }
+        .modal-info button { padding: 2px 8px; background: #1296db; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-size: 11px; }
+        #prevBtn, #nextBtn { background: #3d3d3d; color: #fff; padding: 8px 12px; border: none; border-radius: 6px; cursor: pointer; }
+        #prevBtn:disabled, #nextBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .modal-box { background: #2d2d2d; border-radius: 12px; padding: 20px; max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .modal-header h2 { font-size: 18px; }
+        .tag-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #3d3d3d; border-radius: 6px; margin-bottom: 8px; }
+        .tag-item-name { font-weight: 600; }
+        .tag-item-aliases { font-size: 11px; color: #888; margin-top: 3px; }
+        .tag-item-alias { background: #555; padding: 2px 6px; border-radius: 3px; margin-right: 4px; cursor: pointer; }
+        .tag-input { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #555; background: #3d3d3d; color: #fff; margin-bottom: 10px; }
+        .alias-input-wrap { display: flex; gap: 5px; margin-top: 5px; }
+        .alias-input-wrap input { flex: 1; padding: 5px; border-radius: 4px; border: 1px solid #555; background: #3d3d3d; color: #fff; font-size: 12px; }
+        .alias-tag { background: #555; padding: 2px 6px; border-radius: 3px; margin-right: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+        .alias-tag:hover { background: #e74c3c; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <h1>📷 OpenClaw 相册</h1>
+            <div class="filters">
+                <select id="typeFilter"><option value="all">全部类型</option><option value="photo">照片</option><option value="video">视频</option></select>
+                <select id="dateFilter"><option value="">全部日期</option></select>
+                <select id="sourceFilter"><option value="">全部来源</option></select>
+                <div style="position: relative;">
+                    <input type="text" id="tagSearch" placeholder="搜索标签..." style="width: 150px;" autocomplete="off">
+                    <div id="tagDropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #2d2d2d; border: 1px solid #555; border-radius: 6px; max-height: 200px; overflow-y: auto; z-index: 200; margin-top: 4px;"></div>
+                </div>
+                <button onclick="clearTagFilter()" style="background: #666;">清除</button>
+                <span class="count" id="count">共 0 项</span>
+                <button onclick="document.getElementById('fileInput').click()" class="btn-upload">⬆️ 上传</button>
+                <input type="file" id="fileInput" accept="image/*,video/*" style="display:none" onchange="uploadFile(this)">
+                <button onclick="openTagManager()" class="btn-tags">🏷️ 标签管理</button>
+            </div>
+        </div>
+    </header>
+    <main><div class="gallery" id="gallery"><div class="loading">加载中...</div></div></main>
+
+    <div class="modal" id="modal">
+        <div class="modal-content">
+            <div class="modal-actions">
+                <button id="prevBtn" onclick="prevImage()">◀ 上一张</button>
+                <span id="imageCounter" style="color:#fff;line-height:36px;"></span>
+                <button id="nextBtn" onclick="nextImage()">下一张 ▶</button>
+                <button class="modal-delete" onclick="deleteCurrentFile()">🗑️ 删除</button>
+                <button class="modal-close" onclick="closeModal()">×</button>
+            </div>
+            <div id="modalMedia"></div>
+            <div class="modal-info" id="modalInfo"></div>
+        </div>
+    </div>
+
+    <!-- 标签管理弹窗 -->
+    <div class="modal" id="tagManagerModal">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h2>🏷️ 标准标签管理</h2>
+                <button onclick="closeTagManager()" style="background: #666;">关闭</button>
+            </div>
+            <input type="text" id="newTagName" class="tag-input" placeholder="输入新标签名称后按回车添加" onkeydown="if(event.key==='Enter')addNewTag()">
+            <div id="tagList" style="max-height: 400px; overflow-y: auto;"></div>
+        </div>
+    </div>
+
+    <!-- 编辑标签弹窗 -->
+    <div class="modal" id="editTagModal">
+        <div class="modal-box" style="max-width: 350px;">
+            <div class="modal-header">
+                <h2>编辑标签</h2>
+                <button onclick="closeEditTag()" style="background: #666;">×</button>
+            </div>
+            <input type="hidden" id="editTagOldName">
+            <div style="margin-bottom: 15px;">
+                <label style="font-size: 12px; color: #888; display: block; margin-bottom: 5px;">标签名称</label>
+                <input type="text" id="editTagName" class="tag-input" style="margin-bottom: 0;">
+            </div>
+            <div style="margin-bottom: 15px;">
+                <label style="font-size: 12px; color: #888; display: block; margin-bottom: 5px;">别名（点击删除）</label>
+                <div id="aliasList"></div>
+                <div class="alias-input-wrap">
+                    <input type="text" id="newAliasInput" placeholder="输入别名后按回车" onkeydown="if(event.key==='Enter')addAlias()">
+                    <button onclick="addAlias()" style="background: #07c160; padding: 5px 10px;">+</button>
+                </div>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button onclick="deleteTag()" style="background: #e74c3c;">删除</button>
+                <button onclick="saveTagEdit()" style="background: #07c160;">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 编辑照片标签弹窗 -->
+    <div class="modal" id="editTagsModal">
+        <div class="modal-box" style="max-width: 350px;">
+            <div class="modal-header">
+                <h2>编辑照片标签</h2>
+                <button onclick="closeEditTags()" style="background: #666;">×</button>
+            </div>
+            <input type="hidden" id="editTagsFilename">
+            <div style="margin-bottom: 10px;">
+                <input type="text" id="newPhotoTagInput" class="tag-input" placeholder="输入标签后按回车添加" onkeydown="if(event.key==='Enter')addPhotoTag()">
+            </div>
+            <div id="photoTagList" style="max-height: 200px; overflow-y: auto; background: #3d3d3d; border-radius: 6px; padding: 8px; margin-bottom: 15px;"></div>
+            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                <button onclick="savePhotoTags()" style="background: #27ae60;">保存</button>
+                <button onclick="closeEditTags()" style="background: #666;">关闭</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+let allMedia = [];
+let allTags = [];
+let selectedTag = '';
+let currentFilename = '';
+let currentIndex = 0;
+let canonicalTags = [];
+
+async function loadMedia() {
+    const type = document.getElementById('typeFilter').value;
+    const date = document.getElementById('dateFilter').value;
+    const source = document.getElementById('sourceFilter').value;
+    const params = new URLSearchParams();
+    if (type !== 'all') params.append('type', type);
+    if (date) params.append('date', date);
+    if (source) params.append('source', source);
+    if (selectedTag) params.append('tag', selectedTag);
+    const res = await fetch('/gallery/api/media?' + params);
+    const data = await res.json();
+    allMedia = data.media;
+    renderGallery();
+    document.getElementById('count').textContent = '共 ' + data.total + ' 项';
+}
+
+async function loadFilters() {
+    const [datesRes, sourcesRes, tagsRes] = await Promise.all([
+        fetch('/gallery/api/dates'),
+        fetch('/gallery/api/sources'),
+        fetch('/gallery/api/tags')
+    ]);
+    const datesData = await datesRes.json();
+    const sourcesData = await sourcesRes.json();
+    const tagsData = await tagsRes.json();
+
+    // 清空并重新填充日期筛选
+    const dateFilter = document.getElementById('dateFilter');
+    dateFilter.innerHTML = '<option value="">全部日期</option>';
+    datesData.dates.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d; opt.textContent = d; dateFilter.appendChild(opt);
+    });
+
+    // 清空并重新填充来源筛选
+    const sourceFilter = document.getElementById('sourceFilter');
+    sourceFilter.innerHTML = '<option value="">全部来源</option>';
+    sourcesData.sources.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s; opt.textContent = s; sourceFilter.appendChild(opt);
+    });
+
+    allTags = tagsData.tags;
+    renderTagDropdown('');
+}
+
+function renderGallery() {
+    const gallery = document.getElementById('gallery');
+    if (allMedia.length === 0) {
+        gallery.innerHTML = '<div class="empty">暂无内容</div>';
+        return;
+    }
+    gallery.innerHTML = allMedia.map((m, i) => `
+        <div class="gallery-item" onclick="openDetail('${m.name}', ${i})">
+            ${m.type === 'photo' ? '<img src="' + (m.thumb || m.path) + '" loading="lazy" alt="${m.name}">' : '<video src="' + m.path + '" loading="lazy"></video>'}
+            <div class="overlay">
+                <span class="source-badge source-${m.source === '飞书' ? 'feishu' : m.source === '微信' ? 'weixin' : m.source === '网页' ? '网页' : '未知'}">${m.source}</span>
+                <span>${m.date}</span>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function openDetail(filename, index) {
+    currentFilename = filename;
+    currentIndex = index !== undefined ? index : allMedia.findIndex(m => m.name === filename);
+    const res = await fetch('/gallery/detail/' + filename);
+    const data = await res.json();
+    const mediaDiv = document.getElementById('modalMedia');
+    mediaDiv.innerHTML = data.type === 'photo' ? '<img src="' + data.path + '" alt="' + data.name + '">' : '<video src="' + data.path + '" controls autoplay></video>';
+    const sizeStr = data.size > 1024*1024 ? (data.size / 1024 / 1024).toFixed(1) + ' MB' : (data.size / 1024).toFixed(0) + ' KB';
+    document.getElementById('modalInfo').innerHTML = `
+        <span>📅 ${data.detected_at ? data.detected_at.replace('T', ' ').substring(0, 19) : data.date}</span>
+        <span>📱 ${data.source}</span>
+        <span>💾 ${sizeStr}</span>
+        <span id="currentTags">🏷️ ${(data.ai_tags || []).join(', ') || '无'}</span>
+        <button onclick="openPhotoTagEditor('${data.name}')">编辑标签</button>
+    `;
+    window.currentPhotoTags = data.ai_tags || [];
+    document.getElementById('imageCounter').textContent = (currentIndex + 1) + ' / ' + allMedia.length;
+    document.getElementById('prevBtn').disabled = currentIndex === 0;
+    document.getElementById('nextBtn').disabled = currentIndex === allMedia.length - 1;
+    document.getElementById('modal').classList.add('active');
+}
+
+function closeModal() {
+    document.getElementById('modal').classList.remove('active');
+    currentFilename = '';
+}
+
+function prevImage() { if (currentIndex > 0) { currentIndex--; openDetail(allMedia[currentIndex].name, currentIndex); } }
+function nextImage() { if (currentIndex < allMedia.length - 1) { currentIndex++; openDetail(allMedia[currentIndex].name, currentIndex); } }
+
+async function deleteCurrentFile() {
+    if (!currentFilename || !confirm('确定删除？')) return;
+    const res = await fetch('/gallery/api/delete/' + currentFilename, {method: 'DELETE'});
+    if (res.ok) { closeModal(); loadMedia(); loadFilters(); } else { alert('删除失败'); }
+}
+
+async function uploadFile(input) {
+    const file = input.files[0]; if (!file) return;
+    const formData = new FormData(); formData.append('file', file);
+    try {
+        const res = await fetch('/gallery/upload', {method: 'POST', body: formData});
+        const data = await res.json();
+        if (data.success) { alert('上传成功！'); loadMedia(); }
+        else { alert('上传失败: ' + data.error); }
+    } catch (e) { alert('上传失败: ' + e); }
+    input.value = '';
+}
+
+function clearTagFilter() { selectedTag = ''; document.getElementById('tagSearch').value = ''; document.getElementById('tagDropdown').style.display = 'none'; loadMedia(); }
+
+function renderTagDropdown(filter) {
+    const dropdown = document.getElementById('tagDropdown');
+    const filtered = allTags.filter(t => t.toLowerCase().includes(filter.toLowerCase())).slice(0, 20);
+    if (filtered.length === 0) { dropdown.style.display = 'none'; return; }
+    dropdown.innerHTML = filtered.map(t => '<div onclick="selectTag(\'' + t + '\')" style="padding: 8px 12px; cursor: pointer;" onmouseover="this.style.background=\'#3d3d3d\'" onmouseout="this.style.background=\'transparent\'">🏷️ ' + t + '</div>').join('');
+    dropdown.style.display = 'block';
+}
+
+function selectTag(tag) { selectedTag = tag; document.getElementById('tagSearch').value = tag; document.getElementById('tagDropdown').style.display = 'none'; loadMedia(); }
+
+// 照片标签编辑
+let editPhotoTags = [];
+function openPhotoTagEditor(filename) {
+    document.getElementById('editTagsFilename').value = filename;
+    editPhotoTags = (window.currentPhotoTags || []).slice();
+    renderPhotoTagList();
+    document.getElementById('editTagsModal').classList.add('active');
+}
+function closeEditTags() { document.getElementById('editTagsModal').classList.remove('active'); }
+function renderPhotoTagList() {
+    const container = document.getElementById('photoTagList');
+    container.innerHTML = editPhotoTags.map(t => '<div style="display: flex; justify-content: space-between; align-items: center; padding: 5px 8px; background: #2d2d2d; border-radius: 4px; margin-bottom: 5px;"><span>🏷️ ' + t + '</span><span onclick="removePhotoTag(\'' + t + '\')" style="cursor: pointer; color: #e74c3c; font-size: 12px;">×</span></div>').join('');
+}
+function addPhotoTag() {
+    const input = document.getElementById('newPhotoTagInput');
+    const tag = input.value.trim();
+    if (!tag || editPhotoTags.includes(tag)) { input.value = ''; return; }
+    editPhotoTags.push(tag);
+    input.value = '';
+    renderPhotoTagList();
+}
+function removePhotoTag(tag) { editPhotoTags = editPhotoTags.filter(t => t !== tag); renderPhotoTagList(); }
+async function savePhotoTags() {
+    const filename = document.getElementById('editTagsFilename').value;
+    const res = await fetch('/gallery/api/photo-tags/' + filename, {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({tags: editPhotoTags})});
+    if (res.ok) {
+        const data = await res.json();
+        window.currentPhotoTags = data.tags;
+        closeEditTags();
+        document.getElementById('currentTags').textContent = '🏷️ ' + (data.tags.join(', ') || '无');
+        loadMedia();
+        loadFilters();
+    } else { alert('保存失败'); }
+}
+
+// 标签管理
+async function openTagManager() { document.getElementById('tagManagerModal').classList.add('active'); await loadCanonicalTags(); renderTagList(); }
+function closeTagManager() { document.getElementById('tagManagerModal').classList.remove('active'); }
+async function loadCanonicalTags() { const res = await fetch('/gallery/api/canonical-tags'); const data = await res.json(); canonicalTags = data.tags || []; }
+function renderTagList() {
+    const container = document.getElementById('tagList');
+    container.innerHTML = canonicalTags.map(t => '<div class="tag-item"><div><div class="tag-item-name">' + t.name + '</div>' + (t.aliases.length ? '<div class="tag-item-aliases">' + t.aliases.map(a => '<span class="tag-item-alias" onclick="event.stopPropagation();editTag(\'' + t.name + '\',\'' + a + '\')">' + a + ' ×</span>').join('') + '</div>' : '') + '</div><button onclick="editTag(\'' + t.name + '\')" style="background: #1296db; padding: 5px 12px; font-size: 12px;">编辑</button></div>').join('');
+}
+function editTag(name, aliasToEdit) {
+    const tag = canonicalTags.find(t => t.name === name);
+    if (!tag) return;
+    document.getElementById('editTagOldName').value = name;
+    document.getElementById('editTagName').value = name;
+    renderAliasList(tag.aliases, name);
+    document.getElementById('editTagModal').classList.add('active');
+}
+function closeEditTag() { document.getElementById('editTagModal').classList.remove('active'); }
+function renderAliasList(aliases, tagName) {
+    const container = document.getElementById('aliasList');
+    container.innerHTML = (aliases || []).map(a => '<span class="alias-tag" onclick="removeAlias(\'' + tagName + '\',\'' + a + '\')">' + a + ' ×</span>').join('') || '<span style="color: #888; font-size: 12px;">暂无别名</span>';
+}
+async function addAlias() {
+    const tagName = document.getElementById('editTagOldName').value;
+    const newAlias = document.getElementById('newAliasInput').value.trim();
+    if (!newAlias) return;
+    const tag = canonicalTags.find(t => t.name === tagName);
+    if (!tag) return;
+    const newAliases = [...(tag.aliases || []), newAlias];
+    const res = await fetch('/gallery/api/canonical-tags/' + tagName, {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: tagName, aliases: newAliases, category: ''})});
+    if (res.ok) { await loadCanonicalTags(); renderAliasList(newAliases, tagName); renderTagList(); document.getElementById('newAliasInput').value = ''; }
+}
+async function removeAlias(tagName, alias) {
+    const tag = canonicalTags.find(t => t.name === tagName);
+    if (!tag) return;
+    const newAliases = (tag.aliases || []).filter(a => a !== alias);
+    const res = await fetch('/gallery/api/canonical-tags/' + tagName, {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: tagName, aliases: newAliases, category: ''})});
+    if (res.ok) { await loadCanonicalTags(); renderAliasList(newAliases, tagName); renderTagList(); }
+}
+async function saveTagEdit() {
+    const oldName = document.getElementById('editTagOldName').value;
+    const newName = document.getElementById('editTagName').value.trim();
+    if (!newName) { alert('标签名称不能为空'); return; }
+    const tag = canonicalTags.find(t => t.name === oldName);
+    const aliases = tag ? (tag.aliases || []) : [];
+    const res = await fetch('/gallery/api/canonical-tags/' + oldName, {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: newName, aliases: aliases, category: ''})});
+    if (res.ok) { closeEditTag(); await loadCanonicalTags(); renderTagList(); loadFilters(); } else { const data = await res.json(); alert('保存失败: ' + data.error); }
+}
+async function deleteTag() {
+    const oldName = document.getElementById('editTagOldName').value;
+    if (!confirm('确定删除标签"' + oldName + '"？')) return;
+    const res = await fetch('/gallery/api/canonical-tags/' + oldName, {method: 'DELETE'});
+    if (res.ok) { closeEditTag(); await loadCanonicalTags(); renderTagList(); loadFilters(); } else { alert('删除失败'); }
+}
+async function addNewTag() {
+    const name = document.getElementById('newTagName').value.trim();
+    if (!name) return;
+    const res = await fetch('/gallery/api/canonical-tags', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: name, aliases: [], category: ''})});
+    if (res.ok) { document.getElementById('newTagName').value = ''; await loadCanonicalTags(); renderTagList(); loadFilters(); } else { const data = await res.json(); alert('添加失败: ' + data.error); }
+}
+
+// Event listeners
+const safeAddEvent = (id, event, handler) => { const el = document.getElementById(id); if (el) el.addEventListener(event, handler); };
+safeAddEvent('typeFilter', 'change', loadMedia);
+safeAddEvent('dateFilter', 'change', loadMedia);
+safeAddEvent('sourceFilter', 'change', loadMedia);
+safeAddEvent('tagSearch', 'focus', () => renderTagDropdown(document.getElementById('tagSearch')?.value || ''));
+safeAddEvent('tagSearch', 'input', () => renderTagDropdown(document.getElementById('tagSearch')?.value || ''));
+safeAddEvent('tagSearch', 'blur', () => setTimeout(() => { const d = document.getElementById('tagDropdown'); if (d) d.style.display = 'none'; }, 200));
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { closeModal(); closeEditTags(); closeTagManager(); closeEditTag(); }
+    if (document.getElementById('modal')?.classList.contains('active')) { if (e.key === 'ArrowLeft') prevImage(); if (e.key === 'ArrowRight') nextImage(); }
+});
+safeAddEvent('modal', 'click', e => { if (e.target === document.getElementById('modal')) closeModal(); });
+safeAddEvent('tagManagerModal', 'click', e => { if (e.target === document.getElementById('tagManagerModal')) closeTagManager(); });
+safeAddEvent('editTagModal', 'click', e => { if (e.target === document.getElementById('editTagModal')) closeEditTag(); });
+safeAddEvent('editTagsModal', 'click', e => { if (e.target === document.getElementById('editTagsModal')) closeEditTags(); });
+
+// Initialize
+window.addEventListener('DOMContentLoaded', () => {
+    console.log('Gallery: DOM ready, initializing...');
+    Promise.all([loadFilters(), loadMedia()]).catch(e => { console.error('Init error:', e); });
+}, false);
+</script>
+</body>
+</html>

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>个人知识管理 - 本地备份</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #0f1117;
+            color: #e0e3e8;
+            font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1d27 0%, #141720 100%);
+            border-bottom: 1px solid #2a2d3a;
+            padding: 20px 32px;
+            margin: -20px -20px 30px -20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .header-icon { font-size: 24px; }
+        .header h1 { font-size: 18px; font-weight: 600; flex: 1; }
+        .header-badge {
+            background: #1a2332;
+            border: 1px solid #2a3a5c;
+            color: #5b8def;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .section-title {
+            font-size: 13px;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 16px;
+        }
+        .doc-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+        }
+        .doc-card {
+            background: #1a1d27;
+            border: 1px solid #2a2d3a;
+            border-radius: 12px;
+            padding: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .doc-card:hover {
+            border-color: #5b8def;
+            transform: translateY(-2px);
+        }
+        .doc-tag {
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 8px;
+        }
+        .doc-meta {
+            font-size: 12px;
+            color: #6b7280;
+        }
+        .empty {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6b7280;
+        }
+        .empty-icon { font-size: 48px; margin-bottom: 16px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <span class="header-icon">📚</span>
+        <h1>个人知识管理 - 本地备份</h1>
+        <span class="header-badge">本地存储</span>
+    </div>
+    
+    <div class="container">
+        <div class="section-title">已保存的参观记录</div>
+        
+        {% if docs %}
+        <div class="doc-list">
+            {% for doc in docs %}
+            <a href="/visit/doc/{{ doc.filename }}" style="text-decoration:none;color:inherit">
+                <div class="doc-card">
+                    <div class="doc-tag">{{ doc.tag }}</div>
+                    <div class="doc-meta">查看详情 →</div>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty">
+            <div class="empty-icon">📭</div>
+            <div>暂无本地备份文档</div>
+            <div style="font-size:12px;margin-top:8px">使用「开始生成」后会同时创建本地备份</div>
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>

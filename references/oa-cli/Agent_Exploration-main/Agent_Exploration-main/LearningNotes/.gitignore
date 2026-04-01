@@ -1,0 +1,9 @@
+# Only track markdown files
+.DS_Store
+*.py
+*.sh
+*.js
+*.ts
+*.rb
+*.go
+*.rs

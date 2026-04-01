@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>上传文档 - 个人电子书库</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f0f; color: #fff; min-height: 100vh; }
+        .container { max-width: 600px; margin: 0 auto; padding: 40px 20px; }
+        .header { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
+        .back-btn { background: #2d2d2d; border: none; color: #fff; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+        .back-btn:hover { background: #3d3d3d; }
+        h1 { font-size: 24px; font-weight: 600; }
+        .upload-area { border: 2px dashed #444; border-radius: 16px; padding: 60px 20px; text-align: center; cursor: pointer; transition: all 0.3s; margin-bottom: 20px; }
+        .upload-area:hover, .upload-area.dragover { border-color: #07c160; background: rgba(7, 193, 96, 0.05); }
+        .upload-icon { font-size: 48px; margin-bottom: 16px; }
+        .upload-text { font-size: 16px; color: #888; margin-bottom: 8px; }
+        .upload-hint { font-size: 13px; color: #666; }
+        .formats { margin-top: 16px; font-size: 12px; color: #555; }
+        #fileInput { display: none; }
+        .file-list { margin-top: 24px; }
+        .file-item { background: #1a1a1a; border: 1px solid #333; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+        .file-name { font-size: 15px; font-weight: 500; margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .file-meta { font-size: 12px; color: #666; display: flex; gap: 12px; }
+        .progress-bar { height: 4px; background: #333; border-radius: 2px; margin-top: 10px; overflow: hidden; }
+        .progress-fill { height: 100%; background: #07c160; border-radius: 2px; transition: width 0.3s; width: 0%; }
+        .status { font-size: 12px; color: #07c160; margin-top: 6px; }
+        .status.classifying { color: #f39c12; }
+        .status.error { color: #e74c3c; }
+        .nav { display: flex; gap: 8px; margin-bottom: 24px; }
+        .nav a { padding: 8px 16px; background: #1a1a1a; border-radius: 8px; color: #888; text-decoration: none; font-size: 14px; }
+        .nav a:hover { background: #2d2d2d; }
+        .nav a.active { background: #07c160; color: #fff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <button class="back-btn" onclick="location.href='/library/'">← 返回</button>
+            <h1>📚 上传文档</h1>
+        </div>
+
+        <div class="nav">
+            <a href="/library/">📚 资料库</a>
+            <a href="/library/upload" class="active">⬆️ 上传</a>
+        </div>
+
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📤</div>
+            <div class="upload-text">拖拽文件到这里，或点击选择文件</div>
+            <div class="upload-hint">支持 PDF、EPUB、TXT、MD、DOCX</div>
+            <div class="formats">单个文件最大 200MB</div>
+            <input type="file" id="fileInput" accept=".pdf,.epub,.txt,.md,.docx">
+        </div>
+
+        <div class="file-list" id="fileList"></div>
+    </div>
+
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileList = document.getElementById('fileList');
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+
+        uploadArea.addEventListener('dragover', e => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', e => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) handleFile(files[0]);
+        });
+
+        fileInput.addEventListener('change', e => {
+            if (e.target.files.length > 0) handleFile(e.target.files[0]);
+        });
+
+        function handleFile(file) {
+            const ext = '.' + file.name.split('.').pop().toLowerCase();
+            const allowed = ['.pdf', '.epub', '.txt', '.md', '.docx'];
+            if (!allowed.includes(ext)) {
+                alert('不支持的格式，请选择 PDF、EPUB、TXT、MD、DOCX');
+                return;
+            }
+
+            const itemId = 'upload-' + Date.now();
+            const item = document.createElement('div');
+            item.className = 'file-item';
+            item.id = itemId;
+            item.innerHTML = `
+                <div class="file-name">${file.name}</div>
+                <div class="file-meta">
+                    <span>${(file.size / 1024 / 1024).toFixed(2)} MB</span>
+                    <span>${ext}</span>
+                </div>
+                <div class="progress-bar"><div class="progress-fill" style="width: 30%"></div></div>
+                <div class="status">上传中...</div>
+            `;
+            fileList.prepend(item);
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/library/api/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    const pbar = item.querySelector('.progress-fill');
+                    pbar.style.width = '80%';
+                    const status = item.querySelector('.status');
+                    status.textContent = '上传完成，分类中...';
+                    status.className = 'status classifying';
+                    // 轮询状态
+                    checkStatus(data.document.id, itemId);
+                } else {
+                    item.querySelector('.status').textContent = '上传失败: ' + data.error;
+                    item.querySelector('.status').className = 'status error';
+                }
+            })
+            .catch(err => {
+                item.querySelector('.status').textContent = '上传失败: ' + err;
+                item.querySelector('.status').className = 'status error';
+            });
+        }
+
+        function checkStatus(docId, itemId) {
+            fetch(`/library/api/book/${docId}`)
+                .then(r => r.json())
+                .then(data => {
+                    const item = document.getElementById(itemId);
+                    if (!item) return;
+                    const status = item.querySelector('.status');
+                    const pbar = item.querySelector('.progress-fill');
+
+                    if (data.status === 'classified' || data.status === 'indexed') {
+                        pbar.style.width = '100%';
+                        status.textContent = '完成 ✓';
+                        status.className = 'status';
+                    } else {
+                        status.textContent = '分类中...';
+                        setTimeout(() => checkStatus(docId, itemId), 2000);
+                    }
+                })
+                .catch(() => {
+                    setTimeout(() => checkStatus(docId, itemId), 3000);
+                });
+        }
+    </script>
+</body>
+</html>
