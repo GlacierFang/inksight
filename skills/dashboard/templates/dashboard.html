@@ -266,7 +266,7 @@
             <div class="stat-card">
                 <div class="stat-label">本时段内剩余调用量</div>
                 <div class="stat-value green" id="statWindowRemain">-</div>
-                <div class="stat-sub">剩余 / 600</div>
+                <div class="stat-sub">5h窗口剩余</div>
             </div>
             <div class="stat-card">
                 <div class="stat-label">当前会话数</div>
@@ -279,7 +279,6 @@
         <div class="panel" style="margin-bottom:20px">
             <div class="panel-title">
                 🔴 当前状态
-                <button class="refresh-btn" onclick="try{loadOverview()}catch(e){console.error(e)}" style="margin-left:auto">🔄 刷新</button>
         <div id="healthzBar" style="display:none;margin-left:12px;font-size:12px;padding:2px 10px;border-radius:12px;background:#f0f1f3;color:#8f959e"></div>
             </div>
             <div class="stat-cards" style="grid-template-columns: repeat(3, 1fr); margin-bottom:0;">
@@ -350,33 +349,6 @@
             <div id="cronHistSummary" style="margin-top:10px;font-size:12px;color:#8f959e"></div>
         </div>
 
-        <!-- 工作数据 -->
-        <div class="panel" style="margin-bottom:20px">
-            <div class="panel-title">📦 工作数据</div>
-            <div class="stat-cards" style="grid-template-columns: repeat(4, 1fr); margin-bottom:0;">
-                <div class="stat-card">
-                    <div class="stat-label">SSD 存储</div>
-                    <div class="stat-value" id="wdSsdFree">-</div>
-                    <div class="stat-sub" id="wdSsdInfo">-</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">照片</div>
-                    <div class="stat-value" id="wdPhoto">-</div>
-                    <div class="stat-sub">张</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">电子书</div>
-                    <div class="stat-value" id="wdBookTotal">-</div>
-                    <div class="stat-sub">总量</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">已索引</div>
-                    <div class="stat-value" id="wdBookIndexed">-</div>
-                    <div class="stat-sub">已深度学习</div>
-                </div>
-            </div>
-        </div>
-
         <!-- Publish calendar (main action) + day detail -->
         <div class="two-col" style="margin-bottom:20px">
             <div class="panel">
@@ -409,22 +381,16 @@
             </div>
         </div>
 
-        <!-- Second row: 深入分析 + 记忆状态 -->
-        <div class="two-col" style="margin-bottom:20px">
-            <div class="panel">
-                <div class="panel-title">📚 正在深入分析</div>
-                <div class="book-list" id="bookList"><div class="loading">加载中</div></div>
+        <!-- 记忆状态（单栏） -->
+        <div class="panel" style="margin-bottom:20px">
+            <div class="panel-title">🧠 记忆状态</div>
+            <div class="memory-section">
+                <div class="memory-section-title">📁 项目文档</div>
+                <div id="memoryProjects" class="memory-list"><div class="loading">加载中</div></div>
             </div>
-            <div class="panel">
-                <div class="panel-title">🧠 记忆状态</div>
-                <div class="memory-section">
-                    <div class="memory-section-title">📁 项目文档</div>
-                    <div id="memoryProjects" class="memory-list"><div class="loading">加载中</div></div>
-                </div>
-                <div class="memory-section">
-                    <div class="memory-section-title">📅 每日记录</div>
-                    <div id="memoryDaily" class="memory-list"><div class="loading">加载中</div></div>
-                </div>
+            <div class="memory-section">
+                <div class="memory-section-title">📅 每日记录</div>
+                <div id="memoryDaily" class="memory-list"><div class="loading">加载中</div></div>
             </div>
         </div>
 
@@ -441,46 +407,37 @@
     <!-- ═══════════════════════════════════════ -->
     <div id="page-usage" style="display:none">
 
-        <!-- Usage stat cards -->
-        <div class="stat-cards" style="margin-bottom:20px">
-            <div class="stat-card">
-                <div class="stat-label">本期 API 调用</div>
-                <div class="stat-value" id="usageTotal">-</div>
-                <div class="stat-sub" id="usageRange">-</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">窗口配额</div>
-                <div class="stat-value green" id="usageWindow">-</div>
-                <div class="stat-sub">5小时滚动窗口</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">日均调用</div>
-                <div class="stat-value" id="usageAvg">-</div>
-                <div class="stat-sub">次/天</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Token 剩余</div>
-                <div class="stat-value green" id="usageTokens">-</div>
-                <div class="stat-sub">条</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">会话数</div>
-                <div class="stat-value" id="usageSessions">-</div>
-                <div class="stat-sub">活跃</div>
+        <!-- 工作数据 -->
+        <div class="panel" style="margin-bottom:20px">
+            <div class="panel-title">📦 工作数据</div>
+            <div class="stat-cards" style="grid-template-columns: repeat(4, 1fr); margin-bottom:0;">
+                <div class="stat-card">
+                    <div class="stat-label">SSD 存储</div>
+                    <div class="stat-value" id="wdSsdFree">-</div>
+                    <div class="stat-sub" id="wdSsdInfo">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">照片</div>
+                    <div class="stat-value" id="wdPhoto">-</div>
+                    <div class="stat-sub">张</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">电子书</div>
+                    <div class="stat-value" id="wdBookTotal">-</div>
+                    <div class="stat-sub">总量</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">已索引</div>
+                    <div class="stat-value" id="wdBookIndexed">-</div>
+                    <div class="stat-sub">已深度学习</div>
+                </div>
             </div>
         </div>
 
         <!-- Charts -->
-        <div class="two-col" style="margin-bottom:20px">
-            <div class="panel">
-                <div class="panel-title">📊 来源分布</div>
-                <div class="chart-box" id="chartPie"></div>
-                <div class="source-legend" id="sourceLegend"></div>
-            </div>
-            <div class="panel">
-                <div class="panel-title">📈 近30天调用趋势</div>
-                <div class="chart-box" id="chartBar"></div>
-            </div>
+        <div class="panel" style="margin-bottom:20px">
+            <div class="panel-title">📈 近30天调用趋势</div>
+            <div class="chart-box" id="chartBar"></div>
         </div>
 
         <!-- System status -->
@@ -495,72 +452,17 @@
             <div id="diskSpaceInfo"><div class="loading">加载中</div></div>
         </div>
 
-        <!-- Burn Rate Token Plan 配额 -->
-        <div class="panel" style="margin-bottom:20px">
-            <div class="panel-title">🔥 Burn Rate <span id="burnRateLabel" style="font-size:12px;font-weight:400;margin-left:8px;color:#8f959e"></span></div>
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:12px">
-                <div style="text-align:center">
-                    <div style="font-size:22px;font-weight:700" id="burnIntervalLeft">-</div>
-                    <div style="font-size:11px;color:#8f959e">窗口重置倒计时</div>
-                </div>
-                <div style="text-align:center">
-                    <div style="font-size:22px;font-weight:700" id="burnWeeklyLeft">-</div>
-                    <div style="font-size:11px;color:#8f959e">本周剩余配额</div>
-                </div>
-                <div style="text-align:center">
-                    <div style="font-size:22px;font-weight:700" id="burnExhaustHours">-</div>
-                    <div style="font-size:11px;color:#8f959e">配额耗尽预估</div>
-                </div>
-            </div>
-            <!-- 5h窗口进度条 -->
-            <div style="margin-bottom:8px">
-                <div style="display:flex;justify-content:space-between;font-size:11px;color:#8f959e;margin-bottom:4px">
-                    <span>M2.7 5h窗口消耗</span>
-                    <span id="burnIntervalPct">-</span>
-                </div>
-                <div style="background:#f0f1f3;border-radius:4px;height:8px;overflow:hidden">
-                    <div id="burnIntervalBar" style="height:100%;background:#07c160;border-radius:4px;width:0%;transition:width 0.3s"></div>
-                </div>
-            </div>
-            <!-- 本周进度条 -->
-            <div style="margin-bottom:8px">
-                <div style="display:flex;justify-content:space-between;font-size:11px;color:#8f959e;margin-bottom:4px">
-                    <span>本周消耗配额</span>
-                    <span id="burnWeeklyPct">-</span>
-                </div>
-                <div style="background:#f0f1f3;border-radius:4px;height:8px;overflow:hidden">
-                    <div id="burnWeeklyBar" style="height:100%;background:#5bc0de;border-radius:4px;width:0%;transition:width 0.3s"></div>
-                </div>
-            </div>
-            <!-- 其他模型状态 -->
-            <div id="burnOtherModels" style="font-size:11px;color:#8f959e;margin-top:4px"></div>
-        </div>
-
         <!-- P2: 用量来源拆分 -->
         <div class="panel" style="margin-bottom:20px">
             <div class="panel-title">📊 用量来源拆分 <span id="usageBreakdownDays" style="font-size:12px;color:#8f959e;font-weight:400;margin-left:6px"></span></div>
             <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px">
                 <div>
                     <div style="font-size:28px;font-weight:700" id="usageTotalTokens">-</div>
-                    <div style="font-size:11px;color:#8f959e">Token总量</div>
-                </div>
-                <div>
-                    <div style="font-size:28px;font-weight:700" id="usageTotalCost">-</div>
-                    <div style="font-size:11px;color:#8f959e">预估费用</div>
-                </div>
-                <div>
-                    <div style="font-size:28px;font-weight:700" id="usageTotalReq">-</div>
                     <div style="font-size:11px;color:#8f959e">调用次数</div>
                 </div>
             </div>
             <div style="margin-bottom:8px;font-size:12px;color:#8f959e">来源分布</div>
             <div id="usageBySource" style="display:flex;flex-direction:column;gap:6px"></div>
-        </div>
-
-        <!-- P2: Cron任务Token排行 -->
-        <div class="panel" style="margin-bottom:20px">
-            <div class="panel-title">🤖 Cron 任务 Token 排行 <span style="font-size:12px;color:#8f959e;font-weight:400;margin-left:6px">近7天</span></div>
-            <div id="cronJobRanking"><div class="loading">加载中</div></div>
         </div>
 
     </div>
@@ -613,31 +515,16 @@
             <div id="ctxList"><div class="loading">加载中</div></div>
         </div>
 
-        <!-- Sessions list + mini calendar -->
-        <div class="two-col">
-            <div class="panel">
-                <div class="panel-title">👥 会话详情</div>
-                <div class="session-list" id="sessionList"><div class="loading">加载中</div></div>
-            </div>
-            <div class="panel">
-                <div class="panel-title">📅 发布日历</div>
-                <div class="cal-header">
-                    <div class="cal-nav">
+        <!-- Cron任务调用次数排行 -->
+        <div class="panel" style="margin-bottom:20px">
+            <div class="panel-title">🤖 Cron 任务 调用次数排行 <span style="font-size:12px;color:#8f959e;font-weight:400;margin-left:6px">近7天</span></div>
+            <div id="cronJobRanking"><div class="loading">加载中</div></div>
+        </div>
 
-                    </div>
-
-                </div>
-                <div class="cal-weekdays">
-                    <div class="cal-weekday">一</div>
-                    <div class="cal-weekday">二</div>
-                    <div class="cal-weekday">三</div>
-                    <div class="cal-weekday">四</div>
-                    <div class="cal-weekday">五</div>
-                    <div class="cal-weekday">六</div>
-                    <div class="cal-weekday">日</div>
-                </div>
-                <div class="cal-grid" id="calGrid2"></div>
-            </div>
+        <!-- Sessions list -->
+        <div class="panel" style="margin-bottom:20px">
+            <div class="panel-title">👥 会话详情</div>
+            <div class="session-list" id="sessionList"><div class="loading">加载中</div></div>
         </div>
 
     </div>
@@ -648,7 +535,7 @@
 
 <script>
 // ── State ──
-const SOURCE_COLORS = ['#07c160','#5bc0de','#f39c12','#9b59b6','#e74c3c','#3498db'];
+
 let calData = {}; // day -> tasks
 let calDaysInMonth = 30;
 
@@ -673,7 +560,7 @@ async function api(url) {
 // OVERVIEW TAB
 // ═══════════════════════════════════════
 async function loadOverview() {
-    await Promise.all([loadStats(), loadPublish(), loadAnalysis(), loadMemory(), loadQuickLinks(), loadCronTasks(), loadCronReliability(), loadAgentActivity(), loadCronHistory(), loadWorkData(), loadHealthz(), loadDiskSpace()]);
+    await Promise.all([loadStats(), loadPublish(), loadMemory(), loadQuickLinks(), loadCronTasks(), loadCronReliability(), loadAgentActivity(), loadCronHistory(), loadHealthz(), loadDiskSpace()]);
     loadCalendarOverview();
     document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('zh-CN');
 }
@@ -751,19 +638,31 @@ async function loadDiskSpace() {
 
 async function loadStats() {
     try {
-        const d = await api('/dashboard/api/current-status');
-        // 本时段内模型调用量
-        document.getElementById('statWindowUsed').textContent = d.used || 0;
-        // token 消耗加到 sub 里
-        const tokens = d.window_total_tokens || 0;
-        document.getElementById('statWindowKey').textContent = '窗口 ' + (d.window_key || '-') + ' | Token ' + tokens.toLocaleString();
+        const [d, dTp] = await Promise.all([
+            api('/dashboard/api/current-status'),
+            api('/dashboard/api/token-plan')
+        ]);
+
+        // 真实 Token Plan 配额（interval_remain = API返回的已使用量，interval_used = API返回的剩余量）
+        const m2 = (dTp.m2 || {});
+        const intervalUsed = m2.interval_remain || 0;  // API的 interval_remain 实为已使用
+        const intervalRemain = m2.interval_used || 0;  // API的 interval_used 实为剩余
+        const intervalTotal = m2.interval_total || 0;
+        const intervalPct = m2.interval_pct || 0;
+
+        // 本时段内模型调用量（来自 MiniMax Token Plan）
+        const usedEl = document.getElementById('statWindowUsed');
+        usedEl.textContent = intervalUsed;
+        usedEl.className = 'stat-value ' + (intervalPct < 70 ? 'green' : intervalPct < 90 ? 'amber' : 'red');
 
         // 本时段内剩余调用量
-        const remain = d.remaining || 0;
-        const pct = Math.round(remain / 600 * 100);
         const remainEl = document.getElementById('statWindowRemain');
-        remainEl.textContent = remain;
-        remainEl.className = 'stat-value ' + (pct > 50 ? 'green' : pct > 20 ? 'amber' : 'red');
+        remainEl.textContent = intervalRemain;
+        remainEl.className = 'stat-value ' + (intervalPct < 70 ? 'green' : intervalPct < 90 ? 'amber' : 'red');
+
+        // token 消耗（来自 current-status）
+        const tokens = d.window_total_tokens || 0;
+        document.getElementById('statWindowKey').textContent = 'Token ' + tokens.toLocaleString();
 
         // 当前会话数
         document.getElementById('statActiveSessions').textContent = d.active_in_window || 0;
@@ -1055,7 +954,6 @@ async function loadCalendarOverview() {
         calData = {};
         (d.tasks || []).forEach(t => { if (!calData[t.day]) calData[t.day] = []; calData[t.day].push(t); });
         renderCalGrid('calGrid');
-        renderCalGrid('calGrid2');
     } catch(e) { console.error(e); }
 }
 
@@ -1141,116 +1039,37 @@ function closeDetail() {
 // USAGE TAB
 // ═══════════════════════════════════════
 async function loadUsage() {
-    await Promise.all([loadUsageStats(), loadUsageBar(), loadUsageSys(), loadUsageBreakdown(), loadCronJobRanking(), loadBurnRate()]);
-}
-
-async function loadBurnRate() {
-    try {
-        const d = await api('/dashboard/api/burn-rate');
-        if (d.error || !d.connected) {
-            document.getElementById('burnIntervalLeft').textContent = '—';
-            document.getElementById('burnRateLabel').textContent = '未连接';
-            return;
-        }
-
-        const m2 = d.m2 || {};
-        const intervalPct = m2.interval_pct || 0;
-        const weeklyPct = m2.weekly_pct || 0;
-
-        const istatusMap = { ok: '#07c160', warn: '#f59e0b', critical: '#ef4444' };
-        const icolor = istatusMap[m2.interval_status] || '#8f959e';
-
-        // 5h窗口
-        const intervalSecs = m2.interval_seconds_left || 0;
-        const countdownStr = intervalSecs >= 3600
-            ? Math.floor(intervalSecs / 3600) + 'h' + Math.round(intervalSecs % 3600 / 60) + 'm'
-            : intervalSecs >= 60
-            ? Math.floor(intervalSecs / 60) + '分钟'
-            : intervalSecs > 0 ? intervalSecs + '秒' : '已重置';
-        document.getElementById('burnIntervalLeft').textContent = countdownStr;
-        document.getElementById('burnIntervalLeft').style.color = icolor;
-        document.getElementById('burnIntervalPct').textContent = (m2.interval_used || 0) + ' / ' + (m2.interval_total || 0) + ' (' + intervalPct + '%)';
-        document.getElementById('burnIntervalBar').style.width = Math.min(intervalPct, 100) + '%';
-        document.getElementById('burnIntervalBar').style.background = icolor;
-
-        // 本周
-        document.getElementById('burnWeeklyLeft').textContent = (m2.weekly_remain || 0) + '次';
-        document.getElementById('burnWeeklyPct').textContent = (m2.weekly_used || 0) + ' / ' + (m2.weekly_total || 0) + ' (' + weeklyPct + '%)';
-        document.getElementById('burnWeeklyBar').style.width = Math.min(weeklyPct, 100) + '%';
-
-        // 预计耗尽
-        const hoursLeft = m2.interval_hours_left;
-        const exhaustStr = hoursLeft ? (hoursLeft < 1 ? Math.round(hoursLeft * 60) + '分钟' : hoursLeft.toFixed(1) + '小时') : '充足';
-        document.getElementById('burnExhaustHours').textContent = exhaustStr;
-        document.getElementById('burnExhaustHours').style.color = icolor;
-
-        // 标签
-        let label = '';
-        if (m2.interval_status === 'critical') label = '⚠️ M2.7 配额即将耗尽';
-        else if (m2.interval_status === 'warn') label = '🟡 M2.7 配额消耗中';
-        else label = '🟢 M2.7 配额充足';
-        document.getElementById('burnRateLabel').textContent = label;
-        document.getElementById('burnRateLabel').style.color = icolor;
-
-        // 其他模型状态
-        const otherModels = (d.all_models || []).filter(m => !m.model_key.includes('MiniMax-M'));
-        if (otherModels.length > 0) {
-            const modelStatus = otherModels.map(m => {
-                const used = m.interval_used || 0;
-                const total = m.interval_total || 0;
-                const remain = m.interval_remain || 0;
-                if (total === 0) return '';
-                return m.name + ': ' + used + '/' + total + ' (剩' + remain + ')';
-            }).filter(Boolean).join(' · ');
-            document.getElementById('burnOtherModels').innerHTML = '其他模型: ' + modelStatus + ' <span style="color:#8f959e">(语音/图片为滚动窗口，口径与后台日统计可能不一致)</span>';
-        }
-    } catch(e) { console.error(e); }
+    await Promise.all([loadUsageBar(), loadUsageSys(), loadUsageBreakdown(), loadWorkData()]);
 }
 
 async function loadUsageStats() {
     try {
-        const [d, dDaily, dSess, dWin] = await Promise.all([
+        const [d, dDaily, dSess, dTp] = await Promise.all([
             api('/dashboard/api/stats?period=month'),
             api('/dashboard/api/stats-daily'),
             api('/dashboard/api/sessions'),
-            api('/dashboard/api/stats?period=day')
+            api('/dashboard/api/token-plan')
         ]);
-        const remaining = 600 - (dWin.window_calls || 0);
-        const pct = Math.round(remaining / 600 * 100);
-        const winEl = document.getElementById('usageWindow');
-        winEl.textContent = remaining + '/600';
-        winEl.className = 'stat-value ' + (pct > 50 ? 'green' : pct > 20 ? 'amber' : 'red');
+        const m2 = (dTp.m2 || {});
+        const intervalTotal = m2.interval_total || 0;
+        const intervalRemain = m2.interval_remain || 0;  // API interval_remain = 已消耗
+        const intervalUsed = m2.interval_used || 0;        // API interval_used = 剩余
+        const intervalPct = m2.interval_pct || 0;
 
+        // 窗口配额（真实 Token Plan 数据）
+        const winEl = document.getElementById('usageWindow');
+        winEl.textContent = intervalRemain + '/' + intervalTotal;
+        winEl.className = 'stat-value ' + (intervalPct < 70 ? 'green' : intervalPct < 90 ? 'amber' : 'red');
+
+        // Token 剩余
+        document.getElementById('usageTokens').textContent = intervalUsed + '';
+
+        // 总调用/日均（来自 API 日志）
         document.getElementById('usageTotal').textContent = d.total_calls || 0;
         document.getElementById('usageRange').textContent = d.range ? d.range.start + ' 起' : '-';
-
         const days = (dDaily.daily || []).filter(dd => dd.total > 0).length || 1;
         document.getElementById('usageAvg').textContent = Math.round((d.total_calls || 0) / days);
-        document.getElementById('usageTokens').textContent = remaining + '';
-        document.getElementById('usageSessions').textContent = (dSess.sessions || []).filter(s => s.status === 'active').length;
-
-        const sources = Object.entries(d.by_source || {});
-        renderPieChart(sources);
-        document.getElementById('sourceLegend').innerHTML = sources.map(([s, c], i) =>
-            `<div class="source-item"><span class="source-dot" style="background:${SOURCE_COLORS[i%SOURCE_COLORS.length]}"></span>${escHtml(s)} (${c})</div>`
-        ).join('');
     } catch(e) { console.error(e); }
-}
-
-function renderPieChart(data) {
-    const el = document.getElementById('chartPie');
-    el.innerHTML = '';
-    if (!data || data.length === 0) { el.innerHTML = '<div class="no-data">暂无数据</div>'; return; }
-    const w = el.clientWidth || 300, h = 200;
-    const r = Math.min(w, h) / 2 - 25;
-    const svg = d3.select(el).append('svg').attr('viewBox', `0 0 ${w} ${h}`);
-    const g = svg.append('g').attr('transform', `translate(${w/2},${h/2})`);
-    const pie = d3.pie().value(d => d[1]).sort(null);
-    const arc = d3.arc().innerRadius(r * 0.55).outerRadius(r);
-    const total = data.reduce((s, d) => s + d[1], 0);
-    g.selectAll('path').data(pie(data)).join('path')
-        .attr('d', arc).attr('fill', (d, i) => SOURCE_COLORS[i % SOURCE_COLORS.length]).attr('opacity', 0.9)
-        .append('title').text(d => `${d.data[0]}: ${d.data[1]} (${(d.data[1]/total*100).toFixed(0)}%)`);
 }
 
 async function loadUsageBar() {
@@ -1320,12 +1139,10 @@ async function loadUsageBreakdown() {
     try {
         const d = await api('/dashboard/api/usage-breakdown?days=7');
         document.getElementById('usageBreakdownDays').textContent = '近 ' + d.days + ' 天';
-        document.getElementById('usageTotalTokens').textContent = d.total_tokens > 0 ? Math.round(d.total_tokens / 1000) + 'K' : '-';
-        document.getElementById('usageTotalCost').textContent = d.total_cost > 0 ? '$' + d.total_cost.toFixed(2) : '-';
-        document.getElementById('usageTotalReq').textContent = d.total_requests || '-';
+        document.getElementById('usageTotalTokens').textContent = d.total_requests || '-';
 
         const byType = d.by_type || [];
-        const totalTokens = d.total_tokens || 1;
+        const totalReqs = d.total_requests || 1;
         const sourceColors = {main: '#07c160', cron: '#5bc0de', feishu: '#9b59b6', wechat: '#f39c12', other: '#8f959e'};
         const sourceNames = {main: '主会话', cron: '定时任务', feishu: '飞书', wechat: '微信', other: '其他'};
 
@@ -1336,18 +1153,16 @@ async function loadUsageBreakdown() {
         }
 
         el.innerHTML = byType.map(t => {
-            const pct = Math.round(t.total_tokens / totalTokens * 100);
+            const pct = Math.round((t.requests || 0) / totalReqs * 100);
             const color = sourceColors[t.type] || '#8f959e';
             const name = sourceNames[t.type] || t.type;
-            const costStr = t.cost > 0 ? '$' + t.cost.toFixed(2) : '';
             return `<div style="display:flex;align-items:center;gap:10px;font-size:13px">
                 <div style="width:70px;text-align:right;color:#646a73">${name}</div>
                 <div style="flex:1;background:#f0f1f3;border-radius:4px;height:18px;overflow:hidden">
                     <div style="width:${pct}%;height:100%;background:${color};border-radius:4px"></div>
                 </div>
-                <div style="width:55px;text-align:right;font-weight:600">${Math.round(t.total_tokens/1000)}K</div>
+                <div style="width:55px;text-align:right;font-weight:600">${t.requests || 0}</div>
                 <div style="width:45px;text-align:right;color:#8f959e">${pct}%</div>
-                <div style="width:60px;text-align:right;color:#8f959e">${costStr}</div>
             </div>`;
         }).join('');
     } catch(e) { console.error(e); }
@@ -1363,13 +1178,13 @@ async function loadCronJobRanking() {
             return;
         }
 
-        const totalTokens = cronType.total_tokens || 1;
+        const totalReqs = cronType.requests || 1;
         el.innerHTML = cronType.sources.map(s => {
-            const pct = Math.round(s.tokens / totalTokens * 100);
+            const pct = Math.round((s.requests || 0) / totalReqs * 100);
             const color = pct >= 30 ? '#ef4444' : pct >= 15 ? '#f59e0b' : '#07c160';
             return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #f5f6f8;font-size:13px">
                 <div style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.label)}</div>
-                <div style="width:55px;text-align:right;color:#8f959e">${Math.round(s.tokens/1000)}K</div>
+                <div style="width:55px;text-align:right;color:#8f959e">${s.requests || 0}次</div>
                 <div style="width:45px;text-align:right;font-weight:600;color:${color}">${pct}%</div>
             </div>`;
         }).join('');
@@ -1381,11 +1196,12 @@ async function loadCronJobRanking() {
 // ═══════════════════════════════════════
 async function loadSessions() {
     try {
-        const [dSess, dWin, dCtx] = await Promise.all([
+        const [dSess, dTp, dCtx] = await Promise.all([
             api('/dashboard/api/sessions'),
-            api('/dashboard/api/stats?period=day'),
+            api('/dashboard/api/token-plan'),
             api('/dashboard/api/session-context')
         ]);
+        await loadCronJobRanking();
         const sess = dSess.sessions || [];
         const active = sess.filter(s => s.status === 'active').length;
         const running = sess.filter(s => s.status === 'running').length;
@@ -1394,10 +1210,18 @@ async function loadSessions() {
         document.getElementById('sessActive').textContent = active;
         document.getElementById('sessRunning').textContent = running;
         document.getElementById('sessIdle').textContent = idle;
-        const remaining = 600 - (dWin.window_calls || 0);
-        document.getElementById('sessWindow').textContent = remaining + '/600';
 
-        // Build context map: session_key -> context data
+        // 订阅窗口（真实 Token Plan 数据）
+        const m2 = (dTp.m2 || {});
+        const intervalRemain = m2.interval_remain || 0;  // API interval_remain = 已消耗
+        const intervalUsed = m2.interval_used || 0;      // API interval_used = 剩余
+        const intervalTotal = m2.interval_total || 0;
+        const intervalPct = m2.interval_pct || 0;
+        const winEl2 = document.getElementById('sessWindow');
+        winEl2.textContent = intervalRemain + '/' + intervalTotal;
+        winEl2.className = 'stat-value ' + (intervalPct < 70 ? 'green' : intervalPct < 90 ? 'amber' : 'red');
+
+        // Build context map
         const ctxMap = {};
         const ctxSessions = dCtx.sessions || [];
         ctxSessions.forEach(cs => { ctxMap[cs.session_key] = cs; });
@@ -1411,7 +1235,6 @@ async function loadSessions() {
                 const ctx = ctxMap[s.session_key] || {};
                 const usagePct = ctx.usage_pct;
                 const thState = ctx.threshold_state || 'not_connected';
-                // Context pressure badge
                 let ctxBadge = '';
                 if (thState === 'critical') {
                     ctxBadge = '<span style="margin-left:6px;font-size:11px;padding:1px 5px;border-radius:6px;background:#fef2f2;color:#ef4444">快满了</span>';
@@ -1420,25 +1243,24 @@ async function loadSessions() {
                 } else if (thState === 'ok' && usagePct !== null) {
                     ctxBadge = '<span style="margin-left:6px;font-size:11px;padding:1px 5px;border-radius:6px;background:#e8f5e9;color:#07c160">' + usagePct + '%</span>';
                 }
-                // Session type badge
                 const sessType = s.kind || 'main';
                 const typeMap = { main: '主', cron: '定时', feishu: '飞书', wechat: '微信', discord: 'Discord' };
                 const typeColorMap = { main: '#07c160', cron: '#5bc0de', feishu: '#9b59b6', wechat: '#f39c12', discord: '#7289da' };
                 const typeTag = typeMap[sessType] || sessType;
                 const typeBg = typeColorMap[sessType] || '#8f959e';
                 const typeBadge2 = '<span style="margin-right:6px;font-size:10px;padding:1px 5px;border-radius:6px;background:' + typeBg + '22;color:' + typeBg + '">' + typeTag + '</span>';
-                return `<div class="session-item">
-                    <span class="session-dot ${dot}"></span>
-                    <span class="session-name">${escHtml(s.label || s.session_key || '未知')}</span>
-                    <span class="session-meta">${typeBadge2}${label} · ${s.last_active || '-'}${ctxBadge}</span>
-                </div>`;
+                return '<div class="session-item">' +
+                    '<span class="session-dot ' + dot + '"></span>' +
+                    '<span class="session-name">' + escHtml(s.label || s.session_key || '未知') + '</span>' +
+                    '<span class="session-meta">' + typeBadge2 + label + ' · ' + (s.last_active || '-') + ctxBadge + '</span>' +
+                '</div>';
             }).join('');
         }
 
         // Context Pressure panel
         const ctxEl = document.getElementById('ctxList');
         if (!dCtx || !dCtx.sessions) {
-            ctxEl.innerHTML = '<div class="no-data">加载失败: ' + (dCtx.error || 'unknown') + '</div>';
+            ctxEl.innerHTML = '<div class="no-data">加载失败</div>';
         }
         const sc = dCtx.state_counts || {};
         const totalCtx = dCtx.total || 0;
@@ -1449,37 +1271,28 @@ async function loadSessions() {
         if (critical > 0) {
             document.getElementById('ctxCritical').style.display = 'inline-block';
             document.getElementById('ctxCritical').textContent = '🔴 ' + critical + ' 个严重';
-        } else {
-            document.getElementById('ctxCritical').style.display = 'none';
-        }
+        } else { document.getElementById('ctxCritical').style.display = 'none'; }
         if (warn > 0) {
             document.getElementById('ctxWarn').style.display = 'inline-block';
             document.getElementById('ctxWarn').textContent = '🟡 ' + warn + ' 个警告';
-        } else {
-            document.getElementById('ctxWarn').style.display = 'none';
-        }
+        } else { document.getElementById('ctxWarn').style.display = 'none'; }
         if (ok > 0) {
             document.getElementById('ctxOk').style.display = 'inline-block';
             document.getElementById('ctxOk').textContent = '🟢 ' + ok + ' 个正常';
-        } else {
-            document.getElementById('ctxOk').style.display = 'none';
-        }
-        // 会话类型分布
+        } else { document.getElementById('ctxOk').style.display = 'none'; }
         const typeCounts = dCtx.type_counts || {};
-        const typeNames = { main: '主会话', cron: '定时任务', feishu: '飞书', wechat: '微信', discord: 'Discord', telegram: 'Telegram' };
-        const typeColor = { main: '#07c160', cron: '#5bc0de', feishu: '#9b59b6', wechat: '#f39c12', discord: '#7289da', telegram: '#0088cc' };
+        const typeNames = { main: '主会话', cron: '定时任务', feishu: '飞书', wechat: '微信', discord: 'Discord' };
+        const typeColor = { main: '#07c160', cron: '#5bc0de', feishu: '#9b59b6', wechat: '#f39c12', discord: '#7289da' };
         const typeParts = Object.entries(typeCounts).map(([t, cnt]) => {
             const name = typeNames[t] || t;
             const color = typeColor[t] || '#8f959e';
             return '<span style="padding:1px 6px;border-radius:8px;background:' + color + '22;color:' + color + ';font-weight:500">' + name + ' ' + cnt.total + '</span>';
         }).join(' ');
         document.getElementById('ctxCriticalCount').innerHTML = '共 ' + totalCtx + ' 个会话' + (typeParts ? ' · ' + typeParts : '');
-        document.getElementById('ctxCriticalCount').style.fontWeight = '400'; 
 
         if (!ctxSessions || ctxSessions.length === 0) {
             ctxEl.innerHTML = '<div class="no-data">暂无 Context 数据</div>';
         } else {
-            // Show top 10 by usage_pct
             const top10 = ctxSessions.slice(0, 10);
             ctxEl.innerHTML = top10.map(cs => {
                 const pct = cs.usage_pct;
@@ -1488,18 +1301,13 @@ async function loadSessions() {
                 const barWidth = pct !== null ? Math.min(pct, 100) : 0;
                 const label2 = thState === 'critical' ? '快满了' : thState === 'warn' ? '使用中' : thState === 'ok' ? '正常' : '未知';
                 const labelColor = thState === 'critical' ? '#ef4444' : thState === 'warn' ? '#f59e0b' : thState === 'ok' ? '#07c160' : '#8f959e';
-                // Extract short session name
-                const shortName = cs.session_key.split(':').pop() || cs.session_key;
-                return `<div style="display:flex;align-items:center;gap:10px;padding:4px 0;border-bottom:1px solid #f5f6f8;font-size:12px">
-                    <div style="width:70%;display:flex;align-items:center;gap:6px;overflow:hidden">
-                        <span style="font-size:10px;padding:1px 5px;border-radius:6px;background:${barColor}20;color:${barColor};font-weight:600;flex-shrink:0">${label2}</span>
-                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#4a4f59">${escHtml(cs.session_key)}</span>
-                    </div>
-                    <div style="flex:1;background:#f0f1f3;border-radius:4px;height:6px;overflow:hidden;margin:0 6px">
-                        <div style="width:${barWidth}%;height:100%;background:${barColor};border-radius:4px"></div>
-                    </div>
-                    <span style="width:40px;text-align:right;font-weight:600;color:${labelColor}">${pct !== null ? pct + '%' : '—'}</span>
-                </div>`;
+                return '<div style="display:flex;align-items:center;gap:10px;padding:4px 0;border-bottom:1px solid #f5f6f8;font-size:12px">' +
+                    '<div style="width:70%;display:flex;align-items:center;gap:6px;overflow:hidden">' +
+                    '<span style="font-size:10px;padding:1px 5px;border-radius:6px;background:' + barColor + '20;color:' + barColor + ';font-weight:600;flex-shrink:0">' + label2 + '</span>' +
+                    '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#4a4f59">' + escHtml(cs.session_key) + '</span></div>' +
+                    '<div style="flex:1;background:#f0f1f3;border-radius:4px;height:6px;overflow:hidden;margin:0 6px">' +
+                    '<div style="width:' + barWidth + '%;height:100%;background:' + barColor + ';border-radius:4px"></div></div>' +
+                    '<span style="width:40px;text-align:right;font-weight:600;color:' + labelColor + '">' + (pct !== null ? pct + '%' : '—') + '</span></div>';
             }).join('');
         }
     } catch(e) {
@@ -1507,7 +1315,7 @@ async function loadSessions() {
         const el = document.getElementById('sessionList');
         if (el) el.innerHTML = '<div class="no-data">加载失败: ' + String(e) + '</div>';
         const ctxEl = document.getElementById('ctxList');
-        if (ctxEl) ctxEl.innerHTML = '<div class="no-data">加载失败: ' + String(e) + '</div>';
+        if (ctxEl) ctxEl.innerHTML = '<div class="no-data">加载失败</div>';
     }
 }
 

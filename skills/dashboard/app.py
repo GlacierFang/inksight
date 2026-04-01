@@ -159,7 +159,7 @@ def api_stats():
         "by_source": dict(by_source),
         "window_key": window_key,
         "window_calls": len(window_calls),
-        "window_limit": 600,
+        "window_limit": None,  # 已废弃，请使用 /api/token-plan 获取真实配额
         "window_by_source": dict(window_by_source),
         "range": {
             "start": start.strftime("%Y-%m-%d %H:%M"),
@@ -738,74 +738,7 @@ def api_connector_status():
                 "hint": "数据来源：" + str(sub_found),
             })
         else:
-            # 尝试读取 MiniMax Token Plan 真实配额
-            try:
-                import urllib.request
-                api_key = None
-                auth_file = OPENCLAW_HOME / "agents" / "main" / "agent" / "auth-profiles.json"
-                if auth_file.exists():
-                    with open(auth_file, 'r', encoding='utf-8') as f:
-                        auth_data = json.load(f)
-                    for profile in auth_data.get("profiles", {}).values():
-                        if profile.get("provider") == "minimax-portal":
-                            access = profile.get("access", "")
-                            if access.startswith("sk-"):
-                                api_key = access
-                                break
-
-                if api_key:
-                    req = urllib.request.Request(
-                        "https://www.minimaxi.com/v1/api/openplatform/coding_plan/remains",
-                        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                        method="GET"
-                    )
-                    with urllib.request.urlopen(req, timeout=10) as resp:
-                        tp_data = json.loads(resp.read())
-                    base_resp = tp_data.get("base_resp", {})
-                    if base_resp.get("status_code") == 0:
-                        mm_models = tp_data.get("model_remains", [])
-                        # 找 M2.7
-                        m2_info = next((m for m in mm_models if "MiniMax-M" in m.get("model_name", "")), None)
-                        if m2_info:
-                            total_w = m2_info.get("current_weekly_total_count", 0)
-                            used_w = m2_info.get("current_weekly_usage_count", 0)
-                            remain_w = total_w - used_w
-                            total_i = m2_info.get("current_interval_total_count", 0)
-                            used_i = m2_info.get("current_interval_usage_count", 0)
-                            remain_i = total_i - used_i
-                            if total_i > 0:
-                                pct = used_i / total_i * 100
-                                status2 = "critical" if pct >= 90 else "warn" if pct >= 70 else "connected"
-                            else:
-                                status2 = "connected"
-                            connectors.append({
-                                "id": "token_plan",
-                                "name": "Token Plan 配额",
-                                "icon": "💳",
-                                "status": status2,
-                                "message": f"M2.7 本周 {used_w}/{total_w} 次，5h窗口 {used_i}/{total_i} 次（剩{remain_i}）",
-                                "hint": f"本周剩余 {remain_w} 次 · {total_w}次/周套餐",
-                            })
-                        else:
-                            connectors.append({
-                                "id": "token_plan", "name": "Token Plan 配额", "icon": "💳",
-                                "status": "partial", "message": "未找到 M2.7 配额数据",
-                                "hint": "检查 MiniMax Token Plan 配置",
-                            })
-                    else:
-                        raise Exception(base_resp.get("status_msg", "API返回错误"))
-                else:
-                    connectors.append({
-                        "id": "token_plan", "name": "Token Plan 配额", "icon": "💳",
-                        "status": "not_connected", "message": "未找到 MiniMax API Key",
-                        "hint": "在 MiniMax 开放平台获取 API Key",
-                    })
-            except Exception as ex:
-                connectors.append({
-                    "id": "token_plan", "name": "Token Plan 配额", "icon": "💳",
-                    "status": "not_connected", "message": f"读取失败: {ex}",
-                    "hint": "检查网络连接或 API Key 是否有效",
-                })
+            pass
 
         # 5. 趋势历史（检查 SQLite metrics.db）
         try:
@@ -1033,7 +966,7 @@ def api_disk_space():
         # 各模块路径
         media_path = Path.home() / ".openclaw" / "media"
         gallery_dir = Path("/home/open/.openclaw/workspace/skills/gallery")
-        library_dir = Path("/home/open/.openclaw/workspace/skills/library")
+        library_dir = Path("/home/open/.openclaw/workspace/library")
         dashboard_dir = Path("/home/open/.openclaw/workspace/skills/dashboard/data")
         workspace_dir = Path("/home/open/.openclaw/workspace")
         inbound_dir = gallery_dir / "data" / "inbound"
@@ -1304,9 +1237,13 @@ def api_token_plan():
                 "weekly_reset_in": weekly_reset_in,
             })
 
+        # 提取 M2.7 单独返回
+        m2_info = next((m for m in models if "MiniMax-M" in (m.get("model_key") or "")), None)
+
         return jsonify({
             "connected": True,
             "models": models,
+            "m2": m2_info,
             "fetched_at": now.isoformat(),
         })
     except Exception as e:
@@ -1314,123 +1251,6 @@ def api_token_plan():
 
 
 
-
-
-@app.route("/api/burn-rate")
-def api_burn_rate():
-    """
-    基于 MiniMax Token Plan 真实配额计算 Burn Rate
-    仅参考 M2.7 的5h窗口和本周配额
-    """
-    try:
-        api_key = None
-        auth_file = Path.home() / ".openclaw" / "agents" / "main" / "agent" / "auth-profiles.json"
-        if auth_file.exists():
-            with open(auth_file, 'r', encoding='utf-8') as f:
-                auth_data = json.load(f)
-            for profile in auth_data.get("profiles", {}).values():
-                if profile.get("provider") == "minimax-portal":
-                    access = profile.get("access", "")
-                    if access.startswith("sk-"):
-                        api_key = access
-                        break
-
-        if not api_key:
-            return jsonify({"error": "未找到 API Key", "connected": False}), 200
-
-        import urllib.request
-        req = urllib.request.Request(
-            "https://www.minimaxi.com/v1/api/openplatform/coding_plan/remains",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            method="GET"
-        )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            tp_data = json.loads(resp.read())
-
-        base_resp = tp_data.get("base_resp", {})
-        if base_resp.get("status_code") != 0:
-            return jsonify({"error": base_resp.get("status_msg"), "connected": False}), 200
-
-        TZ_LOCAL = timezone(timedelta(hours=8))
-        now = datetime.now(TZ_LOCAL)
-
-        m2_info = None
-        all_models = []
-
-        for m in (tp_data.get("model_remains") or []):
-            name = m.get("model_name", "")
-            interval_total = m.get("current_interval_total_count", 0)
-            interval_used = m.get("current_interval_usage_count", 0)
-            weekly_total = m.get("current_weekly_total_count", 0)
-            weekly_used = m.get("current_weekly_usage_count", 0)
-            interval_end_ms = m.get("end_time", 0)
-            weekly_end_ms = m.get("weekly_end_time", 0)
-
-            interval_remain = max(interval_total - interval_used, 0)
-            weekly_remain = max(weekly_total - weekly_used, 0)
-
-            # 窗口剩余秒数（实际时间差）
-            interval_seconds_left = max(0, interval_end_ms // 1000 - int(now.timestamp())) if interval_end_ms else 0
-            weekly_seconds_left = max(0, weekly_end_ms // 1000 - int(now.timestamp())) if weekly_end_ms else 0
-
-            # 窗口已过秒数（实际流逝）
-            interval_seconds_passed = max(0, 5 * 3600 - interval_seconds_left)
-            weekly_seconds_passed = max(0, 7 * 86400 - weekly_seconds_left)
-
-            # 消耗速率（次/小时）
-            interval_rate = (interval_used / max(interval_seconds_passed, 1)) * 3600 if interval_seconds_passed > 0 else 0
-            weekly_rate = (weekly_used / max(weekly_seconds_passed, 1)) * 3600 if weekly_seconds_passed > 0 else 0
-
-            # 预计耗尽（小时）
-            hours_interval = (interval_remain / interval_rate) if interval_rate > 0 else float('inf')
-            hours_weekly = (weekly_remain / weekly_rate) if weekly_rate > 0 else float('inf')
-
-            # 状态
-            if interval_total > 0:
-                pct = interval_used / interval_total * 100
-                istatus = "critical" if pct >= 90 else "warn" if pct >= 70 else "ok"
-            else:
-                istatus = "ok"
-
-            name_map = {
-                "MiniMax-M*": "MiniMax-M2.7",
-                "speech-hd": "语音 HD",
-                "MiniMax-Hailuo-2.3-Fast-6s-768p": "视频 Fast",
-                "MiniMax-Hailuo-2.3-6s-768p": "视频标准",
-                "music-2.5": "音乐",
-                "image-01": "图片",
-            }
-
-            model_data = {
-                "name": name_map.get(name, name),
-                "model_key": name,
-                "interval_total": interval_total,
-                "interval_used": interval_used,
-                "interval_remain": interval_remain,
-                "interval_pct": round(interval_used / interval_total * 100, 1) if interval_total > 0 else 0,
-                "interval_status": istatus,
-                "interval_hours_left": round(hours_interval, 1) if hours_interval < float('inf') else None,
-                "interval_seconds_left": interval_seconds_left,
-                "weekly_total": weekly_total,
-                "weekly_used": weekly_used,
-                "weekly_remain": weekly_remain,
-                "weekly_pct": round(weekly_used / weekly_total * 100, 1) if weekly_total > 0 else 0,
-                "weekly_hours_left": round(hours_weekly, 1) if hours_weekly < float('inf') else None,
-                "weekly_seconds_left": weekly_seconds_left,
-            }
-
-            if "MiniMax-M" in name:
-                m2_info = model_data
-            all_models.append(model_data)
-
-        return jsonify({
-            "connected": True,
-            "fetched_at": now.isoformat(),
-            "m2": m2_info,
-            "all_models": all_models,
-        })
-    except Exception as e:
-        return jsonify({"error": str(e), "connected": False}), 200
 
 
 @app.route("/api/system")
@@ -1455,7 +1275,7 @@ def api_system():
     except Exception as e:
         items.append({"name": "Token 窗口", "status": "error", "message": "检查失败"})
 
-    # 2. Gallery 连接
+    # 1. Gallery 连接
     try:
         if GALLERY_DB.exists():
             conn = sqlite3.connect(str(GALLERY_DB))
@@ -1666,14 +1486,12 @@ def api_current_status():
             except Exception as e:
                 pass
 
-        used = window_model_calls
-        remaining = max(0, 600 - used)
-
+        # 剩余配额改由 /api/token-plan 提供，此处仅统计当前会话
         return jsonify({
             "window_key": window_key,
-            "used": used,
-            "remaining": remaining,
-            "limit": 600,
+            "used": window_model_calls,
+            "remaining": None,  # 请使用 /api/token-plan 获取真实 Token Plan 配额
+            "limit": None,
             "total_sessions": total_sessions,
             "active_in_window": active_in_window,
             "active_dialogs": active_dialogs,
@@ -1686,54 +1504,63 @@ def api_current_status():
 
 @app.route("/api/sessions")
 def api_sessions():
-    """活跃会话列表（从 OpenClaw 获取）"""
+    """活跃会话列表（从 sessions.json 读取）"""
     try:
-        import urllib.request
-        req = urllib.request.Request(
-            "http://localhost:18789/api/sessions/list",
-            headers={"Content-Type": "application/json"},
-            method="GET"
-        )
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            data = json.loads(resp.read())
-            all_sessions = data.get("sessions", [])
-
+        sessions_file = Path("/home/open/.openclaw/agents/main/sessions/sessions.json")
         now_ts = datetime.now(TZ).timestamp()
         SESSION_WINDOW = 300  # 5分钟内活跃
 
         sessions = []
-        for s in all_sessions:
-            # 只看 main / agent / subagent 类型
-            kind = s.get("kind", "")
-            if kind not in ("main", "agent", "subagent"):
-                continue
+        if sessions_file.exists():
+            with open(sessions_file, 'r', encoding='utf-8') as f:
+                sessions_data = json.load(f)
 
-            last_ts = s.get("lastMessageAt", 0)
-            last_active = ""
-            if last_ts:
-                try:
-                    last_dt = datetime.fromtimestamp(last_ts, tz=TZ)
-                    last_active = last_dt.strftime("%H:%M")
-                except:
-                    pass
+            for key, s in sessions_data.items():
+                # key 格式: agent:{type}:{subtype}，从 key 解析 kind
+                parts = key.split(":")
+                if len(parts) >= 2:
+                    kind = parts[1]  # main / agent
+                else:
+                    kind = s.get("kind", "unknown")
 
-            # 判断状态
-            if kind in ("agent", "subagent"):
-                status = "running"
-            elif last_ts and (now_ts - last_ts) < SESSION_WINDOW:
-                status = "active"
-            else:
-                status = "idle"
+                if kind not in ("main", "agent"):
+                    continue
 
-            sessions.append({
-                "id": s.get("id", ""),
-                "session_key": s.get("id", ""),
-                "label": s.get("label", s.get("id", "")),
-                "kind": kind,
-                "status": status,
-                "last_active": last_active,
-                "channel": s.get("channel", ""),
-            })
+                # 子类型：cron / subagent
+                if len(parts) >= 3 and parts[2] == "cron":
+                    sub_kind = "cron"
+                elif len(parts) >= 3 and parts[2] == "subagent":
+                    sub_kind = "subagent"
+                else:
+                    sub_kind = kind
+
+                updated_at = s.get("updatedAt", 0)
+                updated_ts = updated_at / 1000.0 if updated_at > 1e12 else updated_at
+                last_active = ""
+                if updated_ts:
+                    try:
+                        last_dt = datetime.fromtimestamp(updated_ts, tz=TZ)
+                        last_active = last_dt.strftime("%H:%M")
+                    except:
+                        pass
+
+                # 判断状态：subagent / cron → running；main 且 5 分钟内 → active；否则 idle
+                if sub_kind in ("subagent", "cron"):
+                    status = "running"
+                elif updated_ts and (now_ts - updated_ts) < SESSION_WINDOW:
+                    status = "active"
+                else:
+                    status = "idle"
+
+                sessions.append({
+                    "id": s.get("sessionId", key),
+                    "session_key": key,
+                    "label": s.get("label", key),
+                    "kind": sub_kind,
+                    "status": status,
+                    "last_active": last_active,
+                    "channel": s.get("origin", {}).get("provider", ""),
+                })
 
         return jsonify({"sessions": sessions})
     except Exception as e:
