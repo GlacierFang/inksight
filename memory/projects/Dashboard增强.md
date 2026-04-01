@@ -386,11 +386,8 @@ function classifySessionType(sessionKey: string): "Cron" | "Discord" | "Telegram
 
 | 事项 | 状态 | 备注 |
 |------|------|------|
-| Usage 页柱状图渲染 | ❓ | 前端图表库问题，需排查 ECharts/Chart.js |
-| Usage 页饼图渲染 | ❓ | 同上 |
-| Sessions 页数据真实性 | ✅ 已验证 | gateway 18789 连接正常，数据可信 |
+| Usage 页柱状图渲染 | ❓ | 前端图表库问题，需排查 D3.js |
 | 发布日历标记持久化 | ❓ 待验证 | publish-log.json 已实现但未验证 |
-| 深入分析模块逻辑 | ❌ 待处理 | 列出所有任务无意义，应只展示今日正在分析的任务 |
 | 记忆状态 999天前 bug | ❌ 待处理 | 日期计算明显错误 |
 | 系统状态数据编造 | ✅ 已重构 | 替换为真实 healthz API（2026-04-01）|
 
@@ -417,6 +414,36 @@ function classifySessionType(sessionKey: string): "Cron" | "Discord" | "Telegram
 - Cron 面板增强：健康状态标签 + 下次执行时间
 - Usage Tab 新增：🔥 Burn Rate Token Plan 配额面板
 - 修复：pubCount null 错误导致 loadPublish 崩溃
+
+---
+
+## 四.3 2026-04-02 清理重构完成
+
+**已移除功能：**
+- ❌ Burn Rate 模块：与 Overview stat cards 数据重复，已删除
+- ❌ 来源分布饼图：从开发以来从未渲染（函数存在但未被调用），已删除
+- ❌ 用量页 5 个 stat cards：本期API/日均/窗口配额/Token剩余/会话数，与其他模块重复
+- ❌ 预估费用列：改为调用次数口径后无意义
+- ❌ 总请求数卡片：与调用次数重复
+- ❌ 深入分析模块：功能价值低，已从 Overview 删除
+- ❌ Sessions 页重复发布日历：与 Overview 重复，已删除
+- ❌ Overview 刷新按钮：无实际意义
+
+**Bug 修复：**
+- `/api/sessions` 读取 sessions.json 字段映射错误：`kind` 字段不存在，应从 session key 解析（`agent:main:main` → kind=main，`agent:main:cron:UUID` → kind=cron）
+- `/api/sessions` gateway 18789 接口 404：改为直接读取 sessions.json
+- Token Plan 字段语义反转：interval_used（API）= 剩余量，interval_remain（API）= 已消耗量（已在所有前端引用处修正）
+- Library 磁盘统计路径：`workspace/skills/library` → `workspace/library`（books 在此）
+
+**UI 改进：**
+- 用量来源拆分：统计口径从 Token 改为调用次数
+- Cron 任务排行：从 Usage 迁移至 Sessions 页，命名从"Token排行"改为"调用次数排行"
+- 数据源连接状态：移除 Token Plan 条目（与 Overview 重复）
+- 工作数据模块：从 Overview 迁至 Usage 页
+- 记忆状态：Overview 从双栏布局改为单栏
+
+**API 变更：**
+- `/api/burn-rate` 路由已删除（前端不再使用）
 
 ---
 
@@ -477,7 +504,8 @@ const projectedDaysToLimit = burnRatePerDay > 0
 | 2026-04-01 12:43 | `skills/library.bak_2026-03-31_12-43_chunk_queue/` | Chunk 队列系统 |
 | 2026-04-01 | `skills/library.bak_2026-03-31_pause_resume/` | 暂停/恢复功能 |
 | 2026-04-01 | `skills/library.bak_2026-03-31_explore_history/` | 专题探究历史 |
+| 2026-04-02 | `skills/dashboard.bak_2026-04-02_cleanup/` | 清理重构前备份 |
 
 ---
 
-_Last updated: 2026-04-01 17:44_
+_Last updated: 2026-04-02_
