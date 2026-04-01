@@ -6,7 +6,6 @@ OpenClaw Media Gallery - SQLite 数据库版
 import os
 import json
 import mimetypes
-import requests
 from datetime import datetime
 from pathlib import Path
 from flask import Flask, render_template, jsonify, request, send_from_directory, abort, redirect
@@ -26,7 +25,6 @@ PHOTOS_DIR = MEDIA_BASE / "photos"
 VIDEOS_DIR = MEDIA_BASE / "videos"
 INBOUND_DIR = MEDIA_BASE / "inbound"
 THUMBNAILS_DIR = MEDIA_BASE / ".thumbnails"
-AI_WORKS_DIR = MEDIA_BASE / "ai_works"
 
 PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv"}
@@ -475,179 +473,6 @@ def api_delete_canonical_tag(tag_name):
         c.execute("DELETE FROM tags WHERE name = ?", (tag_name,))
     return jsonify({"success": True})
 
-# ============== AI 风格生成 ==============
-
-@app.route("/gallery/api/ai-styles")
-def api_ai_styles():
-    """支持的 AI 风格列表"""
-    styles = [
-        {"id": "song_gongben", "name": "宋代工笔画", "prompt": "Song Dynasty Gongbi painting style, meticulous brushwork, classical Chinese court painting, elegant and refined"},
-        {"id": "ink_wash", "name": "水墨画", "prompt": "Traditional Chinese ink wash painting, xieyi style, poetic and serene, minimalist strokes"},
-        {"id": "ai_restore", "name": "AI复原图", "prompt": "Historical restoration of ancient Chinese architecture/artifacts, archaeological reconstruction, realistic and detailed"},
-        {"id": "green_mountain", "name": "青绿山水", "prompt": "Chinese landscape painting with azurite and malachite pigments, guqin and clouds atmosphere, classical Chinese blue-green landscape"},
-        {"id": "dunhuang", "name": "敦煌壁画", "prompt": "Dunhuang cave fresco, Buddhist art, mineral pigments, ancient silk road aesthetic"},
-        {"id": "gufeng_figure", "name": "古风人物", "prompt": "Ancient Chinese beauty in traditional Hanfu, classic Chinese painting style, elegant and dignified"},
-        {"id": "ukiyo_e", "name": "浮世绘", "prompt": "Japanese ukiyo-e woodblock print style, flat colors, elegant composition, traditional Japanese aesthetic"},
-        {"id": "cyberpunk", "name": "赛博朋克", "prompt": "Cyberpunk style, neon lights, futuristic Chinese cityscape, glowing neon signs, dark atmosphere with vibrant colors"},
-        {"id": "impressionist", "name": "印象派", "prompt": "Impressionist oil painting style, soft light and color, loose brushwork, Monet or Renoir aesthetic"},
-        {"id": "oil_painting", "name": "油画质感", "prompt": "Classical Western oil painting, rich textures and layers, realistic chiaroscuro, Renaissance masterwork"},
-    ]
-    return jsonify({"styles": styles})
-
-@app.route("/gallery/api/ai-generate", methods=["POST"])
-def api_ai_generate():
-    """调用 MiniMax image-01 图生图，生成 AI 风格图片"""
-    import base64
-    import urllib.request
-    data = request.get_json()
-    photo_filename = data.get("photo_filename")   # e.g. "2026-04-01/uuid.jpg"
-    style_id = data.get("style_id")
-    style_prompt = data.get("style_prompt", "")
-
-    if not photo_filename or not style_id:
-        return jsonify({"error": "缺少参数"}), 400
-
-    # 读取照片完整路径
-    photo_path = PHOTOS_DIR / photo_filename
-    if not photo_path.exists():
-        return jsonify({"error": f"照片不存在: {photo_filename}"}), 404
-
-    # 读取 API Key
-    api_key = None
-    auth_file = Path.home() / ".openclaw" / "agents" / "main" / "agent" / "auth-profiles.json"
-    if auth_file.exists():
-        with open(auth_file) as f:
-            profiles = json.load(f).get("profiles", {})
-        for p in profiles.values():
-            access = p.get("access", "")
-            if access.startswith("sk-"):
-                api_key = access
-                break
-    if not api_key:
-        return jsonify({"error": "未找到 MiniMax API Key"}), 500
-
-    # 读取照片为 base64
-    with open(photo_path, "rb") as f:
-        img_b64 = base64.b64encode(f.read()).decode()
-
-    # 调用 MiniMax image-01 图生图
-    req_body = {
-        "model": "image-01",
-        "prompt": style_prompt,
-        "image_file": f"data:image/jpeg;base64,{img_b64}",
-        "n": 1,
-        "aspect_ratio": "1:1",
-    }
-
-    try:
-        req = urllib.request.Request(
-            "https://api.minimaxi.com/v1/image_generation",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            data=json.dumps(req_body).encode(),
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            result = json.loads(resp.read())
-    except Exception as e:
-        return jsonify({"error": f"MiniMax API 调用失败: {str(e)}"}), 500
-
-    base_resp = result.get("base_resp", {})
-    if base_resp.get("status_code") != 0:
-        return jsonify({"error": base_resp.get("status_msg", "API错误")}), 500
-
-    image_data = result.get("data", {})
-    image_urls = image_data.get("image_urls", [])
-    if not image_urls:
-        return jsonify({"error": "未返回图片"}), 500
-
-    image_url = image_urls[0]
-
-    # 下载图片并保存到 ai_works/
-    today = datetime.now().strftime("%Y-%m-%d")
-    work_dir = AI_WORKS_DIR / today
-    work_dir.mkdir(parents=True, exist_ok=True)
-
-    import uuid
-    output_filename = f"{uuid.uuid4().hex}.jpg"
-    output_path = work_dir / output_filename
-
-    try:
-        with urllib.request.urlopen(image_url, timeout=60) as resp:
-            with open(output_path, "wb") as out:
-                out.write(resp.read())
-    except Exception as e:
-        return jsonify({"error": f"图片下载失败: {str(e)}"}), 500
-
-    # 写入元数据
-    meta = {
-        "original": str(photo_filename),
-        "style_id": style_id,
-        "style_name": data.get("style_name", style_id),
-        "prompt": style_prompt,
-        "generated_at": datetime.now().isoformat(),
-        "image_url": image_url,
-    }
-    meta_path = output_path.with_suffix(".jpg.meta")
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
-
-    # 生成缩略图
-    try:
-        from PIL import Image
-        thumb_dir = THUMBNAILS_DIR / "ai_work" / today
-        thumb_dir.mkdir(parents=True, exist_ok=True)
-        thumb_path = thumb_dir / f"{output_filename}.jpg"
-        with Image.open(output_path) as img:
-            img.thumbnail((400, 400))
-            img.convert("RGB").save(thumb_path, "JPEG", quality=85)
-    except Exception:
-        pass  # 缩略图失败不影响主流程
-
-    return jsonify({
-        "success": True,
-        "filename": str(output_path.relative_to(MEDIA_BASE)),
-        "url": f"/gallery/media/ai_work/{today}/{output_filename}",
-        "thumb_url": f"/gallery/thumb/ai_work/{today}/{output_filename}.jpg",
-        "style_name": data.get("style_name", style_id),
-    })
-
-@app.route("/gallery/api/ai-works")
-def api_ai_works():
-    """列出所有 AI 作品"""
-    if not AI_WORKS_DIR.exists():
-        return jsonify({"works": []})
-
-    works = []
-    for date_dir in sorted(AI_WORKS_DIR.iterdir(), reverse=True):
-        if not date_dir.is_dir():
-            continue
-        for f in sorted(date_dir.iterdir(), reverse=True):
-            if f.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
-                continue
-            meta = {}
-            meta_path = f.with_suffix(".jpg.meta")
-            if meta_path.exists():
-                with open(meta_path, encoding="utf-8") as mf:
-                    meta = json.load(mf)
-            thumb_path = THUMBNAILS_DIR / "ai_work" / date_dir.name / f"{f.stem}.jpg"
-            works.append({
-                "filename": str(f.relative_to(MEDIA_BASE)),
-                "url": f"/gallery/media/ai_work/{date_dir.name}/{f.name}",
-                "thumb_url": f"/gallery/thumb/ai_work/{date_dir.name}/{f.stem}.jpg" if thumb_path.exists() else None,
-                "generated_at": meta.get("generated_at", ""),
-                "style_name": meta.get("style_name", ""),
-                "original": meta.get("original", ""),
-            })
-    return jsonify({"works": works})
-
-@app.route("/gallery/ai-works")
-def gallery_ai_works():
-    """AI 作品集页面"""
-    return render_template("ai_works.html")
-
 # ============== 静态文件服务 ==============
 
 @app.route("/gallery/media/<media_type>/<path:filename>")
@@ -656,8 +481,6 @@ def media_file(media_type, filename):
         return send_from_directory(PHOTOS_DIR, filename)
     elif media_type == "video":
         return send_from_directory(VIDEOS_DIR, filename)
-    elif media_type == "ai_work":
-        return send_from_directory(AI_WORKS_DIR, filename)
     abort(404)
 
 @app.route("/gallery/thumb/<media_type>/<path:filename>")
@@ -667,64 +490,5 @@ def thumb_file(media_type, filename):
 @app.route("/gallery/static/<path:filename>")
 def static_files(filename):
     return send_from_directory("/home/open/.openclaw/workspace/skills/gallery/static", filename)
-
-@app.route("/gallery/api/ai-send-feishu", methods=["POST"])
-def api_ai_send_feishu():
-    """将 AI 作品发送到飞书"""
-    import base64
-    data = request.get_json()
-    filename = data.get("filename")  # e.g. "ai_works/2026-04-02/xxx.jpg"
-    if not filename:
-        return jsonify({"error": "缺少 filename"}), 400
-
-    file_path = MEDIA_BASE / filename
-    if not file_path.exists():
-        return jsonify({"error": "文件不存在"}), 404
-
-    FEISHU_APP_ID = "cli_a9259b2e6738dcd6"
-    FEISHU_APP_SECRET = "OuFdqJk0K1XLZAjUESV28bM6cPg0JeTQ"
-    FEISHU_USER_OPEN_ID = "ou_d1b4e7815a063128f882df928effe864"
-
-    # 获取飞书 token
-    token_resp = requests.post(
-        "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-        json={"app_id": FEISHU_APP_ID, "app_secret": FEISHU_APP_SECRET},
-        timeout=10
-    )
-    token = token_resp.json().get("tenant_access_token", "")
-    if not token:
-        return jsonify({"error": "获取飞书 token 失败"}), 500
-
-    # 上传图片到飞书（作为 image 消息）
-    with open(file_path, "rb") as f:
-        img_data = f.read()
-    import io
-    upload_resp = requests.post(
-        "https://open.feishu.cn/open-apis/im/v1/images",
-        headers={"Authorization": f"Bearer {token}"},
-        data={"image_type": "message"},
-        files={"image": (file_path.name, img_data, "image/jpeg")},
-        timeout=30,
-    )
-    upload_json = upload_resp.json()
-    image_key = upload_json.get("data", {}).get("image_key", "")
-    if not image_key:
-        return jsonify({"error": f"图片上传失败: {upload_json}"}), 500
-
-    # 发送图片消息
-    msg_resp = requests.post(
-        "https://open.feishu.cn/open-apis/im/v1/messages",
-        params={"receive_id_type": "open_id"},
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        json={
-            "receive_id": FEISHU_USER_OPEN_ID,
-            "msg_type": "image",
-            "content": json.dumps({"image_key": image_key}),
-        },
-        timeout=10,
-    )
-    msg_json = msg_resp.json()
-    return jsonify({"success": True, "code": msg_json.get("code")})
-
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=18790, debug=False)
