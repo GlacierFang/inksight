@@ -14,9 +14,6 @@
 ### 兴趣爱好
 - **宋粉**:宋朝历史,宋代陵墓(永昭陵、永昌陵等)
 - 历史文物、古代石刻艺术
-- 光固化3D打印(有一台,较久未用)
-- **铁道模型(N比例)**:收藏JR N比例车,周末去铁道新朋友店里跑车玩
-- **DIY亲子**:经常和女儿若菡一起做亲子手工,账号"亲子手工"（小红书）
 
 ---
 
@@ -36,7 +33,7 @@
 - **诗词签 + bt-presence**：✅ 运行中。华为手机离家/回家 → 天气推送（同步）+ 诗词签（异步写 bt_queue）。诗词库管理 /diary/poetry-manage
 - **驿车志 App（train-app 18823）**：Authorization header 已修 + 503 外层重试。API Key 共用 skills/gallery/ai_tagger.env（与 my-train 18809 是两个后端，别混）
 - **已封版 App**：如梦令 18819（2026-07-24）· 探识 18822（2026-07-20）· 时光印象册 18821（2026-07-17）
-- **InkSight 墨水屏**（后端 18834 + WebApp 18835，外网 http://ruohan.site/ink/）：✅ 2026-10-22 上线。部署上游 WebApp（不自己写控制页，成本最小）· 账号层保留已拍板不再问 · 本地固件源 25 个 bin · 设备配网服务器地址填 http://ruohan.site/ink（固件不改，cfgServer 可改）· 待：账号链路 + 真机拉图实测。记录：memory/projects/InkSight.md <!-- project: path:/home/open/.openclaw/workspace -->
+- **InkSight 墨水屏**（后端 18834 + WebApp 18835，外网 http://ruohan.site/ink/）：✅ 2026-10-22 上线。部署上游 WebApp（不自己写控制页，成本最小）· 账号层保留已拍板不再问 · **不做 HTTPS** · 本地固件源 25 个 bin · 设备配网服务器地址填 http://ruohan.site/ink（固件不改，cfgServer 可改）· 待：账号链路 + 真机拉图实测。记录：memory/projects/InkSight.md <!-- project: path:/home/open/.openclaw/workspace -->
 ## Skills
 `gallery` `library` `dashboard` `visit-knowledge` `bt-presence` `presence-diary` `knowledge-center` `nature-recognition` `work-assistant` `stamp-collection` `usage-stats` `brain` `deepseek-webui` `train-app` `my-island`
 
@@ -54,6 +51,22 @@
   - 前端**做**：全部静态数据 + 全部用户状态 + 全部用户数据（uni storage + PUBLIC_DOCUMENTS 备份）
   - **我的教训（10-21 犯）**：山河图记项目里 md 写着"DB = AI 推理落地"，我把这句**项目内的架构描述**当成了冰河大人的原话，
     照着把研学报告写进了后端库，被当场点穿。**md 里写的架构可能是我自己漂移出来的，不是老板的原话。要动边界先问。**
+
+- **自选方向 = 越界（10-23 冰河大人原话："之后再开发什么新的能力，务必和我沟通"）**：
+  - InkSight「宋人日课」自定义模式是我**未经沟通自行开发**的 —— 内容方向、池子、版式全是我定的。
+  - 同一批里我还往 USER.md / MEMORY.md 写了「光固化3D打印 / 铁道模型(N比例) / DIY亲子」三条**未经他确认的兴趣爱好**（他本人否认、部分来自我自己生成的 dreaming 记录回灌）→ 已清理。
+  - **教训**：**不要把自己的推测写进关于他的档案。** USER.md / MEMORY.md 里的每一条都必须能指回他亲口说过的话或真实产出物。
+  - **规矩**：新功能/新模式/新集成，**先谈「做什么、为什么、代价」再动手**（已写进 AGENTS.md 工作节奏）。
+
+- **InkSight 不做固件/OTA(2026-10-22,冰河大人原话"我们不做固件")**:固件相关一律**不查、不修、不主动提**。
+  - `backend/api/routes/firmware.py` / `discover.py` / `device_ota.py`、`/api/health`、`app/flash`、`app/discover` 缺失 → **不用管,不是待办**
+  - 设备端 `ota_url` 不是待修项
+  - 冰河大人已针对此纠正过多次(10-22 一天内 3 次)。不要再拿它当"发现"汇报
+
+- **InkSight 不做 HTTPS(2026-10-22,冰河大人原话"我们不做https")**:外网就是 http://ruohan.site/ink,永远 http。
+  - 不要再汇报"上 HTTPS 后 Origin 会 403 / nginx 要补 X-Forwarded-Proto"这类**假设性**风险 —— 已纠正多次
+  - 同类模式:「万一以后有人调这个接口」「万一 .env 丢了」「万一上别的域名」—— 只要现在不出错,一律不作为发现汇报
+  - 通则:**今天不出错的假设性风险 = 噪音,不是发现**
 
 - **不主动升级 OpenClaw**,等稳定版本;升级前执行全量备份
 - **Gateway 子 session 卡死**:看到 session running + deepseek-v4-pro + rate_limit 要第一时间处理
@@ -178,6 +191,17 @@
 - **根因**:我没有在开始工作前先确认系统边界--哪些端口被占用、哪些数据库是独立的、哪些逻辑是共享的
 - **正确姿势**:多模块项目动手前,先查 `ports.json` 确认端口归属、先理解数据隔离边界,不允许假设"这两个系统差不多可以混用"
 - **nature-api(18798)已停用(2026-07-16)**:进程停止、systemd disable、nginx 路由移除、ports.json 注销
+
+### 上下文里的待办清单 ≠ 我的待办（2026-10-22 新增）
+
+**现象**:会话被压缩后,摘要里带着一份"开放 TODO"清单(firmware.py/discover.py/…)。我把它当成自己的任务,结果每轮报告都念一遍这些没动的东西,被冰河大人连续追问"为啥一直纠结没动的部分""这和 ink 项目有关系么"。
+
+**根因**:摘要里的清单是**上一段调查的遗留发现**,不是冰河大人的指令。我没做归属判断就继承,并靠"重复汇报"给它续命——等于把本该砍掉的分支留在对话里。
+
+**正确做法**:
+- 继承下来的待办,先问一句"这是谁的活"——项目内但**非本次任务范围**的,说出来一次就够,不进报告、不进"待办"
+- 报告只讲本次改了什么(AGENTS.md 已加这条规矩)
+- 冰河大人明确排除的领域(固件/OTA),连"提到"都不行
 
 ### 能力开发的输入输出平衡(2026-08-01 新增,冰河大人原话)
 - **现象**:觅踪 App 杀进程后保持登录失败,我全程在"写状态"上死磕(重试、close() 落盘、多通道备份),完全没去看"读"那一端到底有没有真正读到
