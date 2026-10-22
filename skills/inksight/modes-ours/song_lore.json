@@ -1,0 +1,179 @@
+{
+  "mode_id": "CUSTOM_SONG_LORE",
+  "display_name": "宋人日课",
+  "icon": "star",
+  "cacheable": true,
+  "description": "每日一条宋代掌故：陵墓、石刻、器物、词人轶事",
+  "content": {
+    "type": "llm_json",
+    "prompt_template": "你是一位宋代历史专家。请从宋代（960-1279）的历史中挑一条**准确、可考、适合在4.2寸墨水屏上一眼读完**的掌故，输出 JSON。\n\nJSON 格式：{\"title\": \"掌故标题（6字以内）\", \"era\": \"朝代·具体年代\", \"lines\": [\"正文第1行\", \"正文第2行\", \"正文第3行\"], \"note\": \"一句延伸或出处（16字以内）\"}\n\n要求：\n1. **史实准确**，涉及陵墓、器物、人物时只写有明确记载的；不确定的宁可不写\n2. 正文每行不超过16字，共2-4行\n3. 题材可以是：宋代陵墓与石刻（如永昌陵、永昭陵）、名窑器物（汝官哥钧定）、活字印刷与《营造法模》、名画（如《清明上河图》）、著名词人（苏轼、辛弃疾、李清照）、市井生活\n4. 每次挑不同的题材，避免重复\n5. 只输出 JSON，不要其他内容\n\n环境：{context}",
+    "output_schema": {
+      "title": {
+        "type": "string",
+        "default": "永昌陵"
+      },
+      "era": {
+        "type": "string",
+        "default": "北宋·太平兴国三年"
+      },
+      "lines": {
+        "type": "array",
+        "default": [
+          "宋太祖赵匡胤的陵墓",
+          "位于河南巩义",
+          "陵前石刻仪仗现存"
+        ]
+      },
+      "note": {
+        "type": "string",
+        "default": "北宋帝陵制度的代表"
+      }
+    },
+    "temperature": 0.9,
+    "fallback": {
+      "title": "永昌陵",
+      "era": "北宋·太平兴国三年",
+      "lines": [
+        "宋太祖赵匡胤的陵墓",
+        "位于河南巩义",
+        "陵前石刻仪仗尚存"
+      ],
+      "note": "北宋帝陵制度的代表"
+    },
+    "fallback_pool": [
+      {
+        "title": "永昌陵",
+        "era": "北宋·太平兴国三年",
+        "lines": [
+          "宋太祖赵匡胤的陵墓",
+          "位于河南巩义",
+          "陵前石刻仪仗尚存"
+        ],
+        "note": "北宋帝陵制度的代表"
+      },
+      {
+        "title": "永昭陵",
+        "era": "北宋·至道元年",
+        "lines": [
+          "宋太宗赵光义的陵墓",
+          "与永昌陵相距不远",
+          "同属北宋皇陵"
+        ],
+        "note": "两陵相望，见证北宋中期"
+      },
+      {
+        "title": "五大名窑",
+        "era": "北宋",
+        "lines": [
+          "汝官哥钧定为名窑",
+          "汝窑以天青色釉著称",
+          "传世器物多已断流"
+        ],
+        "note": "宋瓷是中国陶瓷的高峰"
+      },
+      {
+        "title": "活字印刷",
+        "era": "北宋·庆历年间",
+        "lines": [
+          "毕昇用胶泥刻字排版",
+          "沈括记于《梦溪笔谈》",
+          "一字一印可反复使用"
+        ],
+        "note": "世界最早的活字印刷记载"
+      },
+      {
+        "title": "营造法式",
+        "era": "北宋·崇宁二年",
+        "lines": [
+          "李诫编修建筑典籍",
+          "规定材分八等制度",
+          "成为后世营造依据"
+        ],
+        "note": "中国现存最早的建筑专书"
+      },
+      {
+        "title": "清明上河图",
+        "era": "北宋·翰林院待制",
+        "lines": [
+          "张择端绘汴河市井",
+          "长卷五米余",
+          "今藏故宫博物院"
+        ],
+        "note": "北宋都城生活的全景记录"
+      },
+      {
+        "title": "东坡词",
+        "era": "北宋·元丰年间",
+        "lines": [
+          "苏轼因乌台诗案贬黄州",
+          "居此作《寒食帖》",
+          "字字一变再变"
+        ],
+        "note": "天下第三行书"
+      },
+      {
+        "title": "易安词",
+        "era": "南宋·建炎年间",
+        "lines": [
+          "李清照南渡后颠沛流离",
+          "与赵明诚共撰《金石录》",
+          "后期词风沉郁"
+        ],
+        "note": "千古第一女词人"
+      },
+      {
+        "title": "宋人茶事",
+        "era": "北宋",
+        "lines": [
+          "点茶末击拂成汤",
+          "斗茶以色鲜白为上",
+          "建安龙团为贡品"
+        ],
+        "note": "茶在宋代是生活艺术"
+      },
+      {
+        "title": "交子",
+        "era": "北宋·益州",
+        "lines": [
+          "民间最先出现纸币",
+          "初期仅限四川流通",
+          "后由政府设交子务"
+        ],
+        "note": "世界最早的纸币"
+      }
+    ]
+  },
+  "layout": {
+    "layout_engine": "component_tree",
+    "status_bar": {
+      "line_width": 1,
+      "dashed": true
+    },
+    "body_preset": "poetry_card",
+    "preset_props": {
+      "top_gap": 16,
+      "title_field": "title",
+      "title_font": "noto_serif_bold",
+      "title_font_size": 16,
+      "author_field": "era",
+      "author_font": "noto_serif_light",
+      "author_font_size": 10,
+      "separator_width": 56,
+      "lines_field": "lines",
+      "lines_limit": 5,
+      "lines_inset_x": 34,
+      "lines_font": "noto_serif_regular",
+      "lines_font_size": 15,
+      "lines_gap": 9,
+      "note_field": "note",
+      "note_font": "noto_serif_light",
+      "note_font_size": 10,
+      "note_max_lines": 2
+    },
+    "footer": {
+      "label": "宋人日课",
+      "attribution_template": "{era}",
+      "dashed": true
+    }
+  }
+}
