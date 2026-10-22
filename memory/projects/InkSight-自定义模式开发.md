@@ -377,7 +377,7 @@ for mode in v:
 1. **`mode_id` = `CUSTOM_SONG_LORE`**(符合 §四 硬规矩)
 2. **史实准确性不交给模型现编**:手写 **27 条**有出处的掌故放进 `content.fallback_pool`,`content.type = "static"` 且**不写 `static_data`** → 每次请求随机取池中一条,**全程不过 LLM**。
    - 屏上内容 **100% 是我们手写的字**,零幻觉、零模型成本、离线可跑。
-   - (第一版是 `llm_json`,靠 prompt 引导模型"从池子里挑一条改写"。实测在无设备预览里连刷都是毕昇 —— 见下面「§七 预览缓存与轮转」。现已改成 static。)
+   - (第一版是 `llm_json`,靠 prompt 引导模型"从池子里挑一条改写"。实测在无设备预览里连刷都是毕昇 —— 见下面「§六 预览缓存与内容轮转」。现已改成 static。)
 3. **排版**:`component_tree` + `poetry_card` preset,标题 16 号粗宋体、正文 15 号、行距 9、注释 10 号,页脚虚线 + `attribution_template: "{era}"`。
 4. **实测**(2026-10-23 改为 static 后):registry 命中 `source=builtin_json`;进程内连续生成 12 次 → **12 个不同标题,12/12 全部落在手写池内**;公网 preview 连续 4 次 `no_cache=1` → 4 张不同 PNG,`X-Cache-Hit: 0`。
 
@@ -396,9 +396,9 @@ for mode in v:
 
 ---
 
-## 七、预览缓存与内容轮转(踩过的坑)
+## 六、预览缓存与内容轮转(踩过的坑)
 
-### 7.1 预览有 5 分钟缓存,键里没有日期
+### 6.1 预览有 5 分钟缓存,键里没有日期
 
 `core/cache.py:194` 附近的预览缓存 **TTL = 5 分钟**,缓存键 = `persona + 尺寸 + 语言 + 城市` 等,**不含日期**。
 
@@ -410,12 +410,12 @@ http://ruohan.site/ink/api/preview?persona=CUSTOM_SONG_LORE&ui_language=zh&w=400
 ```
 WebApp 的预览页目前**没有**传这个参数 —— 所以在页面上反复点刷新,短时间内看不到变化。这是**缓存行为,不是内容出错**。
 
-### 7.2 无设备预览不会做 LLM 去重
+### 6.2 无设备预览不会做 LLM 去重
 
 `core/json_content.py:804` 附近,LLM 去重历史只在 `if mac and ctype in ("llm","llm_json") and not DISABLE_DEDUP:` 时才加载。
 → **无设备预览没有 `mac`,模型看不到自己近期输出过什么**,所以会连续选同一个题材(当时表现为连续三屏毕昇/活字印刷)。
 
-### 7.3 结论:想要"每次刷新都不一样"的三种手段
+### 6.3 结论:想要"每次刷新都不一样"的三种手段
 
 | 手段 | 效果 | 代价 |
 |---|---|---|
@@ -431,7 +431,7 @@ WebApp 的预览页目前**没有**传这个参数 —— 所以在页面上反�
 
 ---
 
-## 六、真机链路速查(供日后核对)
+## 七、真机链路速查(供日后核对)
 
 ```
 设备定时唤醒
@@ -449,7 +449,7 @@ WebApp 的预览页目前**没有**传这个参数 —— 所以在页面上反�
 
 ---
 
-## 七、改动纪律
+## 八、改动纪律
 
 - 改后端代码前:`bash scripts/pre-edit-backup.sh <文件>`
 - 改完:`systemctl --user restart openclaw-inksight.service` 和 `systemctl --user restart openclaw-inksight-web.service`
@@ -459,7 +459,7 @@ WebApp 的预览页目前**没有**传这个参数 —— 所以在页面上反�
 
 ---
 
-## 八、下一步(待硬件到位)
+## 九、下一步(待硬件到位)
 
 1. 硬件未到 → 固件编译、真机刷写、墨水屏实际观感、真实拉图、账号绑定,**全链路均未端到端验证**
 2. 当前库里 `configs` 0 行、`user_devices` 0 行,`device_state` 只有测试 MAC
