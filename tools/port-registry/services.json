@@ -82,12 +82,6 @@
       "type": "daemon",
       "desc": "灵感碎片整合推送"
     },
-    "reminder-daemon": {
-      "scope": "system",
-      "port": null,
-      "type": "daemon",
-      "desc": "待办提醒守护（timer 每分钟检查）"
-    },
     "knowledge-briefing": {
       "scope": "system",
       "port": null,
