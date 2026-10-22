@@ -1,0 +1,13 @@
+# ── InkSight:上游 vendored 部署树,不纳入 workspace 版本控制 ──
+# backend/ 来自 github.com/datascale-ai/inksight(本地无 .git,上游自行管理版本)
+# 我们自己的模式源文件在 skills/inksight/modes-ours/,部署副本是 cp 出来的产物,不跟踪
+skills/inksight/backend/
+skills/inksight/webapp/
+skills/inksight/venv/
+
+# ── 通用产物 ──
+__pycache__/
+*.pyc
+*.pyo
+node_modules/
+.next/
