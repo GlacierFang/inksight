@@ -100,9 +100,28 @@ GET /api/render
 **`external_data` 内置 provider**:
 `briefing` / `weather_forecast` / `text2image`
 
-**`llm` / `llm_json` 的兜底机制(重要)**:
-`fallback` 是单个兜底对象;`fallback_pool` 是数组,LLM 失败时从池子里随机挑一个(`core/json_content.py:573`)。
-→ **想让屏上内容永远不出错,就手写 `fallback_pool`。** 这是我们做"我们的内容"时的核心手法:史实准确性不能交给模型每次现编。
+**`fallback` / `fallback_pool` 的真实作用范围(2026-10-23 更正)**:
+
+`core/json_content.py:573` 的 `_get_fallback()`:
+```python
+pool = content_cfg.get("fallback_pool")
+if pool and isinstance(pool, list) and len(pool) > 0:
+    return dict(random.choice(pool))
+return dict(content_cfg.get("fallback", {}))
+```
+
+⚠️ **这个函数只在 LLM 调用失败时才被用到**。LLM 成功时,模型返回什么就渲染什么,**`fallback_pool` 不会参与约束**。
+
+所以:
+- ❌ "手写 `fallback_pool`,屏上内容就永远不会出错" —— **错**。LLM 成功时池子形同虚设。
+- ✅ **想让内容 100% 可控,别用 LLM**。用 `content.type = "static"` + `fallback_pool`,**且不写 `static_data`**:
+  - `static` 分支取 `content_cfg.get("static_data", fallback)`,没有 `static_data` 就落到 `fallback`;
+  - `fallback` 又来自 `fallback_pool` 的随机一条;
+  - 结果:**每次请求从池中随机取一条,全程不过 LLM**。史实 100% 手写可控,零模型成本,零幻觉,离线也能跑。
+
+这就是「宋人日课」现在的实现(见 §五)。
+
+**另一种用法**:`llm_json` + `fallback_pool` = "模型正常时自由发挥,模型挂了才用兜底"。适合工具型内容,不适合史实型内容。
 
 **服务端自带凭证**:`api/shared.py:395` 附近强制把 `llm_provider` / `llm_model` / `image_provider` / `image_model` 覆盖为后端 `.env` 里的内置值(MiniMax M3 / image-01),用户级 BYOK 已下线。**所以自定义模式走 LLM 不需要我们自己配 Key。**
 
@@ -356,9 +375,11 @@ for mode in v:
 设计要点:
 
 1. **`mode_id` = `CUSTOM_SONG_LORE`**(符合 §四 硬规矩)
-2. **史实准确性不交给模型现编**:手写 10 条有明确出处的掌故放进 `fallback_pool`,LLM 只负责"从池子里挑一条并改写得更适合一屏读完";LLM 挂了就直接落回池子。屏上永远不会出现瞎编的史实。
+2. **史实准确性不交给模型现编**:手写 **27 条**有出处的掌故放进 `content.fallback_pool`,`content.type = "static"` 且**不写 `static_data`** → 每次请求随机取池中一条,**全程不过 LLM**。
+   - 屏上内容 **100% 是我们手写的字**,零幻觉、零模型成本、离线可跑。
+   - (第一版是 `llm_json`,靠 prompt 引导模型"从池子里挑一条改写"。实测在无设备预览里连刷都是毕昇 —— 见下面「§七 预览缓存与轮转」。现已改成 static。)
 3. **排版**:`component_tree` + `poetry_card` preset,标题 16 号粗宋体、正文 15 号、行距 9、注释 10 号,页脚虚线 + `attribution_template: "{era}"`。
-4. **实测**:preview `responseType=image` → 200 / 400×300 / 1-bit;`responseType=json` → 200 且 `_llm_used: true`(确认走的真实 LLM)。转 BMP → `15662 bytes`,与真机格式一致。
+4. **实测**(2026-10-23 改为 static 后):registry 命中 `source=builtin_json`;进程内连续生成 12 次 → **12 个不同标题,12/12 全部落在手写池内**;公网 preview 连续 4 次 `no_cache=1` → 4 张不同 PNG,`X-Cache-Hit: 0`。
 
 渲染图存 `skills/inksight/modes-ours/preview/`。
 
@@ -372,6 +393,38 @@ for mode in v:
 - **WebApp「无设备体验」页(`/ink/preview`)已可选到它**,在「更多」分组里
 
 > 注:本地 webapp 端口 18835 带 `basePath=/ink`,所以本地要访问 `http://127.0.0.1:18835/ink/preview`,直接打 `/preview` 是 404。
+
+---
+
+## 七、预览缓存与内容轮转(踩过的坑)
+
+### 7.1 预览有 5 分钟缓存,键里没有日期
+
+`core/cache.py:194` 附近的预览缓存 **TTL = 5 分钟**,缓存键 = `persona + 尺寸 + 语言 + 城市` 等,**不含日期**。
+
+后果:无设备体验页连着刷,5 分钟内拿到的是**同一张图**(响应头 `X-Cache-Hit: 1`,字节完全相同)。
+
+绕过:请求加 `&no_cache=1`
+```
+http://ruohan.site/ink/api/preview?persona=CUSTOM_SONG_LORE&ui_language=zh&w=400&h=300&no_cache=1
+```
+WebApp 的预览页目前**没有**传这个参数 —— 所以在页面上反复点刷新,短时间内看不到变化。这是**缓存行为,不是内容出错**。
+
+### 7.2 无设备预览不会做 LLM 去重
+
+`core/json_content.py:804` 附近,LLM 去重历史只在 `if mac and ctype in ("llm","llm_json") and not DISABLE_DEDUP:` 时才加载。
+→ **无设备预览没有 `mac`,模型看不到自己近期输出过什么**,所以会连续选同一个题材(当时表现为连续三屏毕昇/活字印刷)。
+
+### 7.3 结论:想要"每次刷新都不一样"的三种手段
+
+| 手段 | 效果 | 代价 |
+|---|---|---|
+| `type=static` + `fallback_pool`(当前做法) | 每次随机取池中一条,内容全可控 | 池子小了会重复,池子大了不好维护 |
+| 设备端 `refreshInterval` 调到 1440 | 每天只换一次,一屏一整天 | 换得不勤 |
+| 预览页加"换一条"按钮(带 `no_cache=1`) | 手动立刻换 | 要改 webapp 并重新构建 |
+
+> ⚠️ `static` + `fallback_pool` 是**随机**轮转,不是"按日期确定性选取"。
+> 想做到「同一天永远同一条,零点自动换」,需要一个按日期取索引的机制 —— 目前后端没有现成 provider,要么加一个小 computed provider,要么用第 2 行的 `refreshInterval=1440` 近似。
 
 ---
 
