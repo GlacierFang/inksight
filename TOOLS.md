@@ -84,14 +84,12 @@
 | 18795 | organize | - | 队列处理 |
 | 18802 | deepseek-webui | - | DeepSeek WebUI 后端（无对外路径） |
 
-### daemon & push（system scope，无端口）
+### daemon & push（无端口）
 
 | 服务 | 触发 | 说明 |
 |------|------|------|
-| bt-presence | 常驻 daemon | 蓝牙感知（回家/离家推送） |
-| gallery-push | 常驻 daemon | 照片 AI 识别结果推送 |
-| gallery-ai-daemon | timer 每小时 | VLM 照片识别 |
-| scraps-push | 常驻 daemon | 灵感碎片推送 |
+| bt-presence | 常驻 daemon | 蓝牙感知（回家/离家推送，**user scope**） |
+| scraps-push | 常驻 daemon | 灵感碎片推送（system scope） |
 | knowledge-briefing | timer 20:30 | 每日知识简报 |
 | news-fetcher | timer 每小时 | 新闻抓取 |
 | news-summary | timer 22:15 | 新闻 LLM 汇总 |
