@@ -1,0 +1,352 @@
+{
+  "version": 1,
+  "updated": "2026-10-22T09:20:00+08:00",
+  "description": "服务归属登记表 —— 每个 OpenClaw 服务只能在一个 systemd scope 存在。pr audit 以此为准。",
+  "services": {
+    "gallery": {
+      "scope": "user",
+      "port": 18790,
+      "type": "service",
+      "desc": "相册主服务"
+    },
+    "library": {
+      "scope": "user",
+      "port": 18792,
+      "type": "service",
+      "desc": "电子书库"
+    },
+    "dashboard": {
+      "scope": "user",
+      "port": 18794,
+      "type": "service",
+      "desc": "个人工作台"
+    },
+    "my-train": {
+      "scope": "user",
+      "port": 18809,
+      "type": "service",
+      "desc": "驿车志网页版（N比例列车识别）"
+    },
+    "train-app": {
+      "scope": "user",
+      "port": 18823,
+      "type": "service",
+      "desc": "驿车志 App 后端（独立于网页版）"
+    },
+    "nature-recognition": {
+      "scope": "user",
+      "port": 18803,
+      "type": "service",
+      "desc": "识物志"
+    },
+    "natfrp": {
+      "scope": "both",
+      "port": null,
+      "type": "daemon",
+      "desc": "内网穿透（双通道，两个 frpc 实例）",
+      "notes": "system + user 各一个实例，不同配置参数，是设计如此"
+    },
+    "organize": {
+      "scope": "system",
+      "port": 18795,
+      "type": "service",
+      "desc": "队列处理（Gallery AI / Library chunk）"
+    },
+    "visit-knowledge": {
+      "scope": "user",
+      "port": 18796,
+      "type": "service",
+      "desc": "个人知识管理"
+    },
+    "knowledge-center": {
+      "scope": "user",
+      "port": 18797,
+      "type": "service",
+      "desc": "知识中心"
+    },
+    "stamp-collection": {
+      "scope": "user",
+      "port": 18800,
+      "type": "service",
+      "desc": "邮票收藏"
+    },
+    "bt-presence": {
+      "scope": "user",
+      "port": null,
+      "type": "daemon",
+      "desc": "蓝牙存在感知"
+    },
+    "scraps-push": {
+      "scope": "system",
+      "port": null,
+      "type": "daemon",
+      "desc": "灵感碎片整合推送"
+    },
+    "reminder-daemon": {
+      "scope": "system",
+      "port": null,
+      "type": "daemon",
+      "desc": "待办提醒守护（timer 每分钟检查）"
+    },
+    "knowledge-briefing": {
+      "scope": "system",
+      "port": null,
+      "type": "daemon",
+      "desc": "每日知识简报推送",
+      "notes": "timer + daemon 已统一到 system 范围"
+    },
+    "news-fetcher": {
+      "scope": "system",
+      "port": null,
+      "type": "oneshot",
+      "desc": "新闻抓取（timer 每小时触发）"
+    },
+    "news-summary": {
+      "scope": "system",
+      "port": null,
+      "type": "oneshot",
+      "desc": "新闻 LLM 每日汇总（22:15）"
+    },
+    "gateway": {
+      "scope": "user",
+      "port": 18789,
+      "type": "service",
+      "desc": "OpenClaw Gateway 核心"
+    },
+    "new-stamp-fetcher": {
+      "scope": "user",
+      "port": null,
+      "type": "timer",
+      "desc": "新邮票增量采集"
+    },
+    "stamp-price-updater": {
+      "scope": "user",
+      "port": null,
+      "type": "timer",
+      "desc": "邮票价格更新"
+    },
+    "creative-studio": {
+      "scope": "user",
+      "port": 18812,
+      "type": "service",
+      "desc": "创意工坊（图像生成+音乐生成）"
+    },
+    "creative-app": {
+      "scope": "user",
+      "port": 18819,
+      "type": "service",
+      "desc": "如梦令 App 后端（图像+音乐生成）"
+    },
+    "plant-care": {
+      "scope": "system",
+      "port": 18826,
+      "type": "service",
+      "desc": "植愈志 - 植物拍照诊断与养护建议"
+    },
+    "plant-local": {
+      "scope": "user",
+      "port": 18836,
+      "type": "service",
+      "desc": "植愈志 App 后端（uniapp 独立版）"
+    },
+    "news-fetcher-cache": {
+      "scope": "system",
+      "port": null,
+      "type": "oneshot",
+      "desc": "Pre-warm uvx MCP cache for News Fetcher"
+    },
+    "stamp-monitor": {
+      "scope": "user",
+      "port": null,
+      "type": "timer",
+      "desc": "邮票增量采集定时任务"
+    },
+    "scope-audit": {
+      "scope": "system",
+      "port": null,
+      "type": "timer",
+      "desc": "每日08:00 systemd scope归属审计（纯shell，不走LLM）"
+    },
+    "poetry-push": {
+      "scope": "user",
+      "port": null,
+      "type": "daemon",
+      "desc": "OPPO诗词签推送daemon"
+    },
+    "presence": {
+      "scope": "user",
+      "port": 18816,
+      "type": "service",
+      "desc": "存在感日记Web服务"
+    },
+    "presence-daemon": {
+      "scope": "user",
+      "port": null,
+      "type": "daemon",
+      "desc": "存在感日记数据处理daemon"
+    },
+    "presence-push": {
+      "scope": "user",
+      "port": null,
+      "type": "daemon",
+      "desc": "存在感日记推送daemon"
+    },
+    "retro-gaming": {
+      "scope": "user",
+      "port": 18817,
+      "type": "service",
+      "desc": "复古游戏模拟器"
+    },
+    "ai-adventure": {
+      "scope": "user",
+      "port": 18805,
+      "type": "service",
+      "desc": "AI探的冒险 - AI认知闯关游戏"
+    },
+    "app-download": {
+      "scope": "user",
+      "port": 18820,
+      "type": "service",
+      "desc": "识物志 App 下载页"
+    },
+    "nature-local": {
+      "scope": "user",
+      "port": 18818,
+      "type": "service",
+      "desc": "识物志本地版独立API服务"
+    },
+    "gallery-app": {
+      "scope": "user",
+      "port": 18821,
+      "type": "service",
+      "desc": "时光印象册 App 后端 API"
+    },
+    "knowledge-app": {
+      "scope": "user",
+      "port": 18822,
+      "type": "service",
+      "desc": "探识 App 后端"
+    },
+    "mizong": {
+      "scope": "user",
+      "port": 18824,
+      "type": "service",
+      "desc": "觅踪 App 后端"
+    },
+    "my-island": {
+      "scope": "user",
+      "port": 18825,
+      "type": "service",
+      "desc": "梦见岛 App 后端（Life Island 汉化版）"
+    },
+    "my-island-notice": {
+      "scope": "user",
+      "port": null,
+      "type": "timer",
+      "desc": "梦见岛岛上时报日报生成（22:30 触发）"
+    },
+    "my-island-vite": {
+      "scope": "user",
+      "port": 5173,
+      "type": "service",
+      "desc": "梦见岛 Vite dev 前端（5173）"
+    },
+    "qingnang": {
+      "scope": "user",
+      "port": 18910,
+      "type": "service",
+      "desc": "青囊书 App 后端"
+    },
+    "game-download": {
+      "scope": "system",
+      "port": 18828,
+      "type": "service",
+      "desc": "笑林拼拼游戏下载页（端口 18828，system 范围静态文件服务）"
+    },
+    "puzzle-life": {
+      "description": "笑林拼拼拼图游戏",
+      "scope": "user",
+      "ports": [
+        18827
+      ]
+    },
+    "niumaji": {
+      "scope": "user",
+      "port": 18829,
+      "type": "service",
+      "desc": "牛马记 App 后端 - 出笼归笼时间记录"
+    },
+    "huaxia": {
+      "scope": "user",
+      "port": 18888,
+      "type": "service",
+      "desc": "华夏文明纪游戏下载页"
+    },
+    "guobao": {
+      "scope": "user",
+      "port": 18889,
+      "type": "service",
+      "desc": "国宝博物馆下载页静态服务器"
+    },
+    "hanmo": {
+      "scope": "user",
+      "port": 18830,
+      "type": "service",
+      "desc": "翰墨时空谱下载页"
+    },
+    "shiji": {
+      "scope": "user",
+      "port": 18831,
+      "type": "service",
+      "desc": "史迹探寻录下载页"
+    },
+    "tangping": {
+      "scope": "user",
+      "port": 18899,
+      "type": "service",
+      "desc": "躺平巴拉 App 后端（沉浸式水豚养成游戏）"
+    },
+    "bala": {
+      "scope": "user",
+      "port": 18900,
+      "type": "service",
+      "desc": "躺平巴拉下载页（静态 HTTP 服务）"
+    },
+    "wenhua": {
+      "scope": "user",
+      "port": 18911,
+      "type": "service",
+      "desc": "华夏文明五书下载页（静态 HTTP 服务）"
+    },
+    "shanhe": {
+      "scope": "user",
+      "port": 18838,
+      "type": "service",
+      "desc": "山河图记 App 后端（独立 API）"
+    },
+    "sanxia": {
+      "scope": "user",
+      "port": 18840,
+      "type": "service",
+      "desc": "伞下 App 后端（情绪庇护 LLM 代理）"
+    },
+    "shanhe-app": {
+      "scope": "user",
+      "port": 18832,
+      "type": "service",
+      "desc": "山河图记 App 下载页（独立端口 18832 · 路径 /shanhe-app/）"
+    },
+    "inksight": {
+      "scope": "user",
+      "port": 18834,
+      "type": "service",
+      "desc": "InkSight backend (FastAPI, nginx /ink/api/)"
+    },
+    "inksight-web": {
+      "scope": "user",
+      "port": 18835,
+      "type": "service",
+      "desc": "InkSight WebApp (Next.js, nginx /ink/)"
+    }
+  }
+}
