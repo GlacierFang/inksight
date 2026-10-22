@@ -40,11 +40,12 @@
       "desc": "识物志"
     },
     "natfrp": {
-      "scope": "both",
+      "scope": "system",
       "port": null,
       "type": "daemon",
-      "desc": "内网穿透（双通道，两个 frpc 实例）",
-      "notes": "system + user 各一个实例，不同配置参数，是设计如此"
+      "unit": "sakura-frp.service",
+      "desc": "内网穿透 frpc（承载 ruohan.site / xia.ruohan.site 隧道）",
+      "notes": "2026-10-22 收敛为单实例：user 侧 openclaw-natfrp.service 因密钥失效空转已停用并 mask，system 侧 sakura-frp.service 为唯一存活实例；unit 名不带 openclaw- 前缀，用 unit 字段显式指名"
     },
     "organize": {
       "scope": "system",

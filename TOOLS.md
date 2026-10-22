@@ -95,6 +95,7 @@
 | knowledge-briefing | timer 20:30 | 每日知识简报 |
 | news-fetcher | timer 每小时 | 新闻抓取 |
 | news-summary | timer 22:15 | 新闻 LLM 汇总 |
+| natfrp | 常驻 daemon | 内网穿透 frpc（system scope `sakura-frp.service`，承载 ruohan.site / xia.ruohan.site 隧道；配置 `~/.natfrp/frpc.ini`） |
 
 ### Nginx 配置
 
