@@ -952,6 +952,9 @@ async def _generate_computed_content(mode_def: dict, content_cfg: dict, fallback
     if provider == "prince":
         from .prince import build_prince_content
         return await build_prince_content(fallback, **kwargs)
+    if provider == "dongjing":
+        from .dongjing import build_dongjing_content
+        return await build_dongjing_content(fallback, **kwargs)
     if provider == "countdown":
         from .content import generate_countdown_content
         config = content_cfg.get("config", {})

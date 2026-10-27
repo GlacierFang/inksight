@@ -258,6 +258,12 @@ BUILTIN_CATALOG: list[CatalogItem] = [
         zh=CatalogText(name="天工阁", tip="每天造一件并不存在的宋代器物，附虚构展签"),
         en=CatalogText(name="Tiangong", tip="A fictional Song-dynasty artifact made every day"),
     ),
+    CatalogItem(
+        mode_id="CUSTOM_DONGJING",
+        category="custom",
+        zh=CatalogText(name="汴京梦华", tip="《东京梦华录》两轴走读：每天一站，城中41站、岁时42节，角标标今日节令"),
+        en=CatalogText(name="Dongjing", tip="A daily walk through the Tokyo Dream Record: 41 city stops and 42 seasonal festivals"),
+    ),
 ]
 
 
