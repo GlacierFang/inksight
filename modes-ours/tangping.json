@@ -1,0 +1,208 @@
+{
+  "mode_id": "CUSTOM_TANGPING",
+  "display_name": "躺平巴拉",
+  "icon": "art",
+  "cacheable": false,
+  "description": "躺平巴拉今日梦境：一张四色套色版画，顶栏是日期天气电量，底栏写着梦里的地方和那句梦话。",
+  "content": {
+    "type": "computed",
+    "provider": "tangping",
+    "fallback": {
+      "place": "云上",
+      "line": "梦里有条不赶时间的河",
+      "credit": "",
+      "art_url": "",
+      "has_image": "no"
+    }
+  },
+  "layout": {
+    "status_bar": {
+      "line_width": 1,
+      "dashed": true
+    },
+    "body_align": "top",
+    "body": [
+      {
+        "type": "conditional",
+        "field": "has_image",
+        "conditions": [
+          {
+            "op": "eq",
+            "value": "yes",
+            "children": [
+              {
+                "type": "image",
+                "field": "art_url",
+                "x": 0,
+                "width": 400,
+                "height": 234,
+                "fit": "cover",
+                "align_x": "center",
+                "align_y": "center",
+                "margin_bottom": 0
+              }
+            ]
+          },
+          {
+            "op": "eq",
+            "value": "no",
+            "children": [
+              {
+                "type": "spacer",
+                "height_px": 93
+              },
+              {
+                "type": "text",
+                "field": "place",
+                "align": "center",
+                "font": "noto_serif_bold",
+                "font_size": 22,
+                "max_lines": 1,
+                "margin_bottom": 10
+              },
+              {
+                "type": "text",
+                "field": "line",
+                "align": "center",
+                "font": "noto_serif_light",
+                "font_size": 14,
+                "max_lines": 3,
+                "margin_bottom": 0
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "footer": {
+      "label": "TANGPING",
+      "attribution_template": "{credit}",
+      "dashed": true
+    }
+  },
+  "layout_overrides": {
+    "296x128": {
+      "body_align": "top",
+      "body": [
+        {
+          "type": "conditional",
+          "field": "has_image",
+          "conditions": [
+            {
+              "op": "eq",
+              "value": "yes",
+              "children": [
+                {
+                  "type": "image",
+                  "field": "art_url",
+                  "x": 0,
+                  "width": 322,
+                  "height": 99,
+                  "fit": "cover",
+                  "align_x": "center",
+                  "align_y": "center",
+                  "margin_bottom": 0
+                }
+              ]
+            },
+            {
+              "op": "eq",
+              "value": "no",
+              "children": [
+                {
+                  "type": "spacer",
+                  "height_px": 26
+                },
+                {
+                  "type": "text",
+                  "field": "place",
+                  "align": "center",
+                  "font": "noto_serif_bold",
+                  "font_size": 16,
+                  "max_lines": 1,
+                  "margin_bottom": 4
+                },
+                {
+                  "type": "text",
+                  "field": "line",
+                  "align": "center",
+                  "font": "noto_serif_light",
+                  "font_size": 11,
+                  "max_lines": 2,
+                  "margin_bottom": 0
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "footer": {
+        "label": "TANGPING",
+        "attribution_template": "{credit}",
+        "font_size": 9,
+        "dashed": true
+      }
+    },
+    "648x480": {
+      "body_align": "top",
+      "body": [
+        {
+          "type": "conditional",
+          "field": "has_image",
+          "conditions": [
+            {
+              "op": "eq",
+              "value": "yes",
+              "children": [
+                {
+                  "type": "image",
+                  "field": "art_url",
+                  "x": 0,
+                  "width": 400,
+                  "height": 232,
+                  "fit": "cover",
+                  "align_x": "center",
+                  "align_y": "center",
+                  "margin_bottom": 0
+                }
+              ]
+            },
+            {
+              "op": "eq",
+              "value": "no",
+              "children": [
+                {
+                  "type": "spacer",
+                  "height_px": 155
+                },
+                {
+                  "type": "text",
+                  "field": "place",
+                  "align": "center",
+                  "font": "noto_serif_bold",
+                  "font_size": 32,
+                  "max_lines": 1,
+                  "margin_bottom": 14
+                },
+                {
+                  "type": "text",
+                  "field": "line",
+                  "align": "center",
+                  "font": "noto_serif_light",
+                  "font_size": 20,
+                  "max_lines": 3,
+                  "margin_bottom": 0
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "footer": {
+        "label": "TANGPING",
+        "attribution_template": "{credit}",
+        "dashed": true
+      }
+    }
+  }
+}
