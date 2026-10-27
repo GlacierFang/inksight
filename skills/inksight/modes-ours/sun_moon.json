@@ -1,0 +1,170 @@
+{
+  "mode_id": "CUSTOM_SUN_MOON",
+  "display_name": "日昼与月相",
+  "icon": "weather",
+  "cacheable": false,
+  "description": "郑州当日的日出、日落与白昼时长，入夜后换成当晚月相与月相图。数值取自 Open-Meteo，月相本地计算并绘图，一句话由模型当日现写。",
+  "content": {
+    "type": "computed",
+    "provider": "sun_moon",
+    "fallback": {
+      "period": "day",
+      "city": "郑州",
+      "date_cn": "",
+      "sunrise": "--:--",
+      "sunset": "--:--",
+      "daylight": "--",
+      "delta": "",
+      "moon_name": "",
+      "moon_illum": "",
+      "moon_age": "",
+      "moon_to_full": "",
+      "moon_to_new": "",
+      "moon_image": "",
+      "line": "",
+      "source": "Open-Meteo"
+    }
+  },
+  "layout": {
+    "status_bar": {
+      "line_width": 1,
+      "dashed": true
+    },
+    "body": [
+      {
+        "type": "conditional",
+        "field": "period",
+        "conditions": [
+          {
+            "op": "eq",
+            "value": "day",
+            "children": [
+              {
+                "type": "two_column",
+                "left_width": 192,
+                "gap": 16,
+                "left": [
+                  {
+                    "type": "text",
+                    "template": "日出 {sunrise}",
+                    "align": "center",
+                    "font_size": 15,
+                    "max_lines": 1
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "text",
+                    "template": "日落 {sunset}",
+                    "align": "center",
+                    "font_size": 15,
+                    "max_lines": 1
+                  }
+                ]
+              },
+              {
+                "type": "spacer",
+                "height_px": 10
+              },
+              {
+                "type": "text",
+                "template": "白昼时长 {daylight}",
+                "align": "center",
+                "font": "noto_serif_bold",
+                "font_size": 18,
+                "max_lines": 1
+              },
+              {
+                "type": "spacer",
+                "height_px": 2
+              },
+              {
+                "type": "text",
+                "field": "delta",
+                "align": "center",
+                "font_size": 12,
+                "max_lines": 1
+              },
+              {
+                "type": "spacer",
+                "height_px": 6
+              },
+              {
+                "type": "separator",
+                "style": "short",
+                "width": 64
+              },
+              {
+                "type": "spacer",
+                "height_px": 4
+              },
+              {
+                "type": "text",
+                "field": "line",
+                "align": "center",
+                "font": "noto_serif_light",
+                "font_size": 14,
+                "max_lines": 2
+              }
+            ]
+          },
+          {
+            "op": "eq",
+            "value": "night",
+            "children": [
+              {
+                "type": "image",
+                "field": "moon_image",
+                "width": 104,
+                "height": 104,
+                "fit": "contain",
+                "margin_bottom": 2
+              },
+              {
+                "type": "text",
+                "template": "{moon_name} · {moon_illum}",
+                "align": "center",
+                "font": "noto_serif_bold",
+                "font_size": 17,
+                "max_lines": 1
+              },
+              {
+                "type": "text",
+                "template": "月龄 {moon_age} · {moon_to_full}",
+                "align": "center",
+                "font_size": 12,
+                "max_lines": 1
+              },
+              {
+                "type": "spacer",
+                "height_px": 6
+              },
+              {
+                "type": "separator",
+                "style": "short",
+                "width": 64
+              },
+              {
+                "type": "spacer",
+                "height_px": 4
+              },
+              {
+                "type": "text",
+                "field": "line",
+                "align": "center",
+                "font": "noto_serif_light",
+                "font_size": 14,
+                "max_lines": 2
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "footer": {
+      "label": "日昼与月相",
+      "attribution_template": "郑州 {date_cn}",
+      "dashed": true
+    }
+  }
+}

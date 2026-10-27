@@ -1,0 +1,204 @@
+{
+  "mode_id": "CUSTOM_TIANGONG",
+  "display_name": "天工阁",
+  "icon": "art",
+  "cacheable": false,
+  "description": "天工阁虚拟博物馆：每天造一件并不存在的宋代器物，附虚构展签与四色图录插图。展签由模型当日现写，图由生图模型按屏上四色盘（白/黑/金黄/朱红）画出。",
+  "content": {
+    "type": "computed",
+    "provider": "tiangong",
+    "fallback": {
+      "index_label": "第 1 号",
+      "name": "素面圆盒",
+      "shape": "圆口浅腹，盖与身以子母口相合",
+      "use": "盛放香丸或药末",
+      "pattern": "素面无纹，仅盖顶一道弦纹",
+      "mark": "底刻「天工」二字",
+      "origin": "宋理宗淳祐年间作于临安，后随一箱旧物流落北方",
+      "art_url": "",
+      "has_image": "no",
+      "seal_url": "",
+      "collection": "传世仅此一件"
+    }
+  },
+  "layout": {
+    "status_bar": {
+      "line_width": 1,
+      "dashed": true
+    },
+    "body": [
+      {
+        "type": "conditional",
+        "field": "has_image",
+        "conditions": [
+          {
+            "op": "eq",
+            "value": "yes",
+            "children": [
+              {
+                "type": "two_column",
+                "left_x": 0,
+                "left_width": 176,
+                "gap": 12,
+                "left": [
+                  {
+                    "type": "image",
+                    "field": "art_url",
+                    "x": 8,
+                    "width": 160,
+                    "height": 200,
+                    "fit": "contain",
+                    "margin_bottom": 0
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "text",
+                    "field": "index_label",
+                    "align": "left",
+                    "color": "red",
+                    "font_size": 13,
+                    "max_lines": 1,
+                    "margin_bottom": 2
+                  },
+                  {
+                    "type": "text",
+                    "field": "name",
+                    "align": "left",
+                    "font": "noto_serif_bold",
+                    "font_size": 17,
+                    "max_lines": 1,
+                    "margin_bottom": 11
+                  },
+                  {
+                    "type": "text",
+                    "template": "器形：{shape}",
+                    "align": "left",
+                    "margin_x": 0,
+                    "font_size": 12,
+                    "max_lines": 2,
+                    "margin_bottom": 5
+                  },
+                  {
+                    "type": "text",
+                    "template": "用途：{use}",
+                    "align": "left",
+                    "margin_x": 0,
+                    "font_size": 12,
+                    "max_lines": 2,
+                    "margin_bottom": 5
+                  },
+                  {
+                    "type": "text",
+                    "template": "纹样：{pattern}",
+                    "align": "left",
+                    "margin_x": 0,
+                    "font_size": 12,
+                    "max_lines": 2,
+                    "margin_bottom": 5
+                  },
+                  {
+                    "type": "text",
+                    "template": "款识：{mark}",
+                    "align": "left",
+                    "margin_x": 0,
+                    "font_size": 12,
+                    "max_lines": 2,
+                    "margin_bottom": 9
+                  },
+                  {
+                    "type": "text",
+                    "field": "origin",
+                    "align": "left",
+                    "margin_x": 0,
+                    "font": "noto_serif_light",
+                    "font_size": 12,
+                    "max_lines": 3
+                  },
+                  {
+                    "type": "image",
+                    "field": "seal_url",
+                    "x": 340,
+                    "width": 44,
+                    "height": 44,
+                    "fit": "contain",
+                    "margin_bottom": 0
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "eq",
+            "value": "no",
+            "children": [
+              {
+                "type": "text",
+                "field": "index_label",
+                "align": "center",
+                "color": "red",
+                "font_size": 14,
+                "max_lines": 1,
+                "margin_bottom": 2
+              },
+              {
+                "type": "text",
+                "field": "name",
+                "align": "center",
+                "font": "noto_serif_bold",
+                "font_size": 18,
+                "max_lines": 1,
+                "margin_bottom": 11
+              },
+              {
+                "type": "text",
+                "template": "器形：{shape}",
+                "align": "center",
+                "font_size": 13,
+                "max_lines": 2,
+                "margin_bottom": 5
+              },
+              {
+                "type": "text",
+                "template": "用途：{use}",
+                "align": "center",
+                "font_size": 13,
+                "max_lines": 2,
+                "margin_bottom": 5
+              },
+              {
+                "type": "text",
+                "template": "纹样：{pattern}",
+                "align": "center",
+                "font_size": 13,
+                "max_lines": 2,
+                "margin_bottom": 5
+              },
+              {
+                "type": "text",
+                "template": "款识：{mark}",
+                "align": "center",
+                "font_size": 13,
+                "max_lines": 2,
+                "margin_bottom": 9
+              },
+              {
+                "type": "text",
+                "field": "origin",
+                "align": "center",
+                "font": "noto_serif_light",
+                "font_size": 13,
+                "max_lines": 3
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "footer": {
+      "label": "天工阁",
+      "attribution_template": "{collection}",
+      "dashed": true
+    }
+  }
+}

@@ -1,0 +1,417 @@
+{
+  "mode_id": "CUSTOM_ANT",
+  "display_name": "草地铺道蚁",
+  "icon": "ant",
+  "cacheable": false,
+  "description": "一只住在院子里的草地铺道蚁。每天早上掷一次骰子决定它当天的活儿，它自己写今天的记录：纪事、心声，和它身体状况的变化。",
+  "content": {
+    "type": "computed",
+    "provider": "ant",
+    "fallback": {
+      "title": "第七趟",
+      "l1": "",
+      "l2": "",
+      "l3": "",
+      "l4": "",
+      "voice": "",
+      "anomaly_note": "",
+      "state_line": "",
+      "trip_line": "",
+      "name": "细腰",
+      "home": "台阶下第三道砖缝",
+      "signature": "第三块砖缝里的",
+      "has_text": "yes"
+    }
+  },
+  "layout": {
+    "status_bar": {
+      "line_width": 1,
+      "dashed": true
+    },
+    "body": [
+      {
+        "type": "conditional",
+        "field": "has_text",
+        "conditions": [
+          {
+            "op": "eq",
+            "value": "yes",
+            "children": [
+              {
+                "type": "text",
+                "field": "title",
+                "align": "left",
+                "font": "noto_serif_bold",
+                "font_size": 22,
+                "max_lines": 1,
+                "margin_x": 12,
+                "margin_bottom": 8
+              },
+              {
+                "type": "text",
+                "field": "l1",
+                "align": "left",
+                "font": "noto_serif_regular",
+                "font_size": 12,
+                "line_height": 19,
+                "max_lines": 2,
+                "margin_x": 14,
+                "margin_bottom": 0
+              },
+              {
+                "type": "text",
+                "field": "l2",
+                "align": "left",
+                "font": "noto_serif_regular",
+                "font_size": 12,
+                "line_height": 19,
+                "max_lines": 2,
+                "margin_x": 14,
+                "margin_bottom": 0
+              },
+              {
+                "type": "text",
+                "field": "l3",
+                "align": "left",
+                "font": "noto_serif_regular",
+                "font_size": 12,
+                "line_height": 19,
+                "max_lines": 2,
+                "margin_x": 14,
+                "margin_bottom": 0
+              },
+              {
+                "type": "text",
+                "field": "l4",
+                "align": "left",
+                "font": "noto_serif_regular",
+                "font_size": 12,
+                "line_height": 19,
+                "max_lines": 2,
+                "margin_x": 14,
+                "margin_bottom": 0
+              },
+              {
+                "type": "spacer",
+                "height_px": 10
+              },
+              {
+                "type": "text",
+                "template": "「{voice}」",
+                "align": "right",
+                "font": "noto_serif_light",
+                "font_size": 13,
+                "max_lines": 2,
+                "margin_x": 12,
+                "margin_bottom": 0
+              },
+              {
+                "type": "spacer",
+                "height_px": 16
+              },
+              {
+                "type": "text",
+                "field": "state_line",
+                "align": "left",
+                "font": "noto_serif_light",
+                "font_size": 10,
+                "max_lines": 1,
+                "margin_x": 12,
+                "margin_bottom": 2
+              },
+              {
+                "type": "text",
+                "field": "trip_line",
+                "align": "right",
+                "font": "noto_serif_light",
+                "font_size": 10,
+                "max_lines": 1,
+                "margin_x": 12,
+                "margin_bottom": 0
+              }
+            ]
+          },
+          {
+            "op": "eq",
+            "value": "no",
+            "children": [
+              {
+                "type": "spacer",
+                "height_px": 90
+              },
+              {
+                "type": "text",
+                "template": "{name}在{home}",
+                "align": "center",
+                "font": "noto_serif_light",
+                "font_size": 15,
+                "max_lines": 1,
+                "margin_x": 12,
+                "margin_bottom": 6
+              },
+              {
+                "type": "text",
+                "template": "今天没什么可记的",
+                "align": "center",
+                "font": "noto_serif_light",
+                "font_size": 12,
+                "max_lines": 1,
+                "margin_x": 12,
+                "margin_bottom": 0
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "footer": {
+      "label": "ANT",
+      "attribution_template": "{name}·{signature}",
+      "dashed": true
+    }
+  },
+  "layout_overrides": {
+    "296x128": {
+      "body": [
+        {
+          "type": "conditional",
+          "field": "has_text",
+          "conditions": [
+            {
+              "op": "eq",
+              "value": "yes",
+              "children": [
+                {
+                  "type": "text",
+                  "field": "title",
+                  "align": "left",
+                  "font": "noto_serif_bold",
+                  "font_size": 14,
+                  "max_lines": 1,
+                  "margin_x": 8,
+                  "margin_bottom": 4
+                },
+                {
+                  "type": "text",
+                  "field": "l1",
+                  "align": "left",
+                  "font": "noto_serif_regular",
+                  "font_size": 10,
+                  "line_height": 13,
+                  "max_lines": 1,
+                  "margin_x": 8,
+                  "margin_bottom": 0
+                },
+                {
+                  "type": "text",
+                  "field": "l2",
+                  "align": "left",
+                  "font": "noto_serif_regular",
+                  "font_size": 10,
+                  "line_height": 13,
+                  "max_lines": 1,
+                  "margin_x": 8,
+                  "margin_bottom": 0
+                },
+                {
+                  "type": "text",
+                  "field": "l3",
+                  "align": "left",
+                  "font": "noto_serif_regular",
+                  "font_size": 10,
+                  "line_height": 13,
+                  "max_lines": 1,
+                  "margin_x": 8,
+                  "margin_bottom": 0
+                },
+                {
+                  "type": "spacer",
+                  "height_px": 4
+                },
+                {
+                  "type": "text",
+                  "template": "「{voice}」",
+                  "align": "right",
+                  "font": "noto_serif_light",
+                  "font_size": 10,
+                  "max_lines": 1,
+                  "margin_x": 8,
+                  "margin_bottom": 0
+                }
+              ]
+            },
+            {
+              "op": "eq",
+              "value": "no",
+              "children": [
+                {
+                  "type": "spacer",
+                  "height_px": 30
+                },
+                {
+                  "type": "text",
+                  "template": "{name}在{home}",
+                  "align": "center",
+                  "font": "noto_serif_light",
+                  "font_size": 11,
+                  "max_lines": 1,
+                  "margin_x": 8,
+                  "margin_bottom": 0
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "footer": {
+        "label": "ANT",
+        "attribution_template": "{name}·{signature}",
+        "font_size": 9,
+        "dashed": true
+      }
+    },
+    "648x480": {
+      "body": [
+        {
+          "type": "conditional",
+          "field": "has_text",
+          "conditions": [
+            {
+              "op": "eq",
+              "value": "yes",
+              "children": [
+                {
+                  "type": "text",
+                  "field": "title",
+                  "align": "left",
+                  "font": "noto_serif_bold",
+                  "font_size": 34,
+                  "max_lines": 1,
+                  "margin_x": 20,
+                  "margin_bottom": 14
+                },
+                {
+                  "type": "text",
+                  "field": "l1",
+                  "align": "left",
+                  "font": "noto_serif_regular",
+                  "font_size": 18,
+                  "line_height": 28,
+                  "max_lines": 2,
+                  "margin_x": 22,
+                  "margin_bottom": 0
+                },
+                {
+                  "type": "text",
+                  "field": "l2",
+                  "align": "left",
+                  "font": "noto_serif_regular",
+                  "font_size": 18,
+                  "line_height": 28,
+                  "max_lines": 2,
+                  "margin_x": 22,
+                  "margin_bottom": 0
+                },
+                {
+                  "type": "text",
+                  "field": "l3",
+                  "align": "left",
+                  "font": "noto_serif_regular",
+                  "font_size": 18,
+                  "line_height": 28,
+                  "max_lines": 2,
+                  "margin_x": 22,
+                  "margin_bottom": 0
+                },
+                {
+                  "type": "text",
+                  "field": "l4",
+                  "align": "left",
+                  "font": "noto_serif_regular",
+                  "font_size": 18,
+                  "line_height": 28,
+                  "max_lines": 2,
+                  "margin_x": 22,
+                  "margin_bottom": 0
+                },
+                {
+                  "type": "spacer",
+                  "height_px": 18
+                },
+                {
+                  "type": "text",
+                  "template": "「{voice}」",
+                  "align": "right",
+                  "font": "noto_serif_light",
+                  "font_size": 20,
+                  "max_lines": 2,
+                  "margin_x": 20,
+                  "margin_bottom": 0
+                },
+                {
+                  "type": "spacer",
+                  "height_px": 26
+                },
+                {
+                  "type": "text",
+                  "field": "state_line",
+                  "align": "left",
+                  "font": "noto_serif_light",
+                  "font_size": 14,
+                  "max_lines": 1,
+                  "margin_x": 20,
+                  "margin_bottom": 4
+                },
+                {
+                  "type": "text",
+                  "field": "trip_line",
+                  "align": "right",
+                  "font": "noto_serif_light",
+                  "font_size": 14,
+                  "max_lines": 1,
+                  "margin_x": 20,
+                  "margin_bottom": 0
+                }
+              ]
+            },
+            {
+              "op": "eq",
+              "value": "no",
+              "children": [
+                {
+                  "type": "spacer",
+                  "height_px": 150
+                },
+                {
+                  "type": "text",
+                  "template": "{name}在{home}",
+                  "align": "center",
+                  "font": "noto_serif_light",
+                  "font_size": 22,
+                  "max_lines": 1,
+                  "margin_x": 20,
+                  "margin_bottom": 8
+                },
+                {
+                  "type": "text",
+                  "template": "今天没什么可记的",
+                  "align": "center",
+                  "font": "noto_serif_light",
+                  "font_size": 18,
+                  "max_lines": 1,
+                  "margin_x": 20,
+                  "margin_bottom": 0
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "footer": {
+        "label": "ANT",
+        "attribution_template": "{name}·{signature}",
+        "dashed": true
+      }
+    }
+  }
+}

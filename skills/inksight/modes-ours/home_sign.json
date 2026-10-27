@@ -1,0 +1,85 @@
+{
+  "mode_id": "CUSTOM_HOME_SIGN",
+  "display_name": "回家签",
+  "icon": "mobile",
+  "cacheable": false,
+  "description": "到家那一刻的诗签：到家时刻、在外时长、当日一句诗，以及次日双城天气。内容全部读自蓝牙感知的落盘记录，诗句来自既有诗签，不经模型现编。",
+  "content": {
+    "type": "computed",
+    "provider": "home_sign",
+    "fallback": {
+      "arrival_meta": "",
+      "arrival_time": "",
+      "away_text": "",
+      "poem_title": "",
+      "poem_author": "",
+      "lines": [],
+      "note": ""
+    }
+  },
+  "layout": {
+    "layout_engine": "component_tree",
+    "status_bar": {
+      "line_width": 1,
+      "dashed": true
+    },
+    "fragments": [
+      {
+        "fragment": "metric_hero",
+        "meta_field": "arrival_meta",
+        "meta_font": "noto_serif_light",
+        "meta_font_size": 11,
+        "hero_field": "arrival_time",
+        "hero_font_size": 30,
+        "separator_style": "short",
+        "separator_width": 64,
+        "gap": 3
+      },
+      {
+        "fragment": "plain_text",
+        "field": "away_text",
+        "font": "noto_serif_light",
+        "font_size": 12,
+        "align": "center",
+        "max_lines": 1
+      },
+      {
+        "fragment": "book_block",
+        "title_field": "poem_title",
+        "title_font": "noto_serif_bold",
+        "title_font_size": 15,
+        "title_align": "center",
+        "author_template": "{poem_author}",
+        "author_font": "noto_serif_light",
+        "author_font_size": 10,
+        "author_align": "center",
+        "desc_field": "",
+        "show_divider": true,
+        "divider_style": "short",
+        "divider_margin_x": 0,
+        "gap": 2
+      },
+      {
+        "fragment": "briefing_repeat_text",
+        "field": "lines",
+        "text_field": "_value",
+        "text_font": "noto_serif_regular",
+        "text_font_size": 15,
+        "text_align": "center",
+        "text_max_lines": 1,
+        "gap": 6,
+        "limit": 4
+      }
+    ],
+    "fragment_stack": {
+      "padding_x": 18,
+      "justify": "center",
+      "gap": 5
+    },
+    "footer": {
+      "label": "回家签",
+      "attribution_template": "{note}",
+      "dashed": true
+    }
+  }
+}
