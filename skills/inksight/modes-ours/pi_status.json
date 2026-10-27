@@ -1,0 +1,62 @@
+{
+  "mode_id": "CUSTOM_PI_STATUS",
+  "display_name": "树莓派状态",
+  "icon": "power",
+  "cacheable": false,
+  "description": "家里这台树莓派的实时状态：CPU 温度、CPU 占用、内存占用、SSD 剩余空间、开机时长。渲染时直接读本机，不经模型。",
+  "content": {
+    "type": "computed",
+    "provider": "pi_status",
+    "fallback": {
+      "title": "树莓派",
+      "metrics": [],
+      "updated_at": ""
+    }
+  },
+  "layout": {
+    "layout_engine": "component_tree",
+    "status_bar": {
+      "line_width": 1,
+      "dashed": true
+    },
+    "fragments": [
+      {
+        "fragment": "title_with_rule",
+        "title_field": "title",
+        "title_font": "noto_serif_bold",
+        "title_font_size": 18,
+        "title_align": "center",
+        "title_max_lines": 1,
+        "separator_style": "short",
+        "separator_width": 64,
+        "header_gap": 4
+      },
+      {
+        "fragment": "briefing_repeat_row",
+        "field": "metrics",
+        "limit": 5,
+        "gap": 10,
+        "row_gap": 10,
+        "row_align": "end",
+        "left_field": "label",
+        "left_font": "noto_serif_regular",
+        "left_font_size": 14,
+        "left_max_lines": 1,
+        "right_field": "value",
+        "right_font": "noto_serif_bold",
+        "right_font_size": 14,
+        "right_max_lines": 1
+      }
+    ],
+    "fragment_stack": {
+      "padding_x": 24,
+      "justify": "center",
+      "gap": 6
+    },
+    "footer": {
+      "label": "树莓派状态",
+      "attribution_template": "更新 {updated_at}",
+      "dashed": true
+    }
+  }
+}

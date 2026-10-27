@@ -1,0 +1,210 @@
+{
+  "mode_id": "CUSTOM_DAYMARK",
+  "display_name": "日痕",
+  "icon": "daymark",
+  "cacheable": false,
+  "description": "一天一行，刻在屏幕上的一册日志。每天生成一条不超过 28 字的短句，旧的字一直攒在服务端，屏幕只留最近几行。",
+  "content": {
+    "type": "computed",
+    "provider": "rihen",
+    "fallback": {
+      "rows": [],
+      "seal": "",
+      "volume_label": "第一册",
+      "day_count": "0",
+      "has_text": "no",
+      "today": ""
+    }
+  },
+  "layout": {
+    "layout_engine": "component_tree",
+    "status_bar": {
+      "line_width": 1,
+      "dashed": true
+    },
+    "body": {
+      "type": "column",
+      "padding_x": 10,
+      "padding_y": 4,
+      "gap": 6,
+      "children": [
+        {
+          "type": "repeat",
+          "field": "rows",
+          "gap": 7,
+          "item": {
+            "type": "row",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "field": "d",
+                "font": "noto_serif_light",
+                "font_size": 8,
+                "line_height": 16,
+                "align": "left",
+                "max_lines": 1
+              },
+              {
+                "type": "text",
+                "text": "●",
+                "font": "noto_serif_regular",
+                "font_size": 8,
+                "line_height": 16,
+                "color": "red",
+                "max_lines": 1
+              },
+              {
+                "type": "text",
+                "field": "t",
+                "font": "noto_serif_regular",
+                "font_size": 12,
+                "line_height": 16,
+                "grow": 1,
+                "max_lines": 1,
+                "ellipsis": true
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "field": "seal",
+          "font": "noto_serif_bold",
+          "font_size": 12,
+          "line_height": 16,
+          "align": "right",
+          "color": "red",
+          "max_lines": 1
+        }
+      ]
+    },
+    "footer": {
+      "label": "RIHEN",
+      "attribution_template": "{volume_label}",
+      "dashed": true
+    }
+  },
+  "layout_overrides": {
+    "296x128": {
+      "body": {
+        "type": "column",
+        "padding_x": 4,
+        "padding_y": 2,
+        "gap": 3,
+        "children": [
+          {
+            "type": "repeat",
+            "field": "rows",
+            "gap": 3,
+            "item": {
+              "type": "row",
+              "gap": 2,
+              "children": [
+                {
+                  "type": "text",
+                  "text": "●",
+                  "font": "noto_serif_regular",
+                  "font_size": 9,
+                  "line_height": 12,
+                  "color": "red",
+                  "max_lines": 1
+                },
+                {
+                  "type": "text",
+                  "field": "t",
+                  "font": "noto_serif_regular",
+                  "font_size": 9,
+                  "line_height": 12,
+                  "grow": 1,
+                  "max_lines": 1,
+                  "ellipsis": true
+                }
+              ]
+            }
+          },
+          {
+            "type": "text",
+            "field": "seal",
+            "font": "noto_serif_bold",
+            "font_size": 9,
+            "line_height": 12,
+            "align": "right",
+            "color": "red",
+            "max_lines": 1
+          }
+        ]
+      },
+      "footer": {
+        "label": "RIHEN",
+        "attribution_template": "{volume_label}",
+        "font_size": 9,
+        "dashed": true
+      }
+    },
+    "648x480": {
+      "body": {
+        "type": "column",
+        "padding_x": 16,
+        "padding_y": 6,
+        "gap": 6,
+        "children": [
+          {
+            "type": "repeat",
+            "field": "rows",
+            "gap": 7,
+            "item": {
+              "type": "row",
+              "gap": 6,
+              "children": [
+                {
+                  "type": "text",
+                  "field": "d",
+                  "font": "noto_serif_light",
+                  "font_size": 10,
+                  "line_height": 20,
+                  "align": "left",
+                  "max_lines": 1
+                },
+                {
+                  "type": "text",
+                  "text": "●",
+                  "font": "noto_serif_regular",
+                  "font_size": 10,
+                  "line_height": 20,
+                  "color": "red",
+                  "max_lines": 1
+                },
+                {
+                  "type": "text",
+                  "field": "t",
+                  "font": "noto_serif_regular",
+                  "font_size": 14,
+                  "line_height": 20,
+                  "grow": 1,
+                  "max_lines": 1,
+                  "ellipsis": true
+                }
+              ]
+            }
+          },
+          {
+            "type": "text",
+            "field": "seal",
+            "font": "noto_serif_bold",
+            "font_size": 14,
+            "line_height": 20,
+            "align": "right",
+            "color": "red",
+            "max_lines": 1
+          }
+        ]
+      },
+      "footer": {
+        "label": "RIHEN",
+        "attribution_template": "{volume_label}",
+        "dashed": true
+      }
+    }
+  }
+}
