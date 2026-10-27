@@ -1,0 +1,132 @@
+{
+  "mode_id": "CUSTOM_DONGJING",
+  "display_name": "汴京梦华",
+  "icon": "star",
+  "cacheable": false,
+  "description": "《东京梦华录》两轴走读：空间轴走城市（41 站），时间轴走节令（42 节）。一天一站，角标按当天日历标出今日节令。内容全部取自本地原文，不联网、不调用模型。",
+  "content": {
+    "type": "computed",
+    "provider": "dongjing",
+    "fallback": {
+      "title": "汴京",
+      "subtitle": "《东京梦华录》· 卷一",
+      "kind": "prose",
+      "quote": "凡百所卖饮食之人，装鲜净盘合器皿，车檐动使，奇巧可爱，食味和羹，不敢草略。",
+      "lead": "",
+      "items": [],
+      "festival_line": "今日 · 岁序平常",
+      "festival_hint": "",
+      "route_url": ""
+    }
+  },
+  "layout": {
+    "status_bar": {
+      "line_width": 1,
+      "dashed": true
+    },
+    "body_align": "top",
+    "body": [
+      {
+        "type": "text",
+        "field": "title",
+        "align": "left",
+        "font": "noto_serif_bold",
+        "font_size": 25,
+        "max_lines": 1,
+        "margin_x": 16,
+        "margin_bottom": 2
+      },
+      {
+        "type": "text",
+        "field": "subtitle",
+        "align": "left",
+        "font": "noto_serif_light",
+        "font_size": 12,
+        "max_lines": 1,
+        "margin_x": 16,
+        "margin_bottom": 5
+      },
+      {
+        "type": "image",
+        "field": "route_url",
+        "x": 0,
+        "width": 400,
+        "height": 26,
+        "fit": "fill",
+        "align_x": "center",
+        "align_y": "center",
+        "margin_bottom": 3
+      },
+      {
+        "type": "separator",
+        "style": "dashed",
+        "margin_x": 16,
+        "margin_bottom": 6
+      },
+      {
+        "type": "conditional",
+        "field": "kind",
+        "conditions": [
+          {
+            "op": "eq",
+            "value": "list",
+            "children": [
+              {
+                "type": "text",
+                "field": "lead",
+                "align": "left",
+                "font": "noto_serif_light",
+                "font_size": 12,
+                "max_lines": 1,
+                "margin_x": 16,
+                "margin_bottom": 5
+              },
+              {
+                "type": "list",
+                "field": "items",
+                "font": "noto_serif_regular",
+                "font_size": 14,
+                "item_spacing": 16,
+                "max_items": 8,
+                "align": "left",
+                "margin_x": 16
+              }
+            ]
+          },
+          {
+            "op": "eq",
+            "value": "prose",
+            "children": [
+              {
+                "type": "text",
+                "field": "quote",
+                "align": "left",
+                "font": "noto_serif_regular",
+                "font_size": 16,
+                "line_height": 21,
+                "max_lines": 5,
+                "margin_x": 16,
+                "margin_bottom": 4
+              },
+              {
+                "type": "text",
+                "field": "festival_hint",
+                "align": "left",
+                "font": "noto_serif_light",
+                "font_size": 12,
+                "max_lines": 1,
+                "margin_x": 16
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "footer": {
+      "label": "汴京梦华",
+      "attribution_template": "{festival_line}",
+      "dashed": true,
+      "font_size": 12
+    }
+  }
+}
