@@ -1,0 +1,104 @@
+{
+  "mode_id": "CUSTOM_YEAR_PROGRESS",
+  "display_name": "Year Progress",
+  "icon": "year",
+  "cacheable": false,
+  "description": "Year, quarter, month, week and today progress with a full-year heatmap and holiday countdowns",
+  "content": {
+    "type": "computed",
+    "provider": "year_progress",
+    "fallback": {}
+  },
+  "layout": {
+    "status_bar": {
+      "line_width": 1,
+      "dashed": false,
+      "left_text_template": "{title}  {subtitle}"
+    },
+    "layout_engine": "component_tree",
+    "body": {
+      "type": "column",
+      "padding_x": 10,
+      "gap": 0,
+      "children": [
+        {
+          "type": "row",
+          "gap": 10,
+          "align": "center",
+          "children": [
+            {
+              "type": "column",
+              "width": 92,
+              "height": 101,
+              "justify": "space_between",
+              "children": [
+                {"type": "text", "field": "big_label", "font_size": 11, "line_height": 14, "align": "center", "max_lines": 1},
+                {"type": "big_number", "field": "big_pct", "font_size": 36, "align": "center"},
+                {"type": "text", "field": "elapsed_text", "font_size": 10, "line_height": 13, "align": "center", "max_lines": 1}
+              ]
+            },
+            {
+              "type": "column",
+              "grow": 1,
+              "gap": 0,
+              "children": [
+                {
+                  "type": "repeat",
+                  "field": "levels",
+                  "gap": 9,
+                  "item": {
+                    "type": "row",
+                    "gap": 5,
+                    "align": "center",
+                    "children": [
+                      {"type": "text", "field": "label", "font_size": 11, "line_height": 13, "width": 26, "align": "left", "max_lines": 1},
+                      {"type": "progress_bar", "style": "battery", "field": "value", "max_field": "max", "width": 42, "height": 12},
+                      {"type": "text", "field": "pct_text", "font_size": 10, "line_height": 13, "width": 28, "align": "right", "max_lines": 1},
+                      {"type": "text", "field": "remain_text", "font_size": 9, "line_height": 13, "grow": 1, "align": "left", "max_lines": 1}
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {"type": "spacer", "height": 16},
+        {
+          "type": "year_grid",
+          "field": "grid",
+          "cell_size": 5,
+          "gap": 2,
+          "gutter": 10,
+          "month_label_size": 8,
+          "weekday_label_size": 8,
+          "legend_field": "legend",
+          "legend_font_size": 10,
+          "legend_swatch_size": 8,
+          "legend_item_gap": 12,
+          "legend_gap": 8
+        },
+        {"type": "spacer", "height": 8},
+        {"type": "separator", "style": "dashed", "line_width": 1, "margin_x": 0},
+        {"type": "spacer", "height": 6},
+        {
+          "type": "repeat",
+          "field": "countdowns",
+          "direction": "horizontal",
+          "gap": 0,
+          "item": {
+            "type": "text",
+            "template": "{name} {days_text}",
+            "font_size": 12,
+            "line_height": 16,
+            "align": "center",
+            "max_lines": 1
+          }
+        }
+      ]
+    },
+    "footer": {
+      "label": "Year Progress",
+      "line_width": 0
+    }
+  }
+}
