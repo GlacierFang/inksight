@@ -277,7 +277,8 @@ def snap_to_palette(src: Path, dest: Path) -> tuple[bool, str]:
 
     dw, dh = ART_DISPLAY
     try:
-        index_img = eink_snap.snap_illustration(
+        # 天工阁用线描专用归色：金色是细边，不能用网点抖动（会把金边打成虚线）
+        index_img = eink_snap.snap_line_art(
             cropped, dw, dh, ink_min=BLACK_MIN
         )
     except Exception as exc:
