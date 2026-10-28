@@ -26,10 +26,7 @@ from pathlib import Path
 from . import eink_snap
 from .tiangong import (
     IMAGE_MODEL,
-    IMAGE_PROMPT_RETRY,
-    IMAGE_PROMPT_TMPL,
     LLM_MODELS,
-    PALETTE_SPEC,
 )
 
 logger = logging.getLogger(__name__)
@@ -57,6 +54,54 @@ GENRES = (
 )
 
 ENTRY_KEYS = ("画名", "作者", "朝代", "题材", "题跋", "印文", "图")
+# -- 色相硬映射参数（丹青谱专用）--------------------------
+
+# 目标色（与屏上四色完全一致，量化零误差）
+_SNAP_BLACK = (0, 0, 0)
+_SNAP_WHITE = (255, 255, 255)
+_SNAP_YELLOW = (232, 176, 0)
+_SNAP_RED = (200, 0, 0)
+
+# 纸面判据：饱和度低于此值且明度高于此值 -> 纯白
+_PAPER_SNAP_S = 91
+_PAPER_SNAP_V = 200
+
+# 色相区间（度）：纯红相保朱红，橙金相归金黄
+_RED_HUE_MAX = 14.0
+_GOLD_HUE_MAX = 48.0
+
+# 暖色相的最低饱和度（低于此值视为灰墨，直接归黑）
+_WARM_MIN_S = 60
+
+# 橙金相暗部阈值：明度低于此值归墨黑（远山留皴法，不留死平涂）
+_GOLD_MIN_V = 110
+
+
+# 丹青谱专用四色盘说明（不复用天工阁的 PALETTE_SPEC）。
+#
+# 为什么单独一份：天工阁画的是器物，可以用「同一色系内深浅变化」做体积；
+# 丹青谱画的是宋代山水，模型默认自带花青石绿（实测该图 16.6% 像素是绿/青/蓝相，
+# 躺平巴拉只有 2.9%）。屏上四色没有绿，那部分会被 Atkinson 抖成黑黄椒盐噪点。
+# 宋代山水本来就以水墨为主，用纯墨写树石反而是「墨分五色」的正统画法。
+DANQING_PALETTE_SPEC = (
+    "画面只用四种颜色：纯白纸面底、墨黑 #000000 勾线与皴染、金黄 #E8B000 填色、朱红 #C80000 点缀。\n"
+    "树石山体一律用纯墨 #000000 皴染，绝不要任何绿色、青色、蓝色、紫色 —— "
+    "宋代山水以水墨为主，花青石绿一概不用；\n"
+    "远山、天空、屋宇可用金黄 #E8B000 平涂，同一色系内可分深浅（深金黄到淡金黄），点睛处用朱红 #C80000；\n"
+    "勾线要清晰锐利，整幅画缩到 392 像素宽时每条线依然看得清；"
+    "不要灰线、不要淡墨线、不要铅笔淡描、不要阴影和明暗排线；\n"
+    "不要写实材质纹理，宋代图录版画质感，线条清晰，不要任何文字、印章、标签、水印、边框。"
+)
+
+# 第一次：按展签指定的构图画 + 丹青谱专属四色盘。
+DANQING_IMAGE_PROMPT_TMPL = "{desc}。{palette}"
+# 生图失败后的重试版本（仅用于真出错时再试一次）：比共享版更强调「纯墨写树石」。
+DANQING_IMAGE_PROMPT_RETRY = (
+    "{desc}。墨线要粗而清晰，山体轮廓完整，树木用纯墨皴染绝不要绿色，朱红部分面积加大一些。\n"
+    "画面只用四种颜色：纯白纸面底、墨黑 #000000 勾线与皴染、金黄 #E8B000 填色、朱红 #C80000 点缀。\n"
+    "同一色系内允许深浅变化（深金黄到淡金黄），用明暗表现体积；\n"
+    "不要出现绿色、青色、蓝色、紫色，不要写实材质纹理，不要任何文字、印章、水印、边框。"
+)
 
 ENTRY_PROMPT = """你在经营一座虚构的书画馆「丹青谱」。阁中所藏皆为宋代绘画，**但每一幅都不曾存在过**。
 今天要造第 {index} 号藏品。
@@ -198,6 +243,63 @@ async def _llm_entry(index: int, recent: list, genre: str, **kwargs) -> dict:
 # --------------------------------------------------------------------------
 
 
+def _snap_hue_to_ink(img):
+    """把画心的色相硬映射到屏上四色（丹青谱专用，绝不进 eink_snap 共享层）。
+
+    为什么需要：宋代山水模型默认自带花青石绿 —— 实测该图 16.6% 像素是绿/青/蓝相
+    （躺平巴拉只有 2.9%，天工阁 0.3%）。屏上四色没有绿，那部分色相在 Atkinson
+    里没有归属，只能被抖成黑黄椒盐噪点：黄色最大连通块 11%、孤立率 61%。
+    映射之后同一张图变成黄色最大块 51%、孤立率 43%。
+
+    映射规则：
+      纸白（低饱和高亮）-> 纯白 #FFFFFF
+      纯红相（<= 14°）   -> 朱红 #C80000（点睛保留）
+      橙金相（15°~48°）  -> 金黄 #E8B000，暗部归墨黑（远山留皴法）
+      其余色相（绿/青/蓝/紫/灰）-> 墨黑 #000000
+
+    绿树变墨树不是降级：宋代山水本来就以水墨为主，这是「墨分五色」的正统画法。
+
+    必须在 eink_snap.prepare_direct_art 之后调用：先备好尺寸与明度，再归色相。
+    顺序反过来（先归色相再备）会因为 _stretch_value 把已归好的色相重新拉伸而劣化
+    —— 实测黄色孤立率 52% vs 43%。
+    """
+    from PIL import Image
+
+    hch, sch, vch = img.convert("HSV").split()
+    rgb = img.convert("RGB")
+    hp, sp, vp = hch.load(), sch.load(), vch.load()
+    rp = rgb.load()
+
+    out = Image.new("RGB", img.size)
+    op = out.load()
+    width, height = img.size
+
+    for y in range(height):
+        for x in range(width):
+            r, g, b = rp[x, y]
+            sat = sp[x, y]
+            val = vp[x, y]
+            hue_deg = hp[x, y] * 360.0 / 255.0
+
+            if sat <= _PAPER_SNAP_S and val >= _PAPER_SNAP_V:
+                op[x, y] = _SNAP_WHITE
+                continue
+
+            is_red = hue_deg <= _RED_HUE_MAX or hue_deg >= 360 - _RED_HUE_MAX
+            is_gold = (not is_red) and hue_deg <= _GOLD_HUE_MAX
+
+            if (is_red or is_gold) and sat >= _WARM_MIN_S:
+                if is_red:
+                    op[x, y] = _SNAP_RED
+                else:
+                    op[x, y] = _SNAP_YELLOW if val >= _GOLD_MIN_V else _SNAP_BLACK
+                continue
+
+            op[x, y] = _SNAP_BLACK
+
+    return out
+
+
 def prepare_art_file(src: Path, dest: Path) -> tuple[bool, str]:
     """把生图原图备成可直接上屏的图：裁白边（撑成目标比例）→ 保线下采样。
 
@@ -219,6 +321,7 @@ def prepare_art_file(src: Path, dest: Path) -> tuple[bool, str]:
     dw, dh = ART_DISPLAY
     try:
         art_img = eink_snap.prepare_direct_art(src_img, dw, dh)
+        art_img = _snap_hue_to_ink(art_img)
     except Exception as exc:
         return False, f"上屏准备失败: {exc}"
 
@@ -246,8 +349,8 @@ async def _generate_art(entry: dict, dest: Path, **kwargs) -> tuple[bool, str]:
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     reasons = []
     prompts = (
-        IMAGE_PROMPT_TMPL.format(desc=desc, palette=PALETTE_SPEC),
-        IMAGE_PROMPT_RETRY.format(desc=desc),
+        DANQING_IMAGE_PROMPT_TMPL.format(desc=desc, palette=DANQING_PALETTE_SPEC),
+        DANQING_IMAGE_PROMPT_RETRY.format(desc=desc),
     )
     for prompt in prompts:
         payload = {
