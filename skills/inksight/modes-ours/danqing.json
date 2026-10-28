@@ -1,0 +1,345 @@
+{
+  "mode_id": "CUSTOM_DANQING",
+  "display_name": "丹青谱",
+  "icon": "art",
+  "cacheable": false,
+  "description": "丹青谱虚拟书画馆：每天画一幅并不存在的宋代绘画，附虚构题签与四色册页画心。题签由模型当日现写，画心由生图模型按屏上四色盘（白/黑/金黄/朱红）画出。",
+  "content": {
+    "type": "computed",
+    "provider": "danqing",
+    "fallback": {
+      "index_label": "第 1 幅",
+      "title": "秋林曳杖图",
+      "artist": "江村陆氏，号拙庵",
+      "dynasty": "南宋",
+      "genre": "山水",
+      "colophon": "霜落空山有客归，路深不辨斜阳微。",
+      "mark": "拙庵写",
+      "seal_url": "",
+      "art_url": "",
+      "has_image": "no",
+      "collection": "丹青谱藏 · 传世仅此一幅"
+    }
+  },
+  "layout": {
+    "status_bar": {
+      "line_width": 1,
+      "dashed": true
+    },
+    "body": [
+      {
+        "type": "conditional",
+        "field": "has_image",
+        "conditions": [
+          {
+            "op": "eq",
+            "value": "yes",
+            "children": [
+              {
+                "type": "two_column",
+                "left_x": 0,
+                "left_width": 208,
+                "gap": 10,
+                "left": [
+                  {
+                    "type": "image",
+                    "field": "art_url",
+                    "x": 4,
+                    "width": 208,
+                    "height": 234,
+                    "fit": "contain",
+                    "margin_bottom": 0
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "text",
+                    "field": "index_label",
+                    "align": "left",
+                    "color": "red",
+                    "font_size": 13,
+                    "max_lines": 1,
+                    "margin_bottom": 2
+                  },
+                  {
+                    "type": "text",
+                    "field": "title",
+                    "align": "left",
+                    "font": "noto_serif_bold",
+                    "font_size": 17,
+                    "max_lines": 2,
+                    "margin_bottom": 8
+                  },
+                  {
+                    "type": "text",
+                    "template": "{dynasty} · {artist}",
+                    "align": "left",
+                    "margin_x": 0,
+                    "font_size": 11,
+                    "max_lines": 2,
+                    "margin_bottom": 4
+                  },
+                  {
+                    "type": "text",
+                    "template": "题材：{genre}",
+                    "align": "left",
+                    "margin_x": 0,
+                    "font_size": 11,
+                    "max_lines": 1,
+                    "margin_bottom": 6
+                  },
+                  {
+                    "type": "text",
+                    "field": "colophon",
+                    "align": "left",
+                    "margin_x": 0,
+                    "font": "noto_serif_light",
+                    "font_size": 11,
+                    "max_lines": 5,
+                    "margin_bottom": 4
+                  },
+                  {
+                    "type": "text",
+                    "field": "mark",
+                    "align": "left",
+                    "margin_x": 0,
+                    "font": "noto_serif_light",
+                    "font_size": 10,
+                    "max_lines": 1,
+                    "margin_bottom": 2
+                  },
+                  {
+                    "type": "image",
+                    "field": "seal_url",
+                    "x": 342,
+                    "width": 44,
+                    "height": 44,
+                    "fit": "contain",
+                    "margin_bottom": 0
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "eq",
+            "value": "no",
+            "children": [
+              {
+                "type": "text",
+                "field": "index_label",
+                "align": "center",
+                "color": "red",
+                "font_size": 14,
+                "max_lines": 1,
+                "margin_bottom": 2
+              },
+              {
+                "type": "text",
+                "field": "title",
+                "align": "center",
+                "font": "noto_serif_bold",
+                "font_size": 18,
+                "max_lines": 2,
+                "margin_bottom": 10
+              },
+              {
+                "type": "text",
+                "template": "{dynasty} · {artist}",
+                "align": "center",
+                "font_size": 13,
+                "max_lines": 2,
+                "margin_bottom": 6
+              },
+              {
+                "type": "text",
+                "template": "题材：{genre}",
+                "align": "center",
+                "font_size": 13,
+                "max_lines": 1,
+                "margin_bottom": 8
+              },
+              {
+                "type": "text",
+                "field": "colophon",
+                "align": "center",
+                "font": "noto_serif_light",
+                "font_size": 13,
+                "max_lines": 4,
+                "margin_bottom": 6
+              },
+              {
+                "type": "text",
+                "field": "mark",
+                "align": "center",
+                "font": "noto_serif_light",
+                "font_size": 12,
+                "max_lines": 1,
+                "margin_bottom": 0
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "footer": {
+      "label": "丹青谱",
+      "attribution_template": "{collection}",
+      "dashed": true
+    }
+  },
+  "layout_overrides": {
+    "296x128": {
+      "body": [
+        {
+          "type": "two_column",
+          "left_x": 0,
+          "left_width": 92,
+          "gap": 6,
+          "stack_when_short": false,
+          "left": [
+            {
+              "type": "image",
+              "field": "art_url",
+              "x": 2,
+              "width": 88,
+              "height": 92,
+              "fit": "contain",
+              "margin_bottom": 0
+            }
+          ],
+          "right": [
+            {
+              "type": "text",
+              "field": "title",
+              "align": "left",
+              "margin_x": 0,
+              "font": "noto_serif_bold",
+              "font_size": 12,
+              "max_lines": 1,
+              "margin_bottom": 2
+            },
+            {
+              "type": "text",
+              "template": "{dynasty} · {artist}",
+              "align": "left",
+              "margin_x": 0,
+              "font_size": 9,
+              "max_lines": 1,
+              "margin_bottom": 2
+            },
+            {
+              "type": "text",
+              "field": "colophon",
+              "align": "left",
+              "margin_x": 0,
+              "font": "noto_serif_light",
+              "font_size": 9,
+              "max_lines": 3,
+              "margin_bottom": 0
+            }
+          ]
+        }
+      ],
+      "footer": {
+        "label": "丹青谱",
+        "attribution_template": "{collection}",
+        "dashed": true,
+        "height": 22
+      }
+    },
+    "648x480": {
+      "body": [
+        {
+          "type": "two_column",
+          "left_x": 0,
+          "left_width": 330,
+          "gap": 16,
+          "left": [
+            {
+              "type": "image",
+              "field": "art_url",
+              "x": 8,
+              "width": 322,
+              "height": 372,
+              "fit": "contain",
+              "margin_bottom": 0
+            }
+          ],
+          "right": [
+            {
+              "type": "text",
+              "field": "index_label",
+              "align": "left",
+              "color": "red",
+              "font_size": 20,
+              "max_lines": 1,
+              "margin_bottom": 4
+            },
+            {
+              "type": "text",
+              "field": "title",
+              "align": "left",
+              "font": "noto_serif_bold",
+              "font_size": 26,
+              "max_lines": 2,
+              "margin_bottom": 14
+            },
+            {
+              "type": "text",
+              "template": "{dynasty} · {artist}",
+              "align": "left",
+              "margin_x": 0,
+              "font_size": 16,
+              "max_lines": 2,
+              "margin_bottom": 8
+            },
+            {
+              "type": "text",
+              "template": "题材：{genre}",
+              "align": "left",
+              "margin_x": 0,
+              "font_size": 16,
+              "max_lines": 1,
+              "margin_bottom": 10
+            },
+            {
+              "type": "text",
+              "field": "colophon",
+              "align": "left",
+              "margin_x": 0,
+              "font": "noto_serif_light",
+              "font_size": 16,
+              "max_lines": 6,
+              "margin_bottom": 8
+            },
+            {
+              "type": "text",
+              "field": "mark",
+              "align": "left",
+              "margin_x": 0,
+              "font": "noto_serif_light",
+              "font_size": 14,
+              "max_lines": 1,
+              "margin_bottom": 4
+            },
+            {
+              "type": "image",
+              "field": "seal_url",
+              "x": 560,
+              "width": 56,
+              "height": 56,
+              "fit": "contain",
+              "margin_bottom": 0
+            }
+          ]
+        }
+      ],
+      "footer": {
+        "label": "丹青谱",
+        "attribution_template": "{collection}",
+        "dashed": true
+      }
+    }
+  }
+}
