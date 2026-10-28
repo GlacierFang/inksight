@@ -2,14 +2,14 @@
 
 产出三块：
 - 地点 + 短句：LLM 当日现写（自由发挥，不走种子池，只防近期重复）。
-- 图：MiniMax image-01 出图 → 后端 snap 成精确四色调色板 → 按显示尺寸 1:1 存本地。
+- 图：MiniMax image-01 出图 → 后端备成显示尺寸的真彩图 → 按显示尺寸 1:1 存本地。
 - 画面本身不受主题限制：古今中外、哪个时代都能梦；限四色，允许同一色系内的深浅层次，无图内文字。
 
 原则：
 - 图是锦上添花，文字保底。生图真出错 → 退成纯文字卡，当天不空。
 - LLM 整个失败 → 复用昨天的图，日期由 InkSight 顶栏体现。
 - **不设质量门槛**（2026-10-26 冰河大人定）：生成了就上屏，只认真出错。
-- snap 出来的 PNG 每个像素都是精确调色板值，渲染器 Atkinson 抖动误差为 0，等于无损直通。
+- 存的是真彩图，不做预四色化：颜色归类交给渲染器的 Atkinson 抖动，输出精确四色（2026-10-28 起与天工阁统一）。
 - 不留历史：状态里只留今天、昨天（仅供失败兜底）和最近 7 条防重复记录。
 """
 
@@ -46,14 +46,11 @@ IMAGE_MODEL = "image-01"
 IMAGE_ASPECT = "16:9"
 
 # 卡片在屏上的显示尺寸，必须与模式 JSON 里 image 块的 width/height 一致（400×300 基准）。
-# 同尺寸时 PIL 的 resize 是 copy，精确调色板值可以原样送到 Atkinson 抖动（误差 0）。
+# 一致才能 1:1 落屏：渲染器不再二次缩放，细节不会被平均掉。
 CARD_DISPLAY = (400, 234)
 
 # 屏上四色名，与 core/config.py 的 EINK_4COLOR_PALETTE 顺序一致。
 PAL_NAMES = ("黑", "白", "金黄", "朱红")
-
-# 质量闸门（整幅 400×234 计）
-BLACK_MIN = 0.02     # 补墨目标：墨线太少在墨水屏上会看不见
 
 LOCK_STALE_SEC = 900
 RECENT_KEEP = 7
@@ -67,7 +64,7 @@ LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M2.7")
 #
 # 允许「同一色系内的深浅变化」：屏上只有四个物理色，没有灰；
 # 层次来自同一色相的深浅（深金黄→金黄→淡金黄），不是第五种颜色。
-# 后端 snap 把区内明暗映射到相邻色阶，于是毛色、天空、地面都有体积感。
+# 渲染器的 Atkinson 抖动把中间调变成网点，于是毛色、天空、地面都有体积感。
 PALETTE_SPEC = (
     "画面只用四种颜色：纯白纸面底、墨黑 #000000 勾线与暗部、金黄 #E8B000 填色、朱红 #C80000 点缀。"
     "同一色系内可以有深浅变化：填色允许深浅不一的层次（深金黄到淡金黄），"
@@ -258,32 +255,16 @@ async def _llm_dream(recent: list, **kwargs) -> dict:
 
 
 # --------------------------------------------------------------------------
-# 生图 → 四色 snap → 本地质量闸门
+# 生图 → 备成上屏尺寸
 # --------------------------------------------------------------------------
 
 
-def _crop_to_ratio(img, ratio: float):
-    from PIL import Image
+def _prepare_card(src: Path, dest: Path) -> tuple[bool, str]:
+    """把生图备成可直接上屏的图：裁白边 → 明度归一 → 纸面置白 → 保线下采样。
 
-    w, h = img.size
-    if w <= 0 or h <= 0:
-        return img
-    cur = w / h
-    if abs(cur - ratio) < 1e-6:
-        return img
-    if cur > ratio:
-        nw = max(1, int(round(h * ratio)))
-        left = (w - nw) // 2
-        return img.crop((left, 0, left + nw, h))
-    nh = max(1, int(round(w / ratio)))
-    top = (h - nh) // 2
-    return img.crop((0, top, w, top + nh))
+    **不做四色归色**：颜色交给渲染器的 Atkinson 抖动（标准路径，输出精确四色）。
+    这里只保证下采样不把细节平均掉 —— 那才是原来细节变噪点的真正原因。
 
-
-def _snap_to_palette(src: Path, dest: Path) -> tuple[bool, str]:
-    """把生图 snap 成四色盘：裁比例 → 区域归色（保中间调）→ 补墨。
-
-    只做四色归色（墨线不够就补墨），**不设质量门槛**：生成了就上屏。
     返回 (是否成功, 四色占比说明)。只有真出错（读不到图/写不出文件）才算失败。
     """
     try:
@@ -298,29 +279,31 @@ def _snap_to_palette(src: Path, dest: Path) -> tuple[bool, str]:
 
     dw, dh = CARD_DISPLAY
     try:
-        cropped = _crop_to_ratio(img, dw / dh)
+        card_img = eink_snap.prepare_direct_art(img, dw, dh)
     except Exception as exc:
-        return False, f"裁比例失败: {exc}"
+        return False, f"上屏准备失败: {exc}"
 
+    # 四色占比：按渲染器真正会用的 Atkinson 抖动脉冲算一遍，
+    # 描述屏上实际会看到什么，不是质量门槛。
+    counts = {}
     try:
-        index_img = eink_snap.snap_illustration(
-            cropped, dw, dh, ink_min=BLACK_MIN
-        )
-    except Exception as exc:
-        return False, f"四色归色失败: {exc}"
+        from collections import Counter
 
-    counts = [0, 0, 0, 0]
-    for v in index_img.getdata():
-        counts[v] += 1
-    total = dw * dh
+        from . import native_dither
+
+        cnt = Counter(native_dither.atkinson_palette(card_img, 4).getdata())
+        total = dw * dh
+        counts = {PAL_NAMES[i]: cnt.get(i, 0) / total for i in range(4)}
+    except Exception:  # pragma: no cover
+        pass
 
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
-        index_img.convert("RGB").save(dest, "PNG")
+        card_img.save(dest, "PNG")
     except OSError as exc:
         return False, f"写文件失败: {exc}"
 
-    desc = " ".join(f"{PAL_NAMES[i]}{counts[i] * 100 / total:.1f}%" for i in range(4))
+    desc = " ".join(f"{k}{v * 100:.1f}%" for k, v in counts.items())
     return True, desc
 
 
@@ -335,7 +318,7 @@ def _image_prompt(scene: str, retry: bool = False) -> str:
 
 
 async def _generate_image(scene: str, dest: Path, **kwargs) -> tuple[bool, str]:
-    """调 MiniMax 生图 → 下载 → snap 成四色。真出错时换提示词再试一次。"""
+    """调 MiniMax 生图 → 下载 → 备成上屏尺寸。真出错时换提示词再试一次。"""
     import httpx
 
     key = (kwargs.get("image_api_key") or "").strip() or os.getenv("MINIMAX_API_KEY", "").strip()
@@ -387,7 +370,7 @@ async def _generate_image(scene: str, dest: Path, **kwargs) -> tuple[bool, str]:
             reasons.append(f"下载图失败: {exc}")
             break
 
-        ok, reason = _snap_to_palette(tmp, dest)
+        ok, reason = _prepare_card(tmp, dest)
         try:
             tmp.unlink()
         except OSError:
