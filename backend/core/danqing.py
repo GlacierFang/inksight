@@ -218,7 +218,10 @@ def prepare_art_file(src: Path, dest: Path) -> tuple[bool, str]:
 
     dw, dh = ART_DISPLAY
     try:
-        art_img = eink_snap.prepare_direct_art(src_img, dw, dh)
+        # 2026-10-28 冰河大人选定：box 下采样 + 只压暗墨色（白纸与彩色不动）
+        art_img = eink_snap.prepare_direct_art(
+            src_img, dw, dh, downsample="box", ink_gamma=1.35
+        )
     except Exception as exc:
         return False, f"上屏准备失败: {exc}"
 
