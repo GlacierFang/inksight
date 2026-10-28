@@ -1,0 +1,71 @@
+{
+  "mode_id": "CUSTOM_EWORLD",
+  "display_name": "电子世界",
+  "icon": "star",
+  "cacheable": false,
+  "description": "四方电子生命在一张固定大陆上逐日攻伐：32 州郡逐日易主，顶栏四色图例标注势力盘数，底部战报与当日地图变化严格对应。纯本地日期确定性仿真，不联网、不调用模型。",
+  "content": {
+    "type": "computed",
+    "provider": "eworld",
+    "fallback": {
+      "title": "电子世界",
+      "subtitle": "四方逐日攻伐",
+      "map_url": "",
+      "report_line": "",
+      "report_line2": ""
+    }
+  },
+  "layout": {
+    "status_bar": {
+      "hidden": true
+    },
+    "footer": {
+      "hidden": true
+    },
+    "body": [
+      {
+        "type": "image",
+        "field": "map_url",
+        "x": 0,
+        "y": 0,
+        "width": 400,
+        "height": 300,
+        "fit": "fill",
+        "align_x": "left",
+        "align_y": "top"
+      }
+    ]
+  },
+  "layout_overrides": {
+    "648x480": {
+      "body": [
+        {
+          "type": "image",
+          "field": "map_url",
+          "x": 0,
+          "y": 0,
+          "width": 400,
+          "height": 296,
+          "fit": "fill",
+          "align_x": "left",
+          "align_y": "top"
+        }
+      ]
+    },
+    "296x128": {
+      "body": [
+        {
+          "type": "image",
+          "field": "map_url",
+          "x": 0,
+          "y": 0,
+          "width": 321,
+          "height": 139,
+          "fit": "fill",
+          "align_x": "left",
+          "align_y": "top"
+        }
+      ]
+    }
+  }
+}

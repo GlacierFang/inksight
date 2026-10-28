@@ -264,6 +264,12 @@ BUILTIN_CATALOG: list[CatalogItem] = [
         zh=CatalogText(name="汴京梦华", tip="《东京梦华录》两轴走读：每天一站，城中41站、岁时42节，角标标今日节令"),
         en=CatalogText(name="Dongjing", tip="A daily walk through the Tokyo Dream Record: 41 city stops and 42 seasonal festivals"),
     ),
+    CatalogItem(
+        mode_id="CUSTOM_EWORLD",
+        category="custom",
+        zh=CatalogText(name="电子世界", tip="四方电子生命逐日攻伐固定大陆：州郡易主、当日战报与地图严格对应"),
+        en=CatalogText(name="E-World", tip="Four electronic powers fight over a fixed continent daily; the report matches the map exactly"),
+    ),
 ]
 
 
