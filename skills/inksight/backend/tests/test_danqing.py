@@ -1,0 +1,343 @@
+"""「丹青谱」模式（CUSTOM_DANQING）测试。
+
+覆盖：
+  - 模式 JSON：源文件/部署副本合法且一致，catalog 已注册；
+  - provider 接线：computed 通道能派发到 danqing；
+  - 题签解析：LLM 输出按「字段：值」逐行取，缺字段用兜底；
+  - 每日推进：同一天只造一次，跨天接着编号，题材轮转不重样；
+  - 私印：印文画成朱文方印，印文变了就换新印；
+  - 版式：题签字段都真的画出来。
+"""
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+import pytest
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+MODE_SOURCE = BACKEND_DIR.parent / "modes-ours" / "danqing.json"
+MODE_DEPLOY = BACKEND_DIR / "core" / "modes" / "builtin" / "custom_danqing.json"
+
+CONTENT_FIELDS = {
+    "index_label", "title", "artist", "dynasty", "genre",
+    "colophon", "mark", "seal_url", "art_url", "has_image", "collection",
+}
+
+
+def _mode() -> dict:
+    return json.loads(MODE_DEPLOY.read_text(encoding="utf-8"))
+
+
+# ── 模式文件 ────────────────────────────────────────────────
+def test_mode_json_validates():
+    from core.mode_registry import _validate_mode_def_with_error
+
+    for path in (MODE_SOURCE, MODE_DEPLOY):
+        assert path.exists(), f"缺少模式文件：{path}"
+        definition = json.loads(path.read_text(encoding="utf-8"))
+        ok, err = _validate_mode_def_with_error(definition)
+        assert ok, f"{path}: {err}"
+        assert definition["mode_id"] == "CUSTOM_DANQING"
+        assert definition["content"]["type"] == "computed"
+        assert definition["content"]["provider"] == "danqing"
+
+
+def test_mode_source_and_deploy_match():
+    assert MODE_SOURCE.read_text(encoding="utf-8") == MODE_DEPLOY.read_text(encoding="utf-8")
+
+
+def test_registered_in_catalog():
+    from core.mode_catalog import BUILTIN_CATALOG
+
+    item = next(i for i in BUILTIN_CATALOG if i.mode_id == "CUSTOM_DANQING")
+    assert item.category == "custom"
+    assert item.zh.name == "丹青谱"
+
+
+def test_registered_in_mode_registry():
+    from core.mode_registry import get_registry
+
+    assert "CUSTOM_DANQING" in get_registry().get_supported_ids()
+
+
+def test_fallback_covers_every_field():
+    fallback = _mode()["content"]["fallback"]
+    assert set(fallback) == CONTENT_FIELDS
+    # seal_url / art_url 是运行期才有的 URL（私印与画心），兜底为空是对的
+    runtime_urls = {"seal_url", "art_url"}
+    for field, value in fallback.items():
+        if field in runtime_urls:
+            assert value == "", f"{field} 兜底应当为空"
+            continue
+        assert isinstance(value, str) and value.strip(), f"{field} 兜底为空"
+
+
+def test_provider_is_wired():
+    """computed 通道必须能派发到 danqing provider。"""
+    import inspect
+
+    import core.json_content as jc
+
+    source = inspect.getsource(jc._generate_computed_content)
+    assert 'provider == "danqing"' in source
+    assert "build_danqing_content" in source
+
+
+# ── 题签解析 ────────────────────────────────────────────────
+def test_parse_entry_reads_labelled_lines():
+    from core.danqing import _parse_entry
+
+    raw = (
+        "画名：秋林曳杖图\n"
+        "作者：江村陆氏，号拙庵\n"
+        "朝代：南宋\n"
+        "题材：山水\n"
+        "题跋：霜落空山有客归。\n"
+        "款识：拙庵写\n"
+        "印文：拙庵居士\n"
+        "图：一幅宋代山水册页\n"
+        "多余的一句话\n"
+    )
+    entry = _parse_entry(raw)
+    assert entry["画名"] == "秋林曳杖图"
+    assert entry["印文"] == "拙庵居士"
+    assert "多余的一句话" not in entry
+
+
+def test_parse_entry_ignores_malformed():
+    from core.danqing import _parse_entry
+
+    assert _parse_entry("") == {}
+    assert _parse_entry("没有冒号的行\n") == {}
+
+
+def test_entry_keys_cover_prompt_fields():
+    from core.danqing import ENTRY_KEYS, FALLBACK_ENTRY
+
+    for key in ("画名", "作者", "朝代", "题材", "题跋", "款识", "印文", "图"):
+        assert key in ENTRY_KEYS
+        assert FALLBACK_ENTRY.get(key), f"{key} 缺兜底"
+
+
+def test_prompt_forbids_real_painters():
+    """作者与画名必须虚构，不能撞真实宋代画家。"""
+    from core.danqing import ENTRY_PROMPT
+
+    assert "虚构" in ENTRY_PROMPT
+    assert "不得用真实宋代画家的名" in ENTRY_PROMPT
+
+
+# ── 私印 ────────────────────────────────────────────────────
+def test_seal_is_generated_and_reused(tmp_path, monkeypatch):
+    from core import danqing
+
+    monkeypatch.setattr(danqing, "ART_DIR", tmp_path)
+    url = danqing._seal_path("拙庵居士")
+    assert url.startswith("/static/danqing/")
+    assert (tmp_path / url.rsplit("/", 1)[-1]).exists()
+    # 同一印文复用同一文件
+    assert danqing._seal_path("拙庵居士") == url
+    # 不同印文换新印
+    assert danqing._seal_path("某某私印") != url
+
+
+def test_seal_without_text_returns_empty(tmp_path, monkeypatch):
+    from core import danqing
+
+    monkeypatch.setattr(danqing, "ART_DIR", tmp_path)
+    assert danqing._seal_path("") == ""
+    assert danqing._seal_path("   ") == ""
+
+
+# ── 每日推进 ────────────────────────────────────────────────
+@pytest.mark.asyncio
+async def test_build_content_uses_llm_entry_and_fills_fields(tmp_path, monkeypatch):
+    from core import danqing
+
+    monkeypatch.setattr(danqing, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(danqing, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(danqing, "ART_DIR", tmp_path)
+
+    async def fake_generate_art(entry, dest, **kwargs):
+        return False, "测试不生图"
+
+    monkeypatch.setattr(danqing, "_generate_art", fake_generate_art)
+
+    raw = (
+        "画名：寒林归鸦图\n"
+        "作者：钱塘方氏，号静庵\n"
+        "朝代：北宋\n"
+        "题材：花鸟\n"
+        "题跋：寒鸦数点下平芜。\n"
+        "款识：静庵戏笔\n"
+        "印文：静庵之印\n"
+        "图：一幅宋代花鸟册页\n"
+    )
+
+    async def fake_llm_entry(index, recent, genre, **kwargs):
+        return danqing._parse_entry(raw)
+
+    monkeypatch.setattr(danqing, "_llm_entry", fake_llm_entry)
+
+    content = await danqing.build_danqing_content(fallback=_mode()["content"]["fallback"])
+
+    assert content["title"] == "寒林归鸦图"
+    assert content["artist"] == "钱塘方氏，号静庵"
+    assert content["dynasty"] == "北宋"
+    assert content["genre"] == "花鸟"
+    assert content["colophon"] == "寒鸦数点下平芜。"
+    assert content["mark"] == "静庵戏笔"
+    assert content["index_label"].startswith("第 ")
+    assert content["has_image"] == "no"
+    assert content["art_url"] == ""
+    assert content["seal_url"].startswith("/static/danqing/")
+
+
+@pytest.mark.asyncio
+async def test_same_day_reuses_stored_entry(tmp_path, monkeypatch):
+    """同一天再取一次：不重新调用模型，直接用存好的那份。"""
+    from core import danqing
+
+    monkeypatch.setattr(danqing, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(danqing, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(danqing, "ART_DIR", tmp_path)
+
+    calls: list[int] = []
+
+    async def fake_generate_art(entry, dest, **kwargs):
+        return False, "测试不生图"
+
+    monkeypatch.setattr(danqing, "_generate_art", fake_generate_art)
+
+    async def fake_llm_entry(index, recent, genre, **kwargs):
+        calls.append(index)
+        return dict(danqing.FALLBACK_ENTRY)
+
+    monkeypatch.setattr(danqing, "_llm_entry", fake_llm_entry)
+
+    first = await danqing.build_danqing_content()
+    second = await danqing.build_danqing_content()
+
+    assert len(calls) == 1, f"同一天不该重复调用模型，实得 {len(calls)} 次"
+    assert first["title"] == second["title"]
+    assert first["index_label"] == second["index_label"]
+
+
+@pytest.mark.asyncio
+async def test_genres_rotate_without_repeat(tmp_path, monkeypatch):
+    """题材按编号轮转，一轮之内不重样。"""
+    from core import danqing
+
+    monkeypatch.setattr(danqing, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(danqing, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(danqing, "ART_DIR", tmp_path)
+
+    async def fake_generate_art(entry, dest, **kwargs):
+        return False, "测试不生图"
+
+    monkeypatch.setattr(danqing, "_generate_art", fake_generate_art)
+
+    seen: list[str] = []
+
+    async def fake_llm_entry(index, recent, genre, **kwargs):
+        seen.append(genre)
+        entry = dict(danqing.FALLBACK_ENTRY)
+        entry["题材"] = genre
+        return entry
+
+    monkeypatch.setattr(danqing, "_llm_entry", fake_llm_entry)
+
+    for _ in range(len(danqing.GENRES)):
+        await danqing.build_danqing_content()
+        # 每天一个条目：手动把今天挪走，模拟跨天
+        state = danqing._read_state()
+        days = state.get("days", {})
+        for key in list(days):
+            days.pop(key)
+            state["days"] = days
+            danqing._write_state(state)
+
+    assert seen == list(danqing.GENRES)
+    assert len(set(seen)) == len(seen)
+
+
+# ── 版式 ────────────────────────────────────────────────────
+def _referenced_fields(node, out: set[str]) -> set[str]:
+    if isinstance(node, dict):
+        for key in ("field", "code_field", "suffix_field", "max_field", "text_field"):
+            if isinstance(node.get(key), str):
+                out.add(node[key])
+        for key in ("template", "attribution_template"):
+            template = node.get(key)
+            if isinstance(template, str):
+                out.update(re.findall(r"\{(\w+)\}", template))
+        for value in node.values():
+            _referenced_fields(value, out)
+    elif isinstance(node, list):
+        for value in node:
+            _referenced_fields(value, out)
+    return out
+
+
+def test_layout_shows_every_field():
+    mode = _mode()
+    referenced: set[str] = set()
+    _referenced_fields(mode["layout"], referenced)
+    for override in mode.get("layout_overrides", {}).values():
+        _referenced_fields(override, referenced)
+    missing = CONTENT_FIELDS - referenced
+    assert not missing, f"版式没有引用这些字段：{sorted(missing)}"
+
+
+def test_layout_templates_only_use_known_fields():
+    mode = _mode()
+    referenced: set[str] = set()
+    _referenced_fields(mode["layout"], referenced)
+    for override in mode.get("layout_overrides", {}).values():
+        _referenced_fields(override, referenced)
+    unknown = referenced - CONTENT_FIELDS
+    assert not unknown, f"模板引用了不存在的字段：{sorted(unknown)}"
+
+
+def test_layout_has_image_and_no_image_branches():
+    """有图时左图右签，没图时纯题签居中 —— 生图失败不能空屏。"""
+    body = _mode()["layout"]["body"]
+    assert body[0]["type"] == "conditional"
+    assert body[0]["field"] == "has_image"
+    values = {c["value"] for c in body[0]["conditions"]}
+    assert values == {"yes", "no"}
+    for cond in body[0]["conditions"]:
+        assert cond["children"], f"{cond['value']} 分支是空的"
+
+
+def test_has_small_and_large_overrides():
+    overrides = _mode()["layout_overrides"]
+    assert "296x128" in overrides
+    assert "648x480" in overrides
+
+
+def test_image_block_size_matches_provider_display():
+    """版式里的图尺寸必须与 provider 的 ART_DISPLAY 一致，否则会二次缩放丢墨线。"""
+    from core.danqing import ART_DISPLAY
+
+    mode = _mode()
+    sizes: set[tuple[int, int]] = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("type") == "image" and node.get("field") == "art_url":
+                sizes.add((int(node["width"]), int(node["height"])))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(mode["layout"])
+    assert ART_DISPLAY in sizes, f"版式没有用 ART_DISPLAY {ART_DISPLAY}，实得 {sizes}"

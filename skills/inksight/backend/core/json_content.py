@@ -934,6 +934,9 @@ async def _generate_computed_content(mode_def: dict, content_cfg: dict, fallback
     if provider == "tiangong":
         from .tiangong import build_tiangong_content
         return await build_tiangong_content(fallback, **kwargs)
+    if provider == "danqing":
+        from .danqing import build_danqing_content
+        return await build_danqing_content(fallback, **kwargs)
     if provider == "tangping":
         from .tangping import build_tangping_content
         return await build_tangping_content(fallback, **kwargs)
