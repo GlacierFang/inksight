@@ -3,7 +3,7 @@
 产出三块：
 - 地点 + 短句：LLM 当日现写（自由发挥，不走种子池，只防近期重复）。
 - 图：MiniMax image-01 出图 → 后端 snap 成精确四色调色板 → 按显示尺寸 1:1 存本地。
-- 画面本身不受主题限制：古今中外、哪个时代都能梦，只限四色平涂、无渐变、无图内文字。
+- 画面本身不受主题限制：古今中外、哪个时代都能梦；限四色，允许同一色系内的深浅层次，无图内文字。
 
 原则：
 - 图是锦上添花，文字保底。生图真出错 → 退成纯文字卡，当天不空。
@@ -22,6 +22,8 @@ import os
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+
+from . import eink_snap
 
 logger = logging.getLogger(__name__)
 
@@ -47,15 +49,8 @@ IMAGE_ASPECT = "16:9"
 # 同尺寸时 PIL 的 resize 是 copy，精确调色板值可以原样送到 Atkinson 抖动（误差 0）。
 CARD_DISPLAY = (400, 234)
 
-# 屏上四色，值必须与 core/config.py 的 EINK_4COLOR_PALETTE 一致。
-PALETTE_RGB = (
-    (0, 0, 0),        # 0 墨黑
-    (255, 255, 255),  # 1 纯白
-    (232, 176, 0),    # 2 金黄
-    (200, 0, 0),      # 3 朱红
-)
+# 屏上四色名，与 core/config.py 的 EINK_4COLOR_PALETTE 顺序一致。
 PAL_NAMES = ("黑", "白", "金黄", "朱红")
-WHITE_INDEX = 1
 
 # 质量闸门（整幅 400×234 计）
 BLACK_MIN = 0.02     # 补墨目标：墨线太少在墨水屏上会看不见
@@ -69,16 +64,22 @@ DREAM_KEYS = ("地点", "短句", "画面")
 LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M2.7")
 
 # 四色盘说明：直接告诉生图模型要什么颜色，别让它自己发挥。
+#
+# 允许「同一色系内的深浅变化」：屏上只有四个物理色，没有灰；
+# 层次来自同一色相的深浅（深金黄→金黄→淡金黄），不是第五种颜色。
+# 后端 snap 把区内明暗映射到相邻色阶，于是毛色、天空、地面都有体积感。
 PALETTE_SPEC = (
     "画面只用四种颜色：纯白纸面底、墨黑 #000000 勾线与暗部、金黄 #E8B000 填色、朱红 #C80000 点缀。"
-    "平涂色块，无渐变，无阴影，无高光，无写实光影，无材质纹理，"
+    "同一色系内可以有深浅变化：填色允许深浅不一的层次（深金黄到淡金黄），"
+    "暗部允许更深的金黄与浓朱红，用明暗表现体积与柔和光影；"
+    "但不要出现第五种色相（不要蓝、绿、紫、青），不要写实材质纹理，"
     "四色套色版画质感，线条清晰，不要任何文字、印章、标签、水印、边框。"
 )
-# 第一次失败后重试用的更狠版本：强调整片色块与主体轮廓。
+# 第一次失败后重试用的更狠版本：强调墨线清晰、主体完整，同时保留色阶。
 PALETTE_SPEC_RETRY = (
-    "只用四种颜色平涂，色块要整片，不要任何渐变、灰阶与写实明暗；"
+    "只用四种颜色，同一色系内保留深浅层次（深金黄到淡金黄、朱红有浓淡），用明暗表现体积；"
     "墨黑 #000000 勾线要粗而清晰，主体轮廓完整；"
-    "纯白纸面底、墨黑 #000000、金黄 #E8B000、朱红 #C80000，别用第五种颜色。"
+    "纯白纸面底、墨黑 #000000、金黄 #E8B000、朱红 #C80000，别用第五种色相。"
     "不要任何文字、印章、标签、水印、边框。"
 )
 
@@ -279,60 +280,11 @@ def _crop_to_ratio(img, ratio: float):
     return img.crop((0, top, w, top + nh))
 
 
-def _boost_ink(index: bytearray, lum: list, dw: int, dh: int, target: float) -> None:
-    """墨线太少就补墨：先让已有的墨线加粗，还不够就取最暗的一批像素补上。
-
-    e-ink 上没有墨线的图会很淡。但补出来的墨必须是成片的，否则就是噪点——
-    所以按亮度排序取整片最暗的像素，而不是随手点几个点。
-    """
-    total = dw * dh
-    need = int(target * total)
-    black = sum(1 for v in index if v == 0)
-    if black >= need:
-        return
-
-    try:
-        from PIL import Image, ImageFilter
-    except Exception:  # pragma: no cover
-        return
-
-    for _ in range(3):
-        if black >= need:
-            break
-        mask = Image.new("L", (dw, dh), 255)
-        mp = mask.load()
-        for y in range(dh):
-            row = y * dw
-            for x in range(dw):
-                if index[row + x] == 0:
-                    mp[x, y] = 0
-        grown = mask.filter(ImageFilter.MaxFilter(3)).point(
-            lambda p: 0 if p < 128 else 255, mode="L"
-        )
-        gp = grown.load()
-        for y in range(dh):
-            row = y * dw
-            for x in range(dw):
-                if gp[x, y] == 0:
-                    index[row + x] = 0
-        black = sum(1 for v in index if v == 0)
-
-    if black < need:
-        # 只在白底像素里补，不碰已经定色的金黄与朱红（否则四色被吃成三色）
-        cand = []
-        for p, value in enumerate(index):
-            if value == WHITE_INDEX:
-                cand.append((lum[p], p))
-        cand.sort()
-        for _, p in cand[: need - black]:
-            index[p] = 0
-
-
 def _snap_to_palette(src: Path, dest: Path) -> tuple[bool, str]:
-    """把生图 snap 成四色盘。
+    """把生图 snap 成四色盘：裁比例 → 区域归色（保中间调）→ 补墨。
 
     只做四色归色（墨线不够就补墨），**不设质量门槛**：生成了就上屏。
-    返回 (是否成功, 四色占比说明)。只有真出错（读不到图、写不出文件）才算失败。
+    返回 (是否成功, 四色占比说明)。只有真出错（读不到图/写不出文件）才算失败。
     """
     try:
         from PIL import Image
@@ -345,41 +297,26 @@ def _snap_to_palette(src: Path, dest: Path) -> tuple[bool, str]:
         return False, f"读图失败: {exc}"
 
     dw, dh = CARD_DISPLAY
-    img = _crop_to_ratio(img, dw / dh).resize((dw, dh), Image.LANCZOS)
+    try:
+        cropped = _crop_to_ratio(img, dw / dh)
+    except Exception as exc:
+        return False, f"裁比例失败: {exc}"
 
-    px = img.load()
-    index = bytearray(dw * dh)
-    lum: list[int] = [0] * (dw * dh)
-    for y in range(dh):
-        row = y * dw
-        for x in range(dw):
-            r, g, b = px[x, y]
-            lum[row + x] = (r * 299 + g * 587 + b * 114) // 1000
-            best = WHITE_INDEX
-            best_d = None
-            for i, (pr, pg, pb) in enumerate(PALETTE_RGB):
-                d = (r - pr) * (r - pr) + (g - pg) * (g - pg) + (b - pb) * (b - pb)
-                if best_d is None or d < best_d:
-                    best_d = d
-                    best = i
-            index[row + x] = best
-
-    _boost_ink(index, lum, dw, dh, BLACK_MIN)
+    try:
+        index_img = eink_snap.snap_illustration(
+            cropped, dw, dh, ink_min=BLACK_MIN
+        )
+    except Exception as exc:
+        return False, f"四色归色失败: {exc}"
 
     counts = [0, 0, 0, 0]
-    for v in index:
+    for v in index_img.getdata():
         counts[v] += 1
     total = dw * dh
 
     try:
-        rgb = Image.new("RGB", (dw, dh))
-        rp = rgb.load()
-        for y in range(dh):
-            row = y * dw
-            for x in range(dw):
-                rp[x, y] = PALETTE_RGB[index[row + x]]
         dest.parent.mkdir(parents=True, exist_ok=True)
-        rgb.save(dest, "PNG")
+        index_img.convert("RGB").save(dest, "PNG")
     except OSError as exc:
         return False, f"写文件失败: {exc}"
 
