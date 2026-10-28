@@ -1,20 +1,25 @@
-"""四色电子墨水屏插画归色（天工阁 / 躺平巴拉共用底层）。
+"""四色电子墨水屏插画归色。
 
 背景
 ----
 面板只有四个物理色：黑 / 白 / 黄 / 红，没有灰。传统做法是把每个像素硬归到
 最近的一个颜色 —— 中间调全部丢失，画面只剩四块死板的色面（"生硬"）。
 
-本模块的做法：**先分区，再在区内有序抖动**。
+**两套算法，互不影响**（2026-10-28 冰河大人拍板解耦）：
+
+- :func:`snap_illustration` —— **躺平巴拉**用。成片色块的插画：先分区，
+  再在区内有序抖动。金黄区 = 红→黄→白，朱红区 = 黑→红→黄，中性区黑白网点。
+  网点在成片色块上读作明暗层次，效果好，**保持现状不再动**。
+- :func:`snap_line_art` —— **天工阁**用。线描类器物图录：金色是**细边**不是
+  色块，同样的网点会把连贯金边打成黄白虚线。所以细结构取实心本色，
+  只有大色块内部才往暗一档过渡（金→红，红→黑）。
+
+两套的共同点：
 
 - 墨线在**原分辨率**上判定，缩放时"有墨即墨"（线宁可粗，不能消失）。
-- 每个彩色区按**自己区内的**亮度范围做 3 级有序抖动：
-  黄区 = 红→黄→白，红区 = 黑→红→黄。色阶按感知亮度排序（黑<红<黄<白）。
-- 中性区（纸面 / 灰调）按亮度做黑白两级有序抖动：纸面留白，中间调出灰阶网点。
 - 区与区之间**不混色**，所以不会出现跨色相的脏噪点。
-
-输出永远是精确四色（EINK_4COLOR_PALETTE 的 12 个字节），与固件色码一一对应。
-对已经是精确四色的平涂输入，本函数是幂等的（像素逐个相同）。
+- 输出永远是精确四色（EINK_4COLOR_PALETTE 的 12 个字节），与固件色码一一对应。
+- 对已经是精确四色的平涂输入，幂等（像素逐个相同）。
 """
 from __future__ import annotations
 
@@ -216,6 +221,184 @@ def snap_illustration(
                 index[i] = _ordered_index(t, _RED_RAMP, tau)
             else:
                 index[i] = _ordered_index(t, _NEUTRAL_RAMP, tau)
+
+    index = _boost_ink(index, gray_small, dw, dh, ink_min)
+
+    out = Image.frombytes("P", (dw, dh), bytes(index))
+    out.putpalette(EINK_4COLOR_PALETTE + [0] * (768 - len(EINK_4COLOR_PALETTE)))
+    return out
+
+
+# --------------------------------------------------------------------------
+# 天工阁专用：线描类器物图录
+# --------------------------------------------------------------------------
+
+# 区内明暗分档：低于 low_pct 算"暗部"，落在 [low_pct, mid_pct] 的做过渡带。
+#
+# 这两个百分位是**扫参**扫出来的（同一张原图，测黄像素最大连通块占比）：
+#   p20/p35 -> 35.0%   p12/p20 -> 59.1%   p08/p12 -> 79.5%   p05/p08 -> 85.9%
+# 过渡带越窄，实心金色越多、线条越连贯。85.9% 已接近旧硬分类的 89.9%，
+# 同时保留了 0.9% 的红色过渡（深金），层次不至于全丢。
+_LINE_LOW_PCT = 0.05
+_LINE_MID_PCT = 0.08
+
+
+def _percentile(values: list[int], pct: float) -> int:
+    if not values:
+        return 0
+    s = sorted(values)
+    return s[min(len(s) - 1, int(len(s) * pct))]
+
+
+def _region_median_filter(
+    gray: list[int], mask: list[int], w: int, h: int
+) -> list[int]:
+    """在区内做 3x3 中值滤波。
+
+    只让同区像素参与中值，所以不会把细墨线的黑色往白色拉。
+    作用是抹掉模型在金边上的噪点，避免逐像素抖成砂纸。
+    """
+    out = list(gray)
+    for y in range(h):
+        for x in range(w):
+            i = y * w + x
+            if not mask[i]:
+                continue
+            vals = []
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < w and 0 <= ny < h:
+                        j = ny * w + nx
+                        if mask[j]:
+                            vals.append(gray[j])
+            if len(vals) >= 3:
+                vals.sort()
+                out[i] = vals[len(vals) // 2]
+    return out
+
+
+def _line_band(values: list[int]) -> tuple[int, int]:
+    """给一个色区定"暗部阈值"和"过渡带上沿"。
+
+    用**绝对亮度**，不把区间的百分位拉伸到 0..1 —— 拉伸会把一大片均匀
+    金色推到色阶中段，然后被 Bayer 抖成网点，金边就断了。
+    区内几乎没有明暗变化时，返回 (-1, 0)，表示整区保持实心本色。
+    """
+    lo = _percentile(values, _LINE_LOW_PCT)
+    hi = _percentile(values, _LINE_MID_PCT)
+    if hi - lo < 3:
+        return (-1, 0)
+    return (lo, hi)
+
+
+def snap_line_art(
+    src: Image.Image,
+    width: int,
+    height: int,
+    *,
+    ink_dark: int = 110,
+    ink_sat: int = 45,
+    color_sat: int = 50,
+    yellow_hue: tuple[int, int] = (15, 48),
+    red_hue: tuple[int, int] = (14, 240),
+    ink_min: float = 0.0,
+) -> Image.Image:
+    """天工阁专用：线描类器物图录的四色归色（保住细金边）。
+
+    与 :func:`snap_illustration`（躺平巴拉用）的三处不同，都是为了修
+    "金边被打成黄白虚线"这个问题（实测连通块 89.9% → 11.0%）：
+
+    1. **彩区色阶不接白色**。屏上金黄只有一档，若"亮"就映射到白，
+       金边会被 Bayer 抖成黄白虚线。这里金色永远保持金色，更暗的部分
+       才降到红；红更暗降到黑。
+    2. **阈值用绝对亮度**，见 :func:`_line_band`。均匀色块保持实心。
+    3. **过渡带先过中值滤波**，去掉模型噪点再抖。
+
+    输出仍是精确四色（EINK_4COLOR_PALETTE），与固件色码一一对应。
+    """
+    src = src.convert("RGB")
+    dw, dh = int(width), int(height)
+    w, h = src.size
+
+    label = _classify_native(
+        src,
+        ink_dark=ink_dark,
+        ink_sat=ink_sat,
+        color_sat=color_sat,
+        yellow_hue=yellow_hue,
+        red_hue=red_hue,
+    )
+    label_bytes = bytes(label)
+
+    # 掩膜：有墨即墨地缩到显示尺寸（线宁可粗，不能消失）
+    masks: list[Image.Image] = []
+    for target in (BLACK, YELLOW, RED):
+        table = bytes(255 if i == target else 0 for i in range(256))
+        m = Image.frombytes("L", (w, h), label_bytes.translate(table))
+        masks.append(_shrink_any(m, dw, dh))
+
+    # 显示尺寸上的灰度：与掩膜同一尺度，色调和掩膜逐像素对齐
+    gray_img = src.convert("L")
+    gray_small = gray_img.resize((dw, dh), Image.LANCZOS)
+    gray = list(gray_small.getdata())
+    n = dw * dh
+
+    m_black = list(masks[0].getdata())
+    m_yellow = list(masks[1].getdata())
+    m_red = list(masks[2].getdata())
+
+    # 中性 = 既不是墨线、也不属于任何彩色区（纸面 / 灰调）
+    m_neutral = [0] * n
+    for i in range(n):
+        if not m_black[i] and not m_yellow[i] and not m_red[i]:
+            m_neutral[i] = 1
+
+    y_lo, y_hi = _line_band([gray[i] for i in range(n) if m_yellow[i]])
+    r_lo, r_hi = _line_band([gray[i] for i in range(n) if m_red[i]])
+    n_lo, n_hi = _line_band([gray[i] for i in range(n) if m_neutral[i]])
+
+    # 区内中值滤波：去噪但不跨区
+    g_yellow = _region_median_filter(gray, m_yellow, dw, dh)
+    g_red = _region_median_filter(gray, m_red, dw, dh)
+    g_neutral = _region_median_filter(gray, m_neutral, dw, dh)
+
+    index = bytearray(n)
+    for y in range(dh):
+        row = y * dw
+        for x in range(dw):
+            i = row + x
+            if m_black[i]:
+                index[i] = BLACK
+                continue
+            tau = (_BAYER8[y & 7][x & 7] + 0.5) / 64.0
+            if m_yellow[i]:
+                g = g_yellow[i]
+                if g <= y_lo:
+                    index[i] = RED
+                elif g >= y_hi:
+                    index[i] = YELLOW
+                else:
+                    frac = (g - y_lo) / max(1, y_hi - y_lo)
+                    index[i] = RED if frac < tau else YELLOW
+            elif m_red[i]:
+                g = g_red[i]
+                if g <= r_lo:
+                    index[i] = BLACK
+                elif g >= r_hi:
+                    index[i] = RED
+                else:
+                    frac = (g - r_lo) / max(1, r_hi - r_lo)
+                    index[i] = BLACK if frac < tau else RED
+            else:
+                g = g_neutral[i]
+                if g <= n_lo:
+                    index[i] = BLACK
+                elif g >= n_hi:
+                    index[i] = WHITE
+                else:
+                    frac = (g - n_lo) / max(1, n_hi - n_lo)
+                    index[i] = BLACK if frac < tau else WHITE
 
     index = _boost_ink(index, gray_small, dw, dh, ink_min)
 
