@@ -299,6 +299,8 @@ _STRETCH_S_HI = 90
 # 只提 V 不提 S 没用：米黄提亮后饱和度还在，仍然不是调色板色。
 _PAPER_V = 200
 _PAPER_S = 120
+# 低于此饱和度视为墨/灰（白纸与金黄朱红都在此之上，不受压暗影响）
+_INK_S = 70
 
 
 def _stretch_value(img: Image.Image) -> Image.Image:
@@ -352,6 +354,23 @@ def _whiten_paper(img: Image.Image) -> Image.Image:
     return Image.composite(white, img, paper)
 
 
+def _darken_ink(img: Image.Image, gamma: float) -> Image.Image:
+    """只压暗低饱和像素（墨、灰），白纸与金黄朱红原样保留。
+
+    为什么不用整体乘亮度：白纸 255 被乘成 224 之后，纸面在四色里就不算白了，
+    Atkinson 会把整片天空抖成一片黄点。只动低饱和像素，纸面与彩色都不受影响。
+
+    gamma > 1 表示压暗（越暗越多）。gamma <= 1 时原样返回。
+    """
+    if gamma <= 1.0:
+        return img
+    h, s, v = img.convert("HSV").split()
+    lut = [min(255, int(round(255 * (i / 255.0) ** gamma))) for i in range(256)]
+    mask = s.point(lambda p: 255 if p <= _INK_S else 0)
+    v2 = Image.composite(v.point(lut), v, mask)
+    return Image.merge("HSV", (h, s, v2)).convert("RGB")
+
+
 def _minpool_resize(img: Image.Image, tw: int, th: int) -> Image.Image:
     """缩小时逐级先取邻域最暗像素（MinFilter），再 LANCZOS。
 
@@ -373,7 +392,14 @@ def _minpool_resize(img: Image.Image, tw: int, th: int) -> Image.Image:
     return im.resize((tw, th), Image.LANCZOS)
 
 
-def prepare_direct_art(src: Image.Image, width: int, height: int) -> Image.Image:
+def prepare_direct_art(
+    src: Image.Image,
+    width: int,
+    height: int,
+    *,
+    downsample: str = "minpool",
+    ink_gamma: float = 1.0,
+) -> Image.Image:
     """把生图原图准备成可直接上屏的 RGB 图（不做四色归色）。
 
     天工阁与躺平巴拉共用（2026-10-28 起统一）。
@@ -386,8 +412,10 @@ def prepare_direct_art(src: Image.Image, width: int, height: int) -> Image.Image
        判成黑的亮度区间。不这一步，线会被抖成黄色虚点。
     3. 纸面置为精确白（见 :func:`_whiten_paper`）。模型有时把纸画成米白，
        这种颜色在屏上四色里没有归属，Atkinson 会把它抖成一片黄网纹。
-    4. 用 min-pool 下采样，保住细墨线（见 :func:`_minpool_resize`）。
-    5. 输出 RGB，尺寸与屏上显示尺寸 1:1，四色归类交给渲染器。
+    4. 下采样：默认 min-pool（保住细墨线，见 :func:`_minpool_resize`）；
+       ``downsample="box"`` 用邻域平均，细节更实、线略粗。
+    5. 可选只压暗墨色（见 :func:`_darken_ink`），纸面与彩色不动。
+    6. 输出 RGB，尺寸与屏上显示尺寸 1:1，四色归类交给渲染器。
 
     参数
     ----
@@ -420,6 +448,10 @@ def prepare_direct_art(src: Image.Image, width: int, height: int) -> Image.Image
             x1 = min(img.width, int(x1 + grow))
         img = img.crop((x0, y0, x1, y1))
 
+    img = _darken_ink(img, ink_gamma)
+
+    if downsample == "box":
+        return img.resize((tw, th), Image.BOX)
     return _minpool_resize(img, tw, th)
 
 
