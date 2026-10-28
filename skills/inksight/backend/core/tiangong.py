@@ -2,8 +2,8 @@
 
 产出三块：
 - 展签：器名 / 器形 / 用途 / 纹样 / 款识 / 来历，由 LLM 当日现写。
-- 图：MiniMax image-01 按四色盘出图，下载后在模式侧 snap 成精确调色板值，
-  按显示尺寸 1:1 存本地。
+- 图：MiniMax image-01 按四色盘出图（指定尺寸 512x768），下载后裁白边 +
+  保线下采样，按显示尺寸 1:1 存本地。
 - 藏品目录：本地记账，用来防重复（每天的器物门类轮转 + 最近 7 件不重样）。
 
 原则：
@@ -11,9 +11,11 @@
   不影响当天更新。
 - 数值与图都不由展签文字编造——展签只描述「图里画的那个东西」。
 - 颜色不是要躲的负担，是这块屏的资源：展签直接指定哪部分填金黄、哪部分用朱红，
-  生图按四色盘画，模式侧只做 snap，不做「剥颜色词」这种自废武功的事。
-- snap 出来的 PNG 每个像素都是精确调色板值，渲染器的 Atkinson 抖动误差为 0，
-  等于无损直通（与藏印、月相图同一招）。
+  生图按四色盘画，模式侧不做「剥颜色词」这种自废武功的事。
+- **不做预四色化**（2026-10-28 冰河大人定）：图直接交给渲染器的 Atkinson 抖动，
+  那是渲染器的标准路径。原先自己先 snap 一层的做法，问题出在下采样：原图到屏
+  要压 3 倍多，而墨线只有 1 像素宽，被邻域纸白一平均就没了；屏上没有灰，
+  稀释后的中灰线亮度正好落在黄上，于是被抖成黄色虚点。
 """
 
 from __future__ import annotations
@@ -38,18 +40,19 @@ ART_DIR = _BACKEND_DIR / "static" / "tiangong"
 MINIMAX_BASE_URL = "https://api.minimaxi.com/v1"
 MINIMAX_IMAGE_API_URL = f"{MINIMAX_BASE_URL}/image_generation"
 IMAGE_MODEL = "image-01"
-IMAGE_ASPECT = "2:3"
+# 生图尺寸：image-01 支持 width/height（512-2048，须为 8 的倍数）。
+# 注意：两者同时给时 aspect_ratio 优先，width/height 会失效，所以这里不发
+# aspect_ratio。512x768 = 2:3，与屏上图幅 156x234 同比例。
+IMAGE_WIDTH = 512
+IMAGE_HEIGHT = 768
 
 # 器物图在屏上的显示尺寸，必须与模式 JSON 里 image 块的 width/height 一致。
-# 这样渲染器 fit=contain 时是 1:1，PIL 对同尺寸 resize 直接 copy 不做插值，
-# 精确调色板值可以原样送到 Atkinson 抖动（误差为 0，无黄/红杂色）。
-ART_DISPLAY = (160, 200)
+# 这样渲染器 fit=contain 时是 1:1，不会再缩一次（也就不会二次稀释细线）。
+# 156x234 = 2:3；屏 400x300，去掉状态栏 36 和页脚 30，body 正好 234 高。
+ART_DISPLAY = (156, 234)
 
 # 屏上四色名，与 core/config.py 的 EINK_4COLOR_PALETTE 顺序一致。
 PAL_NAMES = ("黑", "白", "金黄", "朱红")
-
-# 补墨目标（不是质量门槛）：墨线太少在墨水屏上会看不见，故加粗到该比例。
-BLACK_MIN = 0.010
 
 CATEGORIES = (
     "茶器", "酒器", "香事", "文房", "灯具", "服饰",
@@ -69,6 +72,8 @@ LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M2.7")
 # 后端 snap 会把区内明暗映射到相邻色阶上，于是色块有体积，不再是死平涂。
 PALETTE_SPEC = (
     "画面只用四种颜色：纯白纸面底、墨黑 #000000 勾线、金黄 #E8B000 填色、朱红 #C80000 点缀。"
+    "勾线一律纯黑 #000000，笔画清晰锐利——整幅画缩到 150 像素宽时每条线依然看得清；"
+    "不要灰线、不要淡墨线、不要铅笔淡描、不要阴影和明暗排线。"
     "同一色系内可以有深浅变化：填充的金黄可以带深浅不一的层次（深金黄到淡金黄），"
     "朱红点缀也可以有深浅变化；用明暗表现体积与转折。"
     "但不要出现第五种色相（不要蓝、绿、紫、青），不要写实材质纹理，"
@@ -222,42 +227,31 @@ async def _llm_entry(index: int, recent: list, category: str, **kwargs) -> dict:
 
 
 # --------------------------------------------------------------------------
-# 生图 → 四色 snap
+# 生图 → 上屏准备（不做预四色化）
 # --------------------------------------------------------------------------
 
 
-def _crop_content(img):
-    """裁掉白边，让器物充满画面。"""
-    from PIL import ImageChops
+def _counts(rgb_img) -> dict:
+    """四色占比：按渲染器真正会用的 Atkinson 抖动脉冲算一遍。
 
-    w, h = img.size
-    lum = img.convert("L")
-    mask = lum.point(lambda p: 255 if p < 240 else 0)
-    # 饱和区域（金黄/朱红）即使亮度高也要算内容
-    sat = img.convert("HSV").split()[1].point(lambda p: 255 if p > 60 else 0)
-    mask = ImageChops.lighter(mask, sat)
-    bbox = mask.getbbox()
-    if not bbox:
-        return img
-    pad = int(max(bbox[2] - bbox[0], bbox[3] - bbox[1]) * 0.03)
-    return img.crop((
-        max(0, bbox[0] - pad), max(0, bbox[1] - pad),
-        min(w, bbox[2] + pad), min(h, bbox[3] + pad),
-    ))
-
-
-def _counts(index_img) -> dict:
+    这不是质量门槛，只是给日志一个"屏上实际会看到什么"的描述。
+    atkinson_palette 输出的就是精确四色（索引 0-3，与固件色码一致）。
+    """
     from collections import Counter
 
-    cnt = Counter(index_img.getdata())
-    total = index_img.size[0] * index_img.size[1]
+    from . import native_dither
+
+    cnt = Counter(native_dither.atkinson_palette(rgb_img, 4).getdata())
+    total = rgb_img.size[0] * rgb_img.size[1]
     return {PAL_NAMES[i]: cnt.get(i, 0) / total for i in range(4)}
 
 
-def snap_to_palette(src: Path, dest: Path) -> tuple[bool, str]:
-    """把生图 snap 成四色盘：裁白边 → 区域归色（保中间调）→ 补墨。
+def prepare_art_file(src: Path, dest: Path) -> tuple[bool, str]:
+    """把生图原图备成可直接上屏的图：裁白边（撑成目标比例）→ 保线下采样。
 
-    只做四色归色（墨线不够就补墨），**不设质量门槛**：生成了就上屏。
+    **不做四色归色**：颜色交给渲染器的 Atkinson 抖动（标准路径，输出精确四色）。
+    这里只保证下采样不把细墨线平均掉 —— 那才是原来丢线的真正原因。
+
     返回 (是否成功, 四色占比说明)。只有真出错（读不到图/写不出文件）才算失败。
     """
     try:
@@ -270,25 +264,17 @@ def snap_to_palette(src: Path, dest: Path) -> tuple[bool, str]:
     except Exception as exc:
         return False, f"读图失败: {exc}"
 
-    try:
-        cropped = _crop_content(src_img)
-    except Exception as exc:
-        return False, f"裁白边失败: {exc}"
-
     dw, dh = ART_DISPLAY
     try:
-        # 天工阁用线描专用归色：金色是细边，不能用网点抖动（会把金边打成虚线）
-        index_img = eink_snap.snap_line_art(
-            cropped, dw, dh, ink_min=BLACK_MIN
-        )
+        art_img = eink_snap.prepare_direct_art(src_img, dw, dh)
     except Exception as exc:
-        return False, f"四色归色失败: {exc}"
+        return False, f"上屏准备失败: {exc}"
 
-    counts = _counts(index_img)
+    counts = _counts(art_img)
 
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
-        index_img.convert("RGB").save(dest, "PNG")
+        art_img.save(dest, "PNG")
     except OSError as exc:
         return False, f"写文件失败: {exc}"
 
@@ -297,7 +283,7 @@ def snap_to_palette(src: Path, dest: Path) -> tuple[bool, str]:
 
 
 async def _generate_art(entry: dict, dest: Path, **kwargs) -> tuple[bool, str]:
-    """调 MiniMax 生图 → 下载 → snap 成四色。真出错时换提示词再试一次。"""
+    """调 MiniMax 生图 → 下载 → 备成上屏尺寸。真出错时换提示词再试一次。"""
     import httpx
 
     key = (kwargs.get("image_api_key") or "").strip() or os.getenv("MINIMAX_API_KEY", "").strip()
@@ -318,7 +304,9 @@ async def _generate_art(entry: dict, dest: Path, **kwargs) -> tuple[bool, str]:
         payload = {
             "model": IMAGE_MODEL,
             "prompt": prompt,
-            "aspect_ratio": IMAGE_ASPECT,
+            # 不发 aspect_ratio：两者同时给时它优先，width/height 会失效
+            "width": IMAGE_WIDTH,
+            "height": IMAGE_HEIGHT,
             "n": 1,
             "response_format": "url",
             "prompt_optimizer": False,
@@ -357,7 +345,7 @@ async def _generate_art(entry: dict, dest: Path, **kwargs) -> tuple[bool, str]:
             reasons.append(f"下载图失败: {exc}")
             break
 
-        ok, reason = snap_to_palette(tmp, dest)
+        ok, reason = prepare_art_file(tmp, dest)
         try:
             tmp.unlink()
         except OSError:
