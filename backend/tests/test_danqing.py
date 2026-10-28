@@ -26,7 +26,7 @@ MODE_DEPLOY = BACKEND_DIR / "core" / "modes" / "builtin" / "custom_danqing.json"
 
 CONTENT_FIELDS = {
     "index_label", "title", "artist", "dynasty", "genre",
-    "colophon", "mark", "seal_url", "art_url", "has_image", "collection",
+    "colophon", "seal_url", "art_url", "has_image",
 }
 
 
@@ -99,7 +99,6 @@ def test_parse_entry_reads_labelled_lines():
         "朝代：南宋\n"
         "题材：山水\n"
         "题跋：霜落空山有客归。\n"
-        "款识：拙庵写\n"
         "印文：拙庵居士\n"
         "图：一幅宋代山水册页\n"
         "多余的一句话\n"
@@ -120,7 +119,7 @@ def test_parse_entry_ignores_malformed():
 def test_entry_keys_cover_prompt_fields():
     from core.danqing import ENTRY_KEYS, FALLBACK_ENTRY
 
-    for key in ("画名", "作者", "朝代", "题材", "题跋", "款识", "印文", "图"):
+    for key in ("画名", "作者", "朝代", "题材", "题跋", "印文", "图"):
         assert key in ENTRY_KEYS
         assert FALLBACK_ENTRY.get(key), f"{key} 缺兜底"
 
@@ -175,7 +174,6 @@ async def test_build_content_uses_llm_entry_and_fills_fields(tmp_path, monkeypat
         "朝代：北宋\n"
         "题材：花鸟\n"
         "题跋：寒鸦数点下平芜。\n"
-        "款识：静庵戏笔\n"
         "印文：静庵之印\n"
         "图：一幅宋代花鸟册页\n"
     )
@@ -192,7 +190,6 @@ async def test_build_content_uses_llm_entry_and_fills_fields(tmp_path, monkeypat
     assert content["dynasty"] == "北宋"
     assert content["genre"] == "花鸟"
     assert content["colophon"] == "寒鸦数点下平芜。"
-    assert content["mark"] == "静庵戏笔"
     assert content["index_label"].startswith("第 ")
     assert content["has_image"] == "no"
     assert content["art_url"] == ""
@@ -341,3 +338,111 @@ def test_image_block_size_matches_provider_display():
 
     walk(mode["layout"])
     assert ART_DISPLAY in sizes, f"版式没有用 ART_DISPLAY {ART_DISPLAY}，实得 {sizes}"
+
+
+# ── 版式比例：图为主 ────────────────────────────────────────
+def _art_blocks(node, out: list) -> list:
+    if isinstance(node, dict):
+        if node.get("type") == "image" and node.get("field") == "art_url":
+            out.append(node)
+        for value in node.values():
+            _art_blocks(value, out)
+    elif isinstance(node, list):
+        for value in node:
+            _art_blocks(value, out)
+    return out
+
+
+def _text_blocks(node, out: list) -> list:
+    if isinstance(node, dict):
+        if node.get("type") == "text":
+            out.append(node)
+        for value in node.values():
+            _text_blocks(value, out)
+    elif isinstance(node, list):
+        for value in node:
+            _text_blocks(value, out)
+    return out
+
+
+def test_art_is_a_wide_banner():
+    """画心是横幅（宽远大于高），且三屏版式都保持横幅比例。"""
+    mode = _mode()
+    for label, layout in [
+        ("主版式", mode["layout"]),
+        *[(k, v) for k, v in mode.get("layout_overrides", {}).items()],
+    ]:
+        for block in _art_blocks(layout, []):
+            w = int(block["width"])
+            h = int(block["height"])
+            assert w > h * 1.6, f"{label} 画心不是横幅：{w}x{h}"
+            assert w / h < 3.0, f"{label} 画心比例太扁：{w}x{h}"
+
+
+def test_art_fills_most_of_the_width():
+    """画心必须铺满大部分屏宽 —— 冰河大人的要求：图占主导。
+
+    渲染器把 image 的 width/height 乘以 ctx.scale（296→0.92，648→1.62），
+    而 x 是绝对像素，所以这里按同样规则算出屏上实际占位再断言。
+    """
+    mode = _mode()
+    for label, screen_w, screen_h, layout in [
+        ("主版式", 400, 300, mode["layout"]),
+        ("296x128", 296, 128, mode["layout_overrides"]["296x128"]),
+        ("648x480", 648, 480, mode["layout_overrides"]["648x480"]),
+    ]:
+        scale = max(0.92, screen_w / 400.0)
+        blocks = _art_blocks(layout, [])
+        assert blocks, f"{label} 没有画心"
+        for block in blocks:
+            w = int(block["width"]) * scale
+            x = int(block.get("x", 0))
+            ratio = (w) / screen_w
+            assert ratio >= 0.55, f"{label} 画心只占屏宽 {ratio:.0%}，太小"
+            assert x + w <= screen_w + 1, f"{label} 画心超出屏宽：{x}+{w:.0f} > {screen_w}"
+
+
+def test_caption_text_is_capped():
+    """题签必须压到极少文字：每个分支最多 4 个文本块。"""
+    mode = _mode()
+
+    def branches(layout):
+        body = layout.get("body", [])
+        if body and body[0].get("type") == "conditional":
+            return [(f"{c['value']}分支", c["children"]) for c in body[0]["conditions"]]
+        return [("版式", body)]
+
+    for label, layout in [
+        ("主版式", mode["layout"]),
+        *[(k, v) for k, v in mode.get("layout_overrides", {}).items()],
+    ]:
+        for branch_label, children in branches(layout):
+            texts = _text_blocks(children, [])
+            assert len(texts) <= 4, f"{label} {branch_label} 文本块过多：{len(texts)}"
+            for block in texts:
+                assert int(block.get("max_lines", 3)) <= 3, f"{label} {branch_label} 允许行数过多"
+
+
+def test_main_layout_caption_is_two_lines():
+    """主版式（有图分支）只有画名 + 一行落款，其余全部省掉。"""
+    body = _mode()["layout"]["body"]
+    yes = next(c for c in body[0]["conditions"] if c["value"] == "yes")
+    children = yes["children"]
+    assert children[0]["type"] == "image"
+    assert children[1]["type"] == "two_column"
+    texts = _text_blocks(children[1], [])
+    assert len(texts) == 2, f"主版式题签行数不对：{len(texts)}"
+    # 款识已从屏上移除
+    assert "mark" not in {t.get("field") for t in texts}
+    assert all("{mark}" not in (t.get("template") or "") for t in texts)
+
+
+def test_no_image_branch_still_shows_text():
+    """生图失败时退回纯题签版式，且不能空屏。"""
+    body = _mode()["layout"]["body"]
+    no = next(c for c in body[0]["conditions"] if c["value"] == "no")
+    texts = _text_blocks(no, [])
+    assert len(texts) >= 3, "无图分支文字太少"
+    referenced = set()
+    _referenced_fields(no, referenced)
+    assert {"title", "colophon"} <= referenced
