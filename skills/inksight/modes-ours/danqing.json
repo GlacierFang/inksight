@@ -3,7 +3,7 @@
   "display_name": "丹青谱",
   "icon": "art",
   "cacheable": false,
-  "description": "丹青谱虚拟书画馆：每天画一幅并不存在的宋代绘画，附虚构题签与四色册页画心。题签由模型当日现写，画心由生图模型按屏上四色盘（白/黑/金黄/朱红）画出。",
+  "description": "丹青谱虚拟书画馆：每天画一幅并不存在的宋代绘画，附虚构题签与四色横幅画心。题签由模型当日现写，画心由生图模型按屏上四色盘（白/黑/金黄/朱红）画出。",
   "content": {
     "type": "computed",
     "provider": "danqing",
@@ -14,14 +14,13 @@
       "dynasty": "南宋",
       "genre": "山水",
       "colophon": "霜落空山有客归，路深不辨斜阳微。",
-      "mark": "拙庵写",
       "seal_url": "",
       "art_url": "",
-      "has_image": "no",
-      "collection": "丹青谱藏 · 传世仅此一幅"
+      "has_image": "no"
     }
   },
   "layout": {
+    "body_align": "top",
     "status_bar": {
       "line_width": 1,
       "dashed": true
@@ -36,84 +35,48 @@
             "value": "yes",
             "children": [
               {
+                "type": "image",
+                "field": "art_url",
+                "x": 4,
+                "width": 392,
+                "height": 176,
+                "fit": "contain",
+                "margin_bottom": 4
+              },
+              {
                 "type": "two_column",
                 "left_x": 0,
-                "left_width": 208,
-                "gap": 10,
+                "left_width": 336,
+                "gap": 8,
                 "left": [
                   {
-                    "type": "image",
-                    "field": "art_url",
-                    "x": 4,
-                    "width": 208,
-                    "height": 234,
-                    "fit": "contain",
+                    "type": "text",
+                    "field": "title",
+                    "align": "left",
+                    "margin_x": 6,
+                    "font": "noto_serif_bold",
+                    "font_size": 16,
+                    "max_lines": 1,
+                    "margin_bottom": 3
+                  },
+                  {
+                    "type": "text",
+                    "template": "{index_label} · {genre} · {dynasty} · {artist}",
+                    "align": "left",
+                    "margin_x": 6,
+                    "font": "noto_serif_light",
+                    "font_size": 11,
+                    "max_lines": 1,
                     "margin_bottom": 0
                   }
                 ],
                 "right": [
                   {
-                    "type": "text",
-                    "field": "index_label",
-                    "align": "left",
-                    "color": "red",
-                    "font_size": 13,
-                    "max_lines": 1,
-                    "margin_bottom": 2
-                  },
-                  {
-                    "type": "text",
-                    "field": "title",
-                    "align": "left",
-                    "font": "noto_serif_bold",
-                    "font_size": 17,
-                    "max_lines": 2,
-                    "margin_bottom": 8
-                  },
-                  {
-                    "type": "text",
-                    "template": "{dynasty} · {artist}",
-                    "align": "left",
-                    "margin_x": 0,
-                    "font_size": 11,
-                    "max_lines": 2,
-                    "margin_bottom": 4
-                  },
-                  {
-                    "type": "text",
-                    "template": "题材：{genre}",
-                    "align": "left",
-                    "margin_x": 0,
-                    "font_size": 11,
-                    "max_lines": 1,
-                    "margin_bottom": 6
-                  },
-                  {
-                    "type": "text",
-                    "field": "colophon",
-                    "align": "left",
-                    "margin_x": 0,
-                    "font": "noto_serif_light",
-                    "font_size": 11,
-                    "max_lines": 5,
-                    "margin_bottom": 4
-                  },
-                  {
-                    "type": "text",
-                    "field": "mark",
-                    "align": "left",
-                    "margin_x": 0,
-                    "font": "noto_serif_light",
-                    "font_size": 10,
-                    "max_lines": 1,
-                    "margin_bottom": 2
-                  },
-                  {
                     "type": "image",
                     "field": "seal_url",
-                    "x": 342,
-                    "width": 44,
-                    "height": 44,
+                    "x": 352,
+                    "width": 32,
+                    "height": 32,
                     "fit": "contain",
                     "margin_bottom": 0
                   }
@@ -127,35 +90,18 @@
             "children": [
               {
                 "type": "text",
-                "field": "index_label",
-                "align": "center",
-                "color": "red",
-                "font_size": 14,
-                "max_lines": 1,
-                "margin_bottom": 2
-              },
-              {
-                "type": "text",
                 "field": "title",
                 "align": "center",
                 "font": "noto_serif_bold",
-                "font_size": 18,
-                "max_lines": 2,
-                "margin_bottom": 10
+                "font_size": 19,
+                "max_lines": 1,
+                "margin_bottom": 8
               },
               {
                 "type": "text",
-                "template": "{dynasty} · {artist}",
+                "template": "{index_label} · {genre} · {dynasty} · {artist}",
                 "align": "center",
-                "font_size": 13,
-                "max_lines": 2,
-                "margin_bottom": 6
-              },
-              {
-                "type": "text",
-                "template": "题材：{genre}",
-                "align": "center",
-                "font_size": 13,
+                "font_size": 12,
                 "max_lines": 1,
                 "margin_bottom": 8
               },
@@ -164,17 +110,8 @@
                 "field": "colophon",
                 "align": "center",
                 "font": "noto_serif_light",
-                "font_size": 13,
-                "max_lines": 4,
-                "margin_bottom": 6
-              },
-              {
-                "type": "text",
-                "field": "mark",
-                "align": "center",
-                "font": "noto_serif_light",
                 "font_size": 12,
-                "max_lines": 1,
+                "max_lines": 3,
                 "margin_bottom": 0
               }
             ]
@@ -184,17 +121,18 @@
     ],
     "footer": {
       "label": "丹青谱",
-      "attribution_template": "{collection}",
+      "attribution_template": "{colophon}",
       "dashed": true
     }
   },
   "layout_overrides": {
     "296x128": {
+      "body_align": "top",
       "body": [
         {
           "type": "two_column",
           "left_x": 0,
-          "left_width": 92,
+          "left_width": 200,
           "gap": 6,
           "stack_when_short": false,
           "left": [
@@ -202,8 +140,8 @@
               "type": "image",
               "field": "art_url",
               "x": 2,
-              "width": 88,
-              "height": 92,
+              "width": 200,
+              "height": 90,
               "fit": "contain",
               "margin_bottom": 0
             }
@@ -225,17 +163,7 @@
               "align": "left",
               "margin_x": 0,
               "font_size": 9,
-              "max_lines": 1,
-              "margin_bottom": 2
-            },
-            {
-              "type": "text",
-              "field": "colophon",
-              "align": "left",
-              "margin_x": 0,
-              "font": "noto_serif_light",
-              "font_size": 9,
-              "max_lines": 3,
+              "max_lines": 2,
               "margin_bottom": 0
             }
           ]
@@ -243,92 +171,57 @@
       ],
       "footer": {
         "label": "丹青谱",
-        "attribution_template": "{collection}",
+        "attribution_template": "{colophon}",
         "dashed": true,
         "height": 22
       }
     },
     "648x480": {
+      "body_align": "top",
       "body": [
+        {
+          "type": "image",
+          "field": "art_url",
+          "x": 14,
+          "width": 383,
+          "height": 172,
+          "fit": "contain",
+          "margin_bottom": 6
+        },
         {
           "type": "two_column",
           "left_x": 0,
-          "left_width": 330,
-          "gap": 16,
+          "left_width": 340,
+          "gap": 8,
           "left": [
             {
-              "type": "image",
-              "field": "art_url",
-              "x": 8,
-              "width": 322,
-              "height": 372,
-              "fit": "contain",
+              "type": "text",
+              "field": "title",
+              "align": "left",
+              "margin_x": 14,
+              "font": "noto_serif_bold",
+              "font_size": 18,
+              "max_lines": 1,
+              "margin_bottom": 4
+            },
+            {
+              "type": "text",
+              "template": "{index_label} · {genre} · {dynasty} · {artist}",
+              "align": "left",
+              "margin_x": 14,
+              "font": "noto_serif_light",
+              "font_size": 11,
+              "max_lines": 1,
               "margin_bottom": 0
             }
           ],
           "right": [
             {
-              "type": "text",
-              "field": "index_label",
-              "align": "left",
-              "color": "red",
-              "font_size": 20,
-              "max_lines": 1,
-              "margin_bottom": 4
-            },
-            {
-              "type": "text",
-              "field": "title",
-              "align": "left",
-              "font": "noto_serif_bold",
-              "font_size": 26,
-              "max_lines": 2,
-              "margin_bottom": 14
-            },
-            {
-              "type": "text",
-              "template": "{dynasty} · {artist}",
-              "align": "left",
-              "margin_x": 0,
-              "font_size": 16,
-              "max_lines": 2,
-              "margin_bottom": 8
-            },
-            {
-              "type": "text",
-              "template": "题材：{genre}",
-              "align": "left",
-              "margin_x": 0,
-              "font_size": 16,
-              "max_lines": 1,
-              "margin_bottom": 10
-            },
-            {
-              "type": "text",
-              "field": "colophon",
-              "align": "left",
-              "margin_x": 0,
-              "font": "noto_serif_light",
-              "font_size": 16,
-              "max_lines": 6,
-              "margin_bottom": 8
-            },
-            {
-              "type": "text",
-              "field": "mark",
-              "align": "left",
-              "margin_x": 0,
-              "font": "noto_serif_light",
-              "font_size": 14,
-              "max_lines": 1,
-              "margin_bottom": 4
-            },
-            {
               "type": "image",
               "field": "seal_url",
-              "x": 560,
-              "width": 56,
-              "height": 56,
+              "x": 579,
+              "width": 34,
+              "height": 34,
               "fit": "contain",
               "margin_bottom": 0
             }
@@ -337,7 +230,7 @@
       ],
       "footer": {
         "label": "丹青谱",
-        "attribution_template": "{collection}",
+        "attribution_template": "{colophon}",
         "dashed": true
       }
     }

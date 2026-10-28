@@ -1,8 +1,8 @@
 """丹青谱 provider：每日一幅不存在的宋代绘画，附虚构题签与四色画心。
 
 产出：
-- 题签：画名 / 作者 / 朝代 / 题材 / 题跋 / 款识 / 印文，由 LLM 当日现写。
-- 图：MiniMax image-01 按屏上四色盘（白/黑/金黄/朱红）画出册页式画心，
+- 题签：画名 / 作者 / 朝代 / 题材 / 题跋 / 印文，由 LLM 当日现写。
+- 图：MiniMax image-01 按屏上四色盘（白/黑/金黄/朱红）画出横幅式画心，
   下载后裁白边 + 保线下采样，按显示尺寸 1:1 存本地。
 - 印：作者私印，用 LLM 给的四字印文本地画一枚朱文方印。
 
@@ -42,20 +42,21 @@ ART_DIR = _BACKEND_DIR / "static" / "danqing"
 MINIMAX_BASE_URL = "https://api.minimaxi.com/v1"
 MINIMAX_IMAGE_API_URL = f"{MINIMAX_BASE_URL}/image_generation"
 
-# 册页式画心：竖幅（宋代册页多近方，取竖幅更耐看）。生图与显示尺寸同比例，
-# 不裁不压 —— 768:864 = 208:234。
-IMAGE_WIDTH = 768
-IMAGE_HEIGHT = 864
+# 横幅式画心（宋人手卷/横幅一路，横向铺满屏面）。三条屏（400/296/648）都用同一条
+# 2.23:1 的比例，画心在每一块屏上都能满宽、不裁切、不留白边。
+# 生图与显示尺寸同比例，不裁不压 —— 1152:512 ≈ 392:176。
+IMAGE_WIDTH = 1152
+IMAGE_HEIGHT = 512
 
 # 画心在屏上的显示尺寸，必须与模式 JSON 里 image 块的 width/height 一致。
-ART_DISPLAY = (208, 234)
+ART_DISPLAY = (392, 176)
 
 GENRES = (
     "山水", "花鸟", "人物", "楼阁",
     "墨竹", "蔬果", "荷石", "渔隐",
 )
 
-ENTRY_KEYS = ("画名", "作者", "朝代", "题材", "题跋", "款识", "印文", "图")
+ENTRY_KEYS = ("画名", "作者", "朝代", "题材", "题跋", "印文", "图")
 
 ENTRY_PROMPT = """你在经营一座虚构的书画馆「丹青谱」。阁中所藏皆为宋代绘画，**但每一幅都不曾存在过**。
 今天要造第 {index} 号藏品。
@@ -70,15 +71,14 @@ ENTRY_PROMPT = """你在经营一座虚构的书画馆「丹青谱」。阁中�
 作者：<虚构画家名 + 号，如「江村陆氏，号拙庵」，必须是虚构人物，不得用真实宋代画家的名>
 朝代：<北宋或南宋>
 题跋：<画上的一行题跋，12-20 字，像古人题跋的口吻，不要现代词>
-款识：<一行落款，如「臣某某恭绘」>
 印文：<四字印文，如「拙庵居士」>
-图：<给画师的中文提示词，30-50 字，写清画面主体与构图、留白位置，并说明哪部分填金黄、哪部分用朱红>
+图：<给画师的中文提示词，30-50 字，必须是横向横幅构图（宽约为高的两倍，宋人手卷布局），写清画面主体与左右布局、留白位置，并说明哪部分填金黄、哪部分用朱红>
 
 要求：
 1. 作者、画名、印文必须全部虚构，不得使用真实宋代画家名或真实画作名；
-2. 题跋与款识要像古人的口吻，不要现代词（如工厂、实验室、摄影、展览）；
-3. 图的提示词要能独立看懂画的是什么，且写明哪部分填金黄、哪部分用朱红；
-4. 每个字段都要短，全文不超过 160 字。"""
+2. 题跋要像古人的口吻，不要现代词（如工厂、实验室、摄影、展览）；
+3. 图的提示词要能独立看懂画的是什么，构图必须是横向横幅，并写明哪部分填金黄、哪部分用朱红；
+4. 每个字段都要短，全文不超过 140 字。"""
 
 FALLBACK_ENTRY = {
     "画名": "秋林曳杖图",
@@ -86,9 +86,8 @@ FALLBACK_ENTRY = {
     "朝代": "南宋",
     "题材": "山水",
     "题跋": "霜落空山有客归，路深不辨斜阳微。",
-    "款识": "拙庵写",
     "印文": "拙庵居士",
-    "图": "一幅宋代山水册页，平远构图，远处层叠淡墨山峦，近处枯树与策杖行人，大片留白；远山填金黄，人物衣袍用朱红",
+    "图": "一幅宋代山水横幅手卷，左右展开的平远构图，右侧层叠淡墨山峦，左侧大片留白与小舟，近处枯树与策杖行人；远山填金黄，人物衣袍用朱红",
 }
 
 
@@ -185,7 +184,7 @@ async def _llm_entry(index: int, recent: list, genre: str, **kwargs) -> dict:
 
         entry = _parse_entry(raw)
         if entry.get("画名"):
-            for key in ("作者", "朝代", "题材", "题跋", "款识", "印文"):
+            for key in ("作者", "朝代", "题材", "题跋", "印文"):
                 entry.setdefault(key, FALLBACK_ENTRY[key])
             entry.setdefault("图", FALLBACK_ENTRY["图"])
             return entry
@@ -428,7 +427,6 @@ async def build_danqing_content(fallback: dict | None = None, **kwargs) -> dict:
             "朝代": entry.get("朝代", ""),
             "题材": entry.get("题材", ""),
             "题跋": entry.get("题跋", ""),
-            "款识": entry.get("款识", ""),
             "印文": entry.get("印文", ""),
             "图": entry.get("图", ""),
             "art_url": art_url,
@@ -455,11 +453,9 @@ async def build_danqing_content(fallback: dict | None = None, **kwargs) -> dict:
         "dynasty": today.get("朝代", ""),
         "genre": today.get("题材", ""),
         "colophon": today.get("题跋", ""),
-        "mark": today.get("款识", ""),
         "seal_url": _seal_path(str(today.get("印文", ""))),
         "art_url": today.get("art_url", ""),
         "has_image": "yes" if today.get("art_url") else "no",
-        "collection": "丹青谱藏 · 传世仅此一幅",
     }
     if isinstance(fallback, dict):
         for key, value in fallback.items():
