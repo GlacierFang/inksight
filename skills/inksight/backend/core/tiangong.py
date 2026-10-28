@@ -26,6 +26,8 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from . import eink_snap
+
 logger = logging.getLogger(__name__)
 
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -43,13 +45,7 @@ IMAGE_ASPECT = "2:3"
 # 精确调色板值可以原样送到 Atkinson 抖动（误差为 0，无黄/红杂色）。
 ART_DISPLAY = (160, 200)
 
-# 屏上四色，值必须与 core/config.py 的 EINK_4COLOR_PALETTE 一致。
-PALETTE_RGB = (
-    (0, 0, 0),        # 0 墨黑
-    (255, 255, 255),  # 1 纯白
-    (232, 176, 0),    # 2 金黄
-    (200, 0, 0),      # 3 朱红
-)
+# 屏上四色名，与 core/config.py 的 EINK_4COLOR_PALETTE 顺序一致。
 PAL_NAMES = ("黑", "白", "金黄", "朱红")
 
 # 补墨目标（不是质量门槛）：墨线太少在墨水屏上会看不见，故加粗到该比例。
@@ -67,9 +63,15 @@ ENTRY_KEYS = ("名称", "器形", "用途", "纹样", "款识", "来历", "图")
 LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M2.7")
 
 # 四色盘说明：直接告诉生图模型要什么颜色，别让它自己发挥。
+#
+# 关键：允许「同一色系内的深浅变化」。屏上只有四个物理色，没有灰；
+# 层次不是靠第五种颜色，而是靠同一色相的深浅（深金黄→金黄→淡金黄）。
+# 后端 snap 会把区内明暗映射到相邻色阶上，于是色块有体积，不再是死平涂。
 PALETTE_SPEC = (
     "画面只用四种颜色：纯白纸面底、墨黑 #000000 勾线、金黄 #E8B000 填色、朱红 #C80000 点缀。"
-    "平涂色块，无渐变，无阴影，无高光，无写实光影，无材质纹理，"
+    "同一色系内可以有深浅变化：填充的金黄可以带深浅不一的层次（深金黄到淡金黄），"
+    "朱红点缀也可以有深浅变化；用明暗表现体积与转折。"
+    "但不要出现第五种色相（不要蓝、绿、紫、青），不要写实材质纹理，"
     "宋代图录版画质感，线条清晰，不要任何文字、印章、标签、水印、边框。"
 )
 
@@ -79,7 +81,8 @@ IMAGE_PROMPT_TMPL = "{desc}。{palette}"
 IMAGE_PROMPT_RETRY = (
     "{desc}。墨线要粗而清晰，器形轮廓完整，朱红部分面积加大一些。"
     "画面只用四种颜色：纯白纸面底、墨黑 #000000 勾线、金黄 #E8B000 填色、朱红 #C80000 点缀。"
-    "平涂色块，无渐变，无阴影，无高光，无写实光影，无材质纹理，不要任何文字、印章、水印、边框。"
+    "同一色系内允许深浅变化（深金黄到淡金黄、朱红有浓淡），用明暗表现体积；"
+    "不要出现第五种色相，不要写实材质纹理，不要任何文字、印章、水印、边框。"
 )
 
 ENTRY_PROMPT = """你在经营一座虚构的博物馆「天工阁」。阁中所藏皆为宋代器物，**但每一件都不曾存在过**。
@@ -223,49 +226,6 @@ async def _llm_entry(index: int, recent: list, category: str, **kwargs) -> dict:
 # --------------------------------------------------------------------------
 
 
-def _classify(img):
-    """把原图按 HSV 规则分成四张 0/255 掩膜。
-
-    必须在**原分辨率**上分类：细墨线先缩放再分类会被抹平。
-    """
-    from PIL import Image
-
-    w, h = img.size
-    hsv = img.convert("HSV")
-    hp, sp, vp = hsv.split()
-    rp = img.load()
-    hp_p, sp_p, vp_p = hp.load(), sp.load(), vp.load()
-    masks = [Image.new("L", (w, h), 0) for _ in range(4)]
-    mp = [m.load() for m in masks]
-    for y in range(h):
-        for x in range(w):
-            H, S, V = hp_p[x, y], sp_p[x, y], vp_p[x, y]
-            r, g, b = rp[x, y]
-            if S < 45:
-                # 近灰阶：只有足够暗的算墨线；中间灰（阴影）直接丢掉，四色屏上也没有灰
-                c = 0 if V < 110 else 1
-            elif H <= 14 or H >= 240:
-                c = 3 if S > 50 else (0 if V < 110 else 1)
-            elif 15 <= H <= 48:
-                c = 2 if S > 50 else (0 if V < 110 else 1)
-            else:
-                # 别的色相（青绿等）落到黑白，避免在四色屏上变成脏色
-                c = 0 if V < 110 else 1
-            mp[c][x, y] = 255
-    return masks
-
-
-def _shrink_any(mask, dw: int, dh: int):
-    """有墨即墨地缩放一张掩膜：细线在缩放后仍然存在。
-
-    e-ink 上宁可线粗一点，也不能让线消失。
-    """
-    from PIL import Image
-
-    small = mask.resize((dw, dh), Image.LANCZOS)
-    return small.point(lambda p: 255 if p > 28 else 0, mode="L")
-
-
 def _crop_content(img):
     """裁掉白边，让器物充满画面。"""
     from PIL import ImageChops
@@ -295,13 +255,13 @@ def _counts(index_img) -> dict:
 
 
 def snap_to_palette(src: Path, dest: Path) -> tuple[bool, str]:
-    """把生图 snap 成四色盘：分类 → 有墨即墨缩放 → 优先级合并 → 加粗墨线。
+    """把生图 snap 成四色盘：裁白边 → 区域归色（保中间调）→ 补墨。
 
     只做四色归色（墨线不够就补墨），**不设质量门槛**：生成了就上屏。
     返回 (是否成功, 四色占比说明)。只有真出错（读不到图/写不出文件）才算失败。
     """
     try:
-        from PIL import Image, ImageFilter
+        from PIL import Image
     except Exception:  # pragma: no cover
         return False, "PIL 不可用"
 
@@ -316,44 +276,18 @@ def snap_to_palette(src: Path, dest: Path) -> tuple[bool, str]:
         return False, f"裁白边失败: {exc}"
 
     dw, dh = ART_DISPLAY
-    masks = _classify(cropped)
-    small = [_shrink_any(m, dw, dh) for m in masks]
-
-    # 优先级合并：黑 > 金黄 > 朱红 > 白（墨线压在最上层）
-    index = Image.new("L", (dw, dh), 1)
-    ip = index.load()
-    for c in (2, 3, 0):
-        sp = small[c].load()
-        for y in range(dh):
-            for x in range(dw):
-                if sp[x, y]:
-                    ip[x, y] = c
-
-    # 墨线太少就加粗（e-ink 上 1px 线几乎看不见）
-    tries = 0
-    while _counts(index)["黑"] < BLACK_MIN and tries < 3:
-        black_mask = index.point(lambda p: 0 if p == 0 else 255, mode="L")
-        grown = black_mask.filter(ImageFilter.MaxFilter(3)).point(
-            lambda p: 0 if p < 128 else 255, mode="L"
+    try:
+        index_img = eink_snap.snap_illustration(
+            cropped, dw, dh, ink_min=BLACK_MIN
         )
-        gp, ip = grown.load(), index.load()
-        for y in range(dh):
-            for x in range(dw):
-                if gp[x, y] == 0:
-                    ip[x, y] = 0
-        tries += 1
+    except Exception as exc:
+        return False, f"四色归色失败: {exc}"
 
-    counts = _counts(index)
+    counts = _counts(index_img)
 
     try:
-        rgb = Image.new("RGB", (dw, dh))
-        rp = rgb.load()
-        ip = index.load()
-        for y in range(dh):
-            for x in range(dw):
-                rp[x, y] = PALETTE_RGB[ip[x, y]]
         dest.parent.mkdir(parents=True, exist_ok=True)
-        rgb.save(dest, "PNG")
+        index_img.convert("RGB").save(dest, "PNG")
     except OSError as exc:
         return False, f"写文件失败: {exc}"
 
