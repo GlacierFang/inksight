@@ -198,9 +198,66 @@ def test_prepare_art_uses_shared_default_params():
     from core import haicuotu
 
     source = inspect.getsource(haicuotu.prepare_art_file)
-    assert "prepare_direct_art(src_img, dw, dh)" in source
+    # 调用点必须存在（尺寸变量名可以变，但必须走共享层的默认参数）
+    assert "prepare_direct_art(src_img, " in source
     assert "downsample=" not in source
     assert "ink_gamma=" not in source
+
+
+# ── 名称题签（2026-10-29）────────────────────────────────────
+def test_name_is_stamped_into_art_band():
+    """生物名必须烙在图心上缘的题签里。
+
+    起因：名称原先放在版面正文，但图占满整个正文区（y=36..270），
+    那些文字被推到页脚底下裁掉了 —— 屏上根本看不到名称。
+    """
+    from core import haicuotu
+
+    assert haicuotu.LABEL_BAND_H > 0
+    assert haicuotu.ART_PAINT_H + haicuotu.LABEL_BAND_H == haicuotu.ART_DISPLAY[1]
+
+    from PIL import Image
+
+    art = Image.new("RGB", (haicuotu.ART_DISPLAY[0], haicuotu.ART_PAINT_H), (255, 255, 255))
+    stamped = haicuotu._stamp_name(art, "墨尾鲛姥", "第 1 则")
+
+    assert stamped.size == (haicuotu.ART_DISPLAY[0], haicuotu.ART_DISPLAY[1])
+    # 题签带上要有实黑像素（名称写进去了）
+    band = stamped.crop((0, 0, haicuotu.ART_DISPLAY[0], haicuotu.LABEL_BAND_H))
+    dark = sum(1 for px in band.getdata() if sum(px) < 120)
+    assert dark > 100, f"题签带上没有黑字：{dark}"
+
+
+def test_stamp_without_name_is_noop():
+    """没名称时不能画空题签带 —— 那会白白吃掉 38px。"""
+    from PIL import Image
+
+    from core import haicuotu
+
+    art = Image.new("RGB", (haicuotu.ART_DISPLAY[0], haicuotu.ART_PAINT_H), (255, 255, 255))
+    assert haicuotu._stamp_name(art, "") is art
+
+
+def test_prepare_art_file_stamps_name():
+    """prepare_art_file 传了名称就要把题签烙上去。"""
+    import tempfile
+
+    from PIL import Image
+
+    from core import haicuotu
+
+    with tempfile.TemporaryDirectory() as td:
+        src = Path(td) / "src.png"
+        dst = Path(td) / "dst.png"
+        Image.new("RGB", (400, 234), (255, 255, 255)).save(src)
+
+        ok, reason = haicuotu.prepare_art_file(src, dst, name="墨尾鲛姥", index_label="第 1 则")
+        assert ok, reason
+        out = Image.open(dst)
+        assert out.size == haicuotu.ART_DISPLAY
+        band = out.crop((0, 0, 400, haicuotu.LABEL_BAND_H))
+        dark = sum(1 for px in band.getdata() if sum(px) < 120)
+        assert dark > 100, f"成品图题签上没有黑字：{dark}"
 
 
 def test_does_not_touch_shared_layers():
