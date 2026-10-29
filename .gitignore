@@ -14,6 +14,11 @@ skills/inksight/backend/core/modes/builtin/custom_*.json
 skills/inksight/webapp/
 skills/inksight/venv/
 
+# ── .learnings/：自我提升 skill 的本地工作日志 ──
+# 这是给 skill 用的本地笔记本（记录纠正 → 晋升到 SOUL.md / AGENTS.md），
+# 不是源码，不进版本库。2026-10-29 撤出跟踪。
+.learnings/
+
 # ── 通用产物 ──
 __pycache__/
 *.pyc
