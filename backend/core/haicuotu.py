@@ -29,6 +29,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from . import eink_snap
+from .patterns.utils import load_font
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,21 @@ IMAGE_ASPECT = "16:9"
 
 # 画心在屏上的显示尺寸，必须与模式 JSON 里 image 块的 width/height 一致。
 # 一致才能 1:1 落屏：渲染器不再二次缩放，细节不会被平均掉。
+#
+# 2026-10-29：名称改成烙在图心上缘的题签里（见 _stamp_name），
+# 版面与图心尺寸保持第一版不变 —— 图仍占满整个正文区（y=36..270）。
 ART_DISPLAY = (400, 234)
+
+# 题签带：生物名称烙在图心**上缘**的留白里，不占版面正文区。
+#
+# 为什么烙图里而不是用渲染器画：渲染器的中文小字走 9pt 位图字体（PCF），
+# 笔画只有 1px，在四色屏上糊成一团（实测副题「云鲛婆」笔画散开）。
+# 烙进图里可以自己用 TrueType 画黑字，字号更大、笔画实。
+#
+# 题签带高度 38px，画心相应压到 196px；两者相加仍是 234，
+# 所以模式 JSON 里 image 块的 height 不用改。
+LABEL_BAND_H = 38
+ART_PAINT_H = 234 - LABEL_BAND_H  # 196
 
 LOCK_STALE_SEC = 900
 RECENT_KEEP = 7
@@ -302,11 +317,53 @@ async def _llm_entry(index: int, recent: list, **kwargs) -> dict:
 # --------------------------------------------------------------------------
 
 
-def prepare_art_file(src: Path, dest: Path) -> tuple[bool, str]:
-    """把生图原图备成可直接上屏的图：裁白边（撑成目标比例）→ 保线下采样。
+def _stamp_name(art, name: str, index_label: str = ""):
+    """在图心上缘烙一条题签：左边生物名，右边「第 N 则」。
+
+    题签是纯白底 + 实黑字 + 一条细分隔线，烙完再交给渲染器做四色归色。
+    纯黑在四色下是 0 杂点（实测），所以名字不会散。
+
+    返回新图：题签带 + 原画心（总高仍是 ART_DISPLAY 的高）。
+    """
+    from PIL import Image, ImageDraw
+
+    if not name:
+        return art
+    w, h = art.size
+    band_h = LABEL_BAND_H
+    canvas = Image.new("RGB", (w, band_h + h), (255, 255, 255))
+    draw = ImageDraw.Draw(canvas)
+
+    name_font = load_font("noto_serif_bold", 20, force_truetype=True)
+    idx_font = load_font("noto_serif_bold", 11, force_truetype=True)
+
+    pad = 14
+    bbox = draw.textbbox((0, 0), name, font=name_font)
+    nh = bbox[3] - bbox[1]
+    draw.text((pad, (band_h - nh) // 2 - bbox[1]), name, fill=(0, 0, 0), font=name_font)
+
+    if index_label:
+        ib = draw.textbbox((0, 0), index_label, font=idx_font)
+        draw.text(
+            (w - pad - (ib[2] - ib[0]), (band_h - (ib[3] - ib[1])) // 2 - ib[1]),
+            index_label,
+            fill=(0, 0, 0),
+            font=idx_font,
+        )
+
+    draw.line([(0, band_h - 1), (w, band_h - 1)], fill=(0, 0, 0), width=1)
+    canvas.paste(art, (0, band_h))
+    return canvas
+
+
+def prepare_art_file(src: Path, dest: Path, name: str = "", index_label: str = "") -> tuple[bool, str]:
+    """把生图原图备成可直接上屏的图：裁白边（撑成目标比例）→ 保线下采样 → 烙题签。
 
     不做四色归色：颜色交给渲染器的 Atkinson 抖动（标准路径，输出精确四色）。
     这里只保证下采样不把墨线轮廓平均掉。
+
+    name 非空时在图心上缘烙一条题签带（名称 + 第 N 则），
+    画心相应压到 ART_PAINT_H，题签 + 画心仍是 ART_DISPLAY 的尺寸。
 
     返回 (是否成功, 说明)。只有真出错（读不到图/写不出文件）才算失败。
     """
@@ -321,11 +378,18 @@ def prepare_art_file(src: Path, dest: Path) -> tuple[bool, str]:
         return False, f"读图失败: {exc}"
 
     dw, dh = ART_DISPLAY
+    paint_h = ART_PAINT_H if name else dh
     try:
         # 默认参数 = min-pool 保细墨线。躺平巴拉/大宋梦影同一路径已通过肉眼验收。
-        art_img = eink_snap.prepare_direct_art(src_img, dw, dh)
+        art_img = eink_snap.prepare_direct_art(src_img, dw, paint_h)
     except Exception as exc:
         return False, f"上屏准备失败: {exc}"
+
+    if name:
+        try:
+            art_img = _stamp_name(art_img, name, index_label)
+        except Exception as exc:
+            return False, f"题签失败: {exc}"
 
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -336,8 +400,15 @@ def prepare_art_file(src: Path, dest: Path) -> tuple[bool, str]:
     return True, f"{dw}x{dh}"
 
 
-async def _generate_art(desc: str, dest: Path, **kwargs) -> tuple[bool, str]:
-    """调 MiniMax 生图 → 下载 → 备成上屏尺寸。真出错时换提示词再试一次。"""
+async def _generate_art(
+    desc: str,
+    dest: Path,
+    *,
+    name: str = "",
+    index_label: str = "",
+    **kwargs,
+) -> tuple[bool, str]:
+    """调 MiniMax 生图 → 下载 → 备成上屏尺寸（带题签）。真出错时换提示词再试一次。"""
     import httpx
 
     key = (kwargs.get("image_api_key") or "").strip() or os.getenv("MINIMAX_API_KEY", "").strip()
@@ -392,7 +463,7 @@ async def _generate_art(desc: str, dest: Path, **kwargs) -> tuple[bool, str]:
             reasons.append(f"下载图失败: {exc}")
             break
 
-        ok, reason = prepare_art_file(tmp, dest)
+        ok, reason = prepare_art_file(tmp, dest, name=name, index_label=index_label)
         try:
             tmp.unlink()
         except OSError:
@@ -405,27 +476,11 @@ async def _generate_art(desc: str, dest: Path, **kwargs) -> tuple[bool, str]:
 
 
 def _cleanup_art(date_key: str, keep_days: int = 7) -> None:
-    """清理过期画心：保留最近 keep_days 天（含今天），其余删掉。"""
-    try:
-        today = datetime.strptime(date_key, "%Y-%m-%d")
-    except ValueError:
-        return
-    keep: set[str] = set()
-    for offset in range(max(0, int(keep_days))):
-        keep.add((today - timedelta(days=offset)).strftime("%Y%m%d"))
-    try:
-        for path in ART_DIR.glob("beast_*.png"):
-            parts = path.stem.split("_")
-            if len(parts) < 3:
-                continue
-            if parts[1] in keep:
-                continue
-            try:
-                path.unlink()
-            except OSError:
-                continue
-    except OSError:
-        pass
+    """不清理了：往期图鉴永久保留（2026-10-29 起）。
+
+    画廊要回看每天那一只。删掉的图找不回来 —— 同一只重画也不是同一只。
+    """
+    return
 
 
 def _local_art_exists(url: str) -> bool:
@@ -486,7 +541,13 @@ async def _generate_once(date_key: str, force: bool, **kwargs) -> dict | None:
         if art_path.exists():
             ok, reason = True, "复用已有图"
         else:
-            ok, reason = await _generate_art(str(entry.get("画") or ""), art_path, **kwargs)
+            ok, reason = await _generate_art(
+                str(entry.get("画") or ""),
+                art_path,
+                name=str(entry.get("名") or ""),
+                index_label=f"第 {index} 则",
+                **kwargs,
+            )
         if ok:
             art_url = f"/static/haicuotu/{art_name}"
             _cleanup_art(date_key)
