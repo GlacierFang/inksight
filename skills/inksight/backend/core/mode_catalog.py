@@ -271,6 +271,12 @@ BUILTIN_CATALOG: list[CatalogItem] = [
         en=CatalogText(name="Songmeng", tip="A daily Song-dynasty dream scene as a four-color cartoon print"),
     ),
     CatalogItem(
+        mode_id="CUSTOM_HAICUOTU",
+        category="custom",
+        zh=CatalogText(name="海错图", tip="每天一则幻想海洋生物图鉴，画成四色卡通套色版画，水用留白表示"),
+        en=CatalogText(name="Haicuotu", tip="A daily bestiary of imaginary sea creatures as a four-color cartoon print; water is left blank"),
+    ),
+    CatalogItem(
         mode_id="CUSTOM_DONGJING",
         category="custom",
         zh=CatalogText(name="汴京梦华", tip="《东京梦华录》两轴走读：每天一站，城中41站、岁时42节，角标标今日节令"),
