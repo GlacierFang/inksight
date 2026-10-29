@@ -265,6 +265,12 @@ BUILTIN_CATALOG: list[CatalogItem] = [
         en=CatalogText(name="Danqing", tip="A fictional Song-dynasty painting drawn every day"),
     ),
     CatalogItem(
+        mode_id="CUSTOM_SONGMENG",
+        category="custom",
+        zh=CatalogText(name="大宋梦影", tip="每天一则宋代市井梦景，画成四色卡通套色版画"),
+        en=CatalogText(name="Songmeng", tip="A daily Song-dynasty dream scene as a four-color cartoon print"),
+    ),
+    CatalogItem(
         mode_id="CUSTOM_DONGJING",
         category="custom",
         zh=CatalogText(name="汴京梦华", tip="《东京梦华录》两轴走读：每天一站，城中41站、岁时42节，角标标今日节令"),
