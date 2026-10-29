@@ -1,0 +1,363 @@
+{
+  "mode_id": "CUSTOM_HAICUOTU",
+  "display_name": "海错图",
+  "icon": "art",
+  "cacheable": false,
+  "description": "海错图：每日一则幻想海洋生物图鉴，画成四色卡通套色版画。水用留白表示，不填色。",
+  "content": {
+    "type": "computed",
+    "provider": "haicuotu",
+    "fallback": {
+      "index_label": "第 1 则",
+      "name": "墨尾鲛姥",
+      "alias": "鲛婆",
+      "size": "长三尺",
+      "origin": "沉渊湾",
+      "feature": "圆头无须，尾如墨条，跃起时拖一串水珠",
+      "colophon": "潮退始见，捕之得盐",
+      "credit": "",
+      "art_url": "",
+      "has_image": "no"
+    }
+  },
+  "layout": {
+    "status_bar": {
+      "line_width": 1,
+      "dashed": true
+    },
+    "body_align": "top",
+    "body": [
+      {
+        "type": "conditional",
+        "field": "has_image",
+        "conditions": [
+          {
+            "op": "eq",
+            "value": "yes",
+            "children": [
+              {
+                "type": "image",
+                "field": "art_url",
+                "x": 0,
+                "width": 400,
+                "height": 234,
+                "fit": "cover",
+                "align_x": "center",
+                "align_y": "center",
+                "margin_bottom": 4
+              },
+              {
+                "type": "two_column",
+                "left_x": 0,
+                "left_width": 330,
+                "gap": 8,
+                "left": [
+                  {
+                    "type": "text",
+                    "field": "name",
+                    "align": "left",
+                    "margin_x": 6,
+                    "font": "noto_serif_bold",
+                    "font_size": 17,
+                    "max_lines": 1,
+                    "margin_bottom": 2
+                  },
+                  {
+                    "type": "text",
+                    "template": "{index_label} · {alias} · {size} · {origin}",
+                    "align": "left",
+                    "margin_x": 6,
+                    "font": "noto_serif_light",
+                    "font_size": 11,
+                    "max_lines": 1,
+                    "margin_bottom": 3
+                  },
+                  {
+                    "type": "text",
+                    "field": "feature",
+                    "align": "left",
+                    "margin_x": 6,
+                    "font": "noto_serif_light",
+                    "font_size": 12,
+                    "max_lines": 2,
+                    "margin_bottom": 0
+                  }
+                ],
+                "right": [
+                  {
+                    "type": "text",
+                    "field": "colophon",
+                    "align": "right",
+                    "font": "noto_serif_bold",
+                    "font_size": 12,
+                    "max_lines": 3,
+                    "margin_bottom": 0
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "eq",
+            "value": "no",
+            "children": [
+              {
+                "type": "spacer",
+                "height_px": 78
+              },
+              {
+                "type": "text",
+                "field": "name",
+                "align": "center",
+                "font": "noto_serif_bold",
+                "font_size": 22,
+                "max_lines": 1,
+                "margin_bottom": 6
+              },
+              {
+                "type": "text",
+                "template": "{index_label} · {alias} · {size} · {origin}",
+                "align": "center",
+                "font": "noto_serif_light",
+                "font_size": 12,
+                "max_lines": 1,
+                "margin_bottom": 10
+              },
+              {
+                "type": "text",
+                "field": "feature",
+                "align": "center",
+                "font": "noto_serif_light",
+                "font_size": 14,
+                "max_lines": 3,
+                "margin_bottom": 8
+              },
+              {
+                "type": "text",
+                "field": "colophon",
+                "align": "center",
+                "font": "noto_serif_bold",
+                "font_size": 14,
+                "max_lines": 2,
+                "margin_bottom": 0
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "footer": {
+      "label": "海错图",
+      "attribution_template": "{colophon}",
+      "dashed": true
+    }
+  },
+  "layout_overrides": {
+    "296x128": {
+      "body_align": "top",
+      "body": [
+        {
+          "type": "conditional",
+          "field": "has_image",
+          "conditions": [
+            {
+              "op": "eq",
+              "value": "yes",
+              "children": [
+                {
+                  "type": "image",
+                  "field": "art_url",
+                  "x": 0,
+                  "width": 322,
+                  "height": 99,
+                  "fit": "cover",
+                  "align_x": "center",
+                  "align_y": "center",
+                  "margin_bottom": 2
+                },
+                {
+                  "type": "text",
+                  "template": "{name} · {alias} · {size}",
+                  "align": "left",
+                  "margin_x": 4,
+                  "font": "noto_serif_bold",
+                  "font_size": 13,
+                  "max_lines": 1,
+                  "margin_bottom": 1
+                },
+                {
+                  "type": "text",
+                  "field": "feature",
+                  "align": "left",
+                  "margin_x": 4,
+                  "font": "noto_serif_light",
+                  "font_size": 10,
+                  "max_lines": 1,
+                  "margin_bottom": 0
+                }
+              ]
+            },
+            {
+              "op": "eq",
+              "value": "no",
+              "children": [
+                {
+                  "type": "spacer",
+                  "height_px": 14
+                },
+                {
+                  "type": "text",
+                  "field": "name",
+                  "align": "center",
+                  "font": "noto_serif_bold",
+                  "font_size": 16,
+                  "max_lines": 1,
+                  "margin_bottom": 4
+                },
+                {
+                  "type": "text",
+                  "template": "{index_label} · {alias} · {size} · {origin}",
+                  "align": "center",
+                  "font": "noto_serif_light",
+                  "font_size": 10,
+                  "max_lines": 1,
+                  "margin_bottom": 4
+                },
+                {
+                  "type": "text",
+                  "field": "feature",
+                  "align": "center",
+                  "font": "noto_serif_light",
+                  "font_size": 11,
+                  "max_lines": 2,
+                  "margin_bottom": 0
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "footer": {
+        "label": "海错图",
+        "attribution_template": "{colophon}",
+        "font_size": 9,
+        "dashed": true
+      }
+    },
+    "648x480": {
+      "body_align": "top",
+      "body": [
+        {
+          "type": "conditional",
+          "field": "has_image",
+          "conditions": [
+            {
+              "op": "eq",
+              "value": "yes",
+              "children": [
+                {
+                  "type": "image",
+                  "field": "art_url",
+                  "x": 0,
+                  "width": 400,
+                  "height": 232,
+                  "fit": "cover",
+                  "align_x": "center",
+                  "align_y": "center",
+                  "margin_bottom": 6
+                },
+                {
+                  "type": "text",
+                  "field": "name",
+                  "align": "center",
+                  "font": "noto_serif_bold",
+                  "font_size": 26,
+                  "max_lines": 1,
+                  "margin_bottom": 4
+                },
+                {
+                  "type": "text",
+                  "template": "{index_label} · {alias} · {size} · {origin}",
+                  "align": "center",
+                  "font": "noto_serif_light",
+                  "font_size": 14,
+                  "max_lines": 1,
+                  "margin_bottom": 8
+                },
+                {
+                  "type": "text",
+                  "field": "feature",
+                  "align": "center",
+                  "font": "noto_serif_light",
+                  "font_size": 16,
+                  "max_lines": 2,
+                  "margin_bottom": 6
+                },
+                {
+                  "type": "text",
+                  "field": "colophon",
+                  "align": "center",
+                  "font": "noto_serif_bold",
+                  "font_size": 16,
+                  "max_lines": 2,
+                  "margin_bottom": 0
+                }
+              ]
+            },
+            {
+              "op": "eq",
+              "value": "no",
+              "children": [
+                {
+                  "type": "spacer",
+                  "height_px": 150
+                },
+                {
+                  "type": "text",
+                  "field": "name",
+                  "align": "center",
+                  "font": "noto_serif_bold",
+                  "font_size": 32,
+                  "max_lines": 1,
+                  "margin_bottom": 10
+                },
+                {
+                  "type": "text",
+                  "template": "{index_label} · {alias} · {size} · {origin}",
+                  "align": "center",
+                  "font": "noto_serif_light",
+                  "font_size": 16,
+                  "max_lines": 1,
+                  "margin_bottom": 12
+                },
+                {
+                  "type": "text",
+                  "field": "feature",
+                  "align": "center",
+                  "font": "noto_serif_light",
+                  "font_size": 18,
+                  "max_lines": 3,
+                  "margin_bottom": 10
+                },
+                {
+                  "type": "text",
+                  "field": "colophon",
+                  "align": "center",
+                  "font": "noto_serif_bold",
+                  "font_size": 18,
+                  "max_lines": 2,
+                  "margin_bottom": 0
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "footer": {
+        "label": "海错图",
+        "attribution_template": "{colophon}",
+        "dashed": true
+      }
+    }
+  }
+}
