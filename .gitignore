@@ -9,6 +9,10 @@ skills/inksight/backend/*
 !skills/inksight/backend/core/
 !skills/inksight/backend/api/
 !skills/inksight/backend/tests/
+# scripts/：2026-10-30 纳管 —— 每日内容生成（systemd timer 入口）等原创脚本在此，
+# 没有版本历史 = 定时任务改坏了没法回滚。
+!skills/inksight/backend/scripts/
+skills/inksight/backend/scripts/__pycache__/
 # 部署副本：源文件在 modes-ours/，不重复纳管
 skills/inksight/backend/core/modes/builtin/custom_*.json
 skills/inksight/webapp/

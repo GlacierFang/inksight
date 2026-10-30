@@ -1,8 +1,8 @@
 # InkSight 项目文档
 
 > 创建时间：2026-10-21 17:35
-> 最后更新：2026-10-22 08:50
-> 状态：🔵 后端已本地部署（18834），**硬件未到位**，端到端未验证
+> 最后更新：2026-10-30 16:53
+> 状态：🟡 后端（18834）+ WebApp（18835）已部署，设备已到手并跑通真实拉图；**墨水屏已损坏，等新屏到货**
 > 上游仓库：https://github.com/datascale-ai/inksight
 > 许可：MIT（可自由二开，保留版权声明）
 
@@ -47,9 +47,18 @@
 
 | 部分 | 负责人 | 状态 |
 |---|---|---|
-| 硬件（采购、焊接、组装） | 冰河大人 | ⏳ 待办（DIY BOM 约 220 元） |
-| 软件（后端 + 控制网页 + 内容开发） | 麻辣小龙虾 | 🟡 后端已部署，控制网页待做 |
-| 内容做哪些 | — | ⏳ 后续沟通决定 |
+| 硬件（采购、焊接、组装） | 冰河大人 | 🟡 设备已到手刷机配网，**墨水屏已损坏，等新屏到货** |
+| 软件（后端 + 控制网页 + 内容开发） | 麻辣小龙虾 | ✅ 后端 + WebApp 均已部署 |
+| 内容做哪些 | — | 🟢 自研模式已上线并注册生效（见 `modes-ours/`） |
+
+---
+
+## 硬件现状（2026-10-30 更正）<!-- project: path:/home/open/.openclaw/workspace -->
+
+- 设备：ESP32-C3 Pro mini + 4.2 寸墨水屏（大连佳显 GDEM042F86，400×300，黑白红黄四色，SSD2683ZA 驱动）
+- 2026-10-27 已到手、已刷机、已配网，服务器地址 `http://ruohan.site/ink`，真实拉图跑通
+- **2026-10-30：屏幕损坏，等新屏到货**（此前文档记的「硬件未到位 / 端到端未验证」是过期信息）
+- 设备按键只有 RST / BOOT，**没有翻页键**，屏上内容靠定时唤醒轮播
 
 ---
 
@@ -103,12 +112,13 @@ backend/core/modes/builtin/ 下 **30 个 JSON 文件**（另有 en/ 目录 28 �
 - **依赖装法**：上游 requirements.txt 锁 Pillow~=10.1，**本机 Python 3.13 + arm64 装不上**（无预编译轮子）→ 必须放宽版本锁
 - **WebApp 构建通过**（2026-10-22）：Next.js 16.1.6 production build EXIT=0，30 个页面全出，routes-manifest 确认 `basePath: /ink`
 - **外网全链路通**（2026-10-22）：`http://ruohan.site/ink/` 页面 200、`/ink/api/health` 200、固件下载 1.19MB 200；原有站点 dashboard/shanhe/gallery/nature/studio 全 200，未回归
+- **设备真实拉图已通**（2026-10-27 起）：固件已刷、已配网（服务器地址 `http://ruohan.site/ink`），nginx 日志 65 次真实 `GET /api/render`（`bpp=2&colors=4`），固件零改动。**屏幕后于 2026-10-30 损坏**
 
 ### 未验证 ❌
 
-- **固件编译（本机无 PlatformIO）、真机刷写、墨水屏实际观感与刷新速度** ← 硬件未到位，全链路未跑通
+- **墨水屏实际观感与刷新速度** ← 屏幕已损坏，等新屏到货后复验
+- **固件编译**（本机无 PlatformIO）未做，固件用官方站刷
 - **账号链路端到端**（注册 → 配对码 → 绑定设备）未实测
-- **设备真实拉图**（设备连上后 `/api/render` 返回真 BMP）未实测
 - 语音链路（百炼 ASR/TTS，需 WROOM32E + 麦克风扬声器，C3 不支持）
 
 ### 上游已做的修复（改代码前必看）
@@ -339,8 +349,7 @@ skills/inksight/
 
 ## 十一、待办
 
-- [ ] 冰河大人：采购硬件（ESP32-C3 Pro mini + 4.2 寸墨水屏，DIY BOM 约 220 元；参考上游 docs/hardware.md / docs/bom.md）
-- [ ] 设备到手后配网，**服务器地址填 `http://ruohan.site/ink`**，验证设备能拉到 BMP
+- [ ] 冰河大人：**等新墨水屏到货**（2026-10-30 原屏损坏）；到货装回后配网，**服务器地址仍填 `http://ruohan.site/ink`**，验证设备能拉到 BMP
 - [ ] 麻辣小龙虾：建第一个账号并登录 ruohan.site/ink，验证账号链路（注册 → 配对码 → 绑定设备）
 - [x] ~~麻辣小龙虾：接 MiniMax 持久配置~~ → **2026-10-22 改为「用户零配置 + 后端内置 MiniMax」，方案已变，见第九章**
 - [ ] 麻辣小龙虾：写第一个自定义模式 JSON（验证"加内容 = 加 JSON，不改代码"）
@@ -1152,3 +1161,57 @@ HTTP preview 200；整页严格四色（白 56.0% 黑 18.4% 黄 16.7% 红 8.9%�
 **验收**：2026-10-29 15:19 冰河大人「可」—— 通过肉眼验收。
 
 <!-- project: path:/home/open/.openclaw/workspace -->
+## 十六、回顾功能根治：去设备绑定 + 自动更新（2026-10-30 18:00-18:30）
+
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+冰河大人指出回顾页两个问题：**和设备强绑定**、**不能自动更新**。查证后两个都成立，
+根因是同一个：**内容生成的触发时机 = 设备拉取的时机**。
+
+### 事实核对（根治前）
+
+| 问题 | 证据 |
+|---|---|
+| 强绑定 | 前端第一屏强制选设备，所有请求走 `/api/device/{mac}/gallery`；但 `core/gallery.py` 读 `runtime_cache/<state>/state.json`、`core/screen_archive.py` 写 `runtime_cache/<state>/screens/<day>.png`，**两处都不接受 MAC**。换台设备请求，字节完全一样 —— MAC 是纯门面 |
+| 不能自动更新 | 整屏图只在 `api/routes/render.py:202-208`（设备真实拉图时）落盘。补图唯一手段 `scripts/history_backfill.py` 是手动跑一次就结束，**systemd 和 crontab 都没有它的定时任务**。缺图是静默的：`gallery.entries()` 里 `if not _has_screen(...): continue` |
+
+### 根治做法（A+B 组合）
+
+**A. 内容生成脱离设备拉取（服务器定时）**
+
+新增 `backend/scripts/daily_content.py` + systemd `openclaw-inksight-daily.timer`（每天 07:00）：
+
+- 走 `core/pipeline.generate_and_render`（和设备下发同一套出图管线），`mac=""`、`archive_screen=True`；
+- 模板配置从 `configs` 表取当前生效那份，**只借位置/语言，不传 MAC**；
+- 模式清单从 `core/gallery.py` 派生（唯一事实来源），wide 形态（电子世界）排除；
+- 设备退化成纯显示器：它醒不醒、内容都在。屏幕坏了内容也不断档。
+
+**踩到的坑（都修了）**：
+
+1. **脚本 hang 不退出** —— aiosqlite 的工作线程不是 daemon，进程干完活卡住不退（systemd 会判超时）。修法：`finally` 里 `await close_all()`。`history_backfill.py` 有同样的毛病，一并修了。
+2. **天气取错城市** —— 原本用 `api.shared.build_image`，它在 `mac=None` 时拿不到设备配置，天气退回默认城市（杭州）而不是郑州。改用 `core/pipeline.generate_and_render` 显式传 date_ctx/weather。
+3. **凭证** —— 不传 llm/image provider，让 pipeline 走默认 MiniMax（服务端托管凭证）。
+
+**B. 回顾接口脱离 MAC（账号作用域）**
+
+新增 `backend/api/routes/gallery.py`：`GET /api/gallery`、`GET /api/gallery/image`，鉴权 `require_user`（Bearer 或 `ink_session` Cookie —— 后者是为了 `<img>` 标签带不了 Authorization 头）。
+
+旧路由 `/device/{mac}/gallery` **保留**（兼容旧链接），内部同一套 `core/gallery.py`，不产生第二份数据。
+
+前端 `webapp/app/gallery/page.tsx` 去掉「选设备」第一屏。
+
+### 验证
+
+- 后端接口四条全通（带真实 token）：模式列表 200 / 条目 200 / PNG 200 (image/png, 9893 bytes) / wide 现算 200
+- 未登录一律 401
+- 外网 `ruohan.site/ink/gallery` 200、`/ink/api/health` 200
+- **systemd 实跑**：`Result=success ExecMainStatus=0`，当天 6 个模式的整屏图全部生成
+- 历史回填 29/29 完成（海错图 2 + 丹青谱 3 + 大宋梦影 2 + 躺平巴拉 7 + 天工阁 8 + 铺道蚁 4 + 电子世界 3）
+- pytest **534 passed**（含新增 `tests/test_gallery_api.py` 5 条）
+
+### 已知缺口（本次没动）
+
+- **日痕（rihen）不在回顾收录范围**：设备轮转列表里叫 `CUSTOM_DAYMARK`，gallery 收录的是 `CUSTOM_RIHEN`，state 有 7 天但 0 张整屏图。既有设计（test_gallery 锁定了 7 个模式），要收进来的话得改 `core/gallery.py` + 补测试。
+- 回顾数据仍不按账号隔离（所有人看到同一份）。当前单机单账号够用；将来多账号要隔离，是「加隔离」而非现在的「假装隔离」。
+- 旧设备路由 `/device/{mac}/gallery` 仍在，行为与新路由一致（同一份数据）。
+
