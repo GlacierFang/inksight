@@ -4,6 +4,7 @@ from .auth import router as auth_router
 from .config import router as config_router
 from .health import router as health_router
 from .device import router as device_router
+from .gallery import router as gallery_router
 from .locations import router as locations_router
 from .mobile import router as mobile_router
 from .modes import router as modes_router
@@ -20,6 +21,7 @@ api_routers = [
     config_router,
     health_router,
     device_router,
+    gallery_router,
     modes_router,
     auth_router,
     user_router,
