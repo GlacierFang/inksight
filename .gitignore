@@ -15,7 +15,19 @@ skills/inksight/backend/*
 skills/inksight/backend/scripts/__pycache__/
 # 部署副本：源文件在 modes-ours/，不重复纳管
 skills/inksight/backend/core/modes/builtin/custom_*.json
-skills/inksight/webapp/
+# webapp/：上游 vendored 部署树，默认不跟踪（同 backend 的处理逻辑）。
+# 2026-10-31 纳管我们自己改过的两个页面 —— 预览页/回顾页与设备配置页都是原创改动，
+# 零版本历史 = 改坏了没法回滚。用 webapp/* 而不是 webapp/，否则 git 不进目录，
+# 里面的文件无法再被 ! 规则捞回来。
+skills/inksight/webapp/*
+!skills/inksight/webapp/app/
+skills/inksight/webapp/app/*
+!skills/inksight/webapp/app/config/
+!skills/inksight/webapp/app/gallery/
+skills/inksight/webapp/app/config/*
+!skills/inksight/webapp/app/config/page.tsx
+skills/inksight/webapp/app/gallery/*
+!skills/inksight/webapp/app/gallery/page.tsx
 skills/inksight/venv/
 
 # ── .learnings/：自我提升 skill 的本地工作日志 ──
