@@ -40,7 +40,7 @@
                 "field": "art_url",
                 "x": 0,
                 "width": 400,
-                "height": 176,
+                "height": 196,
                 "fit": "cover",
                 "align_x": "center",
                 "align_y": "top",
@@ -66,16 +66,6 @@
                 "max_lines": 2,
                 "margin_bottom": 2,
                 "reserve_line_height": true
-              },
-              {
-                "type": "text",
-                "template": "题识：{colophon}",
-                "align": "left",
-                "margin_x": 10,
-                "font": "noto_serif_bold",
-                "font_size": 11,
-                "max_lines": 1,
-                "margin_bottom": 0
               }
             ]
           },
@@ -276,15 +266,6 @@
                   "font_size": 16,
                   "max_lines": 2,
                   "margin_bottom": 6
-                },
-                {
-                  "type": "text",
-                  "field": "colophon",
-                  "align": "center",
-                  "font": "noto_serif_bold",
-                  "font_size": 16,
-                  "max_lines": 2,
-                  "margin_bottom": 0
                 }
               ]
             },
