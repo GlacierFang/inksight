@@ -35,32 +35,11 @@
                 "field": "art_url",
                 "x": 0,
                 "width": 400,
-                "height": 192,
+                "height": 230,
                 "fit": "cover",
                 "align_x": "center",
                 "align_y": "center",
                 "margin_bottom": 4
-              },
-              {
-                "type": "text",
-                "field": "scene",
-                "align": "center",
-                "margin_x": 10,
-                "font": "noto_serif_bold",
-                "font_size": 14,
-                "max_lines": 1,
-                "margin_bottom": 3
-              },
-              {
-                "type": "text",
-                "template": "题记：{colophon}",
-                "align": "center",
-                "margin_x": 10,
-                "font": "noto_serif_light",
-                "font_size": 12,
-                "max_lines": 2,
-                "margin_bottom": 0,
-                "reserve_line_height": true
               }
             ]
           },

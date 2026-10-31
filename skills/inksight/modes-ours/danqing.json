@@ -83,17 +83,6 @@
                     "margin_bottom": 0
                   }
                 ]
-              },
-              {
-                "type": "text",
-                "template": "题跋：{colophon}",
-                "align": "left",
-                "margin_x": 10,
-                "font": "noto_serif_light",
-                "font_size": 11,
-                "max_lines": 2,
-                "margin_bottom": 0,
-                "reserve_line_height": true
               }
             ]
           },
