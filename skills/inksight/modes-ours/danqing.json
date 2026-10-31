@@ -40,7 +40,9 @@
                 "x": 4,
                 "width": 392,
                 "height": 176,
-                "fit": "contain",
+                "fit": "cover",
+                "align_x": "center",
+                "align_y": "center",
                 "margin_bottom": 4
               },
               {
@@ -55,9 +57,9 @@
                     "align": "left",
                     "margin_x": 6,
                     "font": "noto_serif_bold",
-                    "font_size": 16,
+                    "font_size": 15,
                     "max_lines": 1,
-                    "margin_bottom": 3
+                    "margin_bottom": 2
                   },
                   {
                     "type": "text",
@@ -81,6 +83,17 @@
                     "margin_bottom": 0
                   }
                 ]
+              },
+              {
+                "type": "text",
+                "template": "题跋：{colophon}",
+                "align": "left",
+                "margin_x": 10,
+                "font": "noto_serif_light",
+                "font_size": 11,
+                "max_lines": 2,
+                "margin_bottom": 0,
+                "reserve_line_height": true
               }
             ]
           },
@@ -112,7 +125,8 @@
                 "font": "noto_serif_light",
                 "font_size": 12,
                 "max_lines": 3,
-                "margin_bottom": 0
+                "margin_bottom": 0,
+                "reserve_line_height": true
               }
             ]
           }
