@@ -187,9 +187,17 @@ return dict(content_cfg.get("fallback", {}))
 ]
 ```
 
-`type` 可选:`text` / `textarea` / `number` / `select` / `boolean`(还有 `as_json` 让值以 JSON 解析)。
+`type` 可选:`text` / `textarea` / `number` / `select` / `boolean` / `location`(还有 `as_json` 让值以 JSON 解析)。
+
+⚠️ 规范文件 `backend/core/modes/schema/mode_schema.json` 的 type 枚举**曾经漏了 `location`**(2026-10-29 补上),但模式 JSON 早就在用这个类型 —— 改枚举前先确认已有模式在用。
 
 用户填的值最终落到 `config.mode_overrides.<MODE_ID>.mode_settings`,内容生成时通过 `config["mode_settings"]` 读到(`core/json_content.py:923`)。
+
+**`location` 是例外**:城市不落 `mode_settings`,而是**扁平**存在 `mode_overrides.<MODE_ID>` 顶层
+(`city` / `latitude` / `longitude` / `timezone` / `admin1` / `country`),
+`core/pipeline.py::get_effective_mode_config` 会把这些字段**提升到 config 顶层**,
+provider 直接读 `config["city"]` / `config["latitude"]` 即可。
+完整配方见文末「模式自带城市」两节。
 
 ### 2.6 字体与图标
 
@@ -466,13 +474,13 @@ for mode in v:
 
 > 推论:SSD 掉线 = 根盘消失 = 机器当场不可用;SD 卡不承载系统,监控它没意义。
 
-**未验证**:真机墨水屏观感(硬件未到)。
+**未验证**:真机墨水屏观感(设备 2026-10-27 已到手跑通,原屏 2026-10-30 损坏,**2026-11-01 新屏到货组装完毕,设备一切正常**,观感与刷新速度待复验)。
 
 ---
 
 ### `CUSTOM_SUN_MOON`「日昼与月相」
 
-**做什么**:以当日为准,屏上显示郑州的日出、日落与**当日白昼时长**;入夜后换成当晚的月相与**月相图**。配一句当天现写的小文案。
+**做什么**:以当日为准,屏上显示**所选城市**(没设置就跟随设备位置)的日出、日落与**当日白昼时长**;入夜后换成当晚的月相与**月相图**。配一句当天现写的小文案。
 
 1. **分工**(关键:数值不交给 LLM):
    - 日出/日落/白昼时长 → Open-Meteo daily 接口(`sunrise,sunset,daylight_duration`),`past_days=1` 顺带拿到昨天,好算「比昨天短 N 分钟」。
@@ -484,15 +492,15 @@ for mode in v:
    - 几何:把月球当球体,光源方向 `s = (sin(2πf), 0, -cos(2πf))`,法向 `n` 与 `s` 点积为正即受光,投影后就是真实月相形状(f=0 新月、0.25 上弦、0.5 满月)。
    - 画法:PIL 纯 Python 逐像素,**受光部分留白、阴影部分填黑**(天文图惯例),外圈加 2px 黑轮廓标出月面边缘。满月 = 白盘带黑圈,新月 = 实心黑盘。
    - ⚠️ 别把黑白搞反:第一版图省事把受光面填了黑,结果满月是一颗实心黑盘,和天文图完全相反,被冰河大人一眼看穿。**受亮=白**。
-   - 落地:`backend/static/moon/moon_<YYYYMMDD>_<相位序号>_<美术版本>.png`,image 块用 `/static/moon/...` 本地 URL。
+   - 落地:`backend/static/moon/moon_<地点指纹>_<YYYYMMDD>_<相位序号>_<美术版本>.png`,image 块用 `/static/moon/...` 本地 URL。地点指纹是 `城市|经纬` 的 md5 前 8 位 —— 不同城市的当地日期可能差一天,月相图不能跨城市复用。
      - `MOON_ART_VERSION` 是美术版本号:改画法就加 1,旧文件自动失效重画(否则同名旧图会被直接复用)。
      - ⚠️ **必须用 `/static/` 路径,不能用 `/api/uploads/<id>`**:上传引用会被 `_prefetch_images` 塞进 `_prefetched_<field>` 字节流,`responseType=json` 预览会因 bytes 不可序列化直接 500。`/static/` 路径会被 prefetch 跳过。
    - **画布必须 = 显示尺寸(104×104),不要画大再缩**:渲染器 `fit=contain` 会做 LANCZOS 缩放,缩放产生的灰边在 4 色下会被 `atkinson_palette` 抖成黄/红杂色(月相边缘实测冒出 96 个黄点 + 5 个红点)。画布 104、显示 104 时 PIL 的 `resize` 同尺寸直接 copy,不过滤,边缘无灰 → 4 色下干净。
    - 2 色下 `quantize_image_for_eink` 走 `atkinson_bw`,输出 `"1"` 模式且 `dither=NONE`,`paste_icon_onto` 是直接像素拷贝,极性可靠(0=黑)。
-4. **昼夜切换**:legacy 的 `conditional` 块按 content 里的 `period` 字段分支(`day` / `night`)。判定用**郑州本地时间与当天日出日落比较**,不靠小时数硬猜。
+4. **昼夜切换**:legacy 的 `conditional` 块按 content 里的 `period` 字段分支(`day` / `night`)。判定用**地点当地时间与当天日出日落比较**,不靠小时数硬猜(2026-10-29 起,当地时间由 Open-Meteo 的 `timezone=auto` 回传的 `utc_offset_seconds` 给出,不再固定郑州)。
 5. **缓存**:
    - Open-Meteo 结果缓存 30 分钟(`backend/runtime_cache/sun_moon.json`)。
-   - LLM 文案按「日期 + 昼夜」缓存,一天最多调两次(0 次/1 次交替)。
+   - LLM 文案按「**地点** + 日期 + 昼夜」缓存,一天最多调两次(0 次/1 次交替);2026-10-29 起缓存按地点分桶,不同城市互不污染。
    - 月相图按天+相位命名复用,同文件名不重画;`_prune_moon_images` 顺手删 5 天前的旧图。
 6. **`cacheable: false`**:日落后不能继续显示缓存的日间内容。
 
@@ -515,7 +523,9 @@ for mode in v:
 - 月相校验图:`preview/moon_30days.png`(连续 30 天)、`preview/moon_phases8.png`(八大相位)。实测受光面积对理论值误差 ≤2%(像素离散所致)
 - 当日实测:日出 `06:37`、日落 `17:41`、白昼 `11小时04分`、比昨天短 2 分钟;月龄 11.8 天、照亮 90%、盈凸月、距满月 3.0 天
 
-**未验证**:真机墨水屏观感(硬件未到);夜间分支只做过离线渲染,没在真实夜间时段跑过。
+**未验证**:真机墨水屏观感(2026-11-01 新屏到货,观感待复验);夜间分支只做过离线渲染,没在真实夜间时段跑过。
+
+**2026-10-29 追加城市选项**:模式加 `settings_schema` 城市槽位,provider 改成按地点解析(见文末「模式自带城市」通用配方);后端 504 passed,真实预览两版(跟随设备位置 → 郑州 日出 06:42/日落 17:34;选上海 → 日出 06:06/日落 17:08),页脚城市与数值均正确。
 
 ---
 
@@ -554,7 +564,7 @@ for mode in v:
 
 **已修**:月相图原为 200×200 缩到 104×104,LANCZOS 灰边在 4 色下抖出 96 黄点 + 5 红点;改为**画布 = 显示尺寸(104×104)、硬边不插值**后噪点清零(月相区纯白 9269 / 纯黑 1135)。
 
-**设备侧待验**:公网预览默认 `colors=2`,真机要看到四色得设备请求带 `colors=4`,得等硬件。
+**设备侧**:真机请求实测就是 `bpp=2&colors=4`(nginx 日志 65 次 render),四色在真机可见;`colors=2` 只是网页侧预览默认值。
 
 ---
 
@@ -669,7 +679,7 @@ for mode in v:
 - 公网入口是 **HTTP 80**(`ruohan.site`,natfrp 只代理 80 和 22,没配 HTTPS);用 https 连会 HTTP 000。
   `date.appworlds.cn` 是 OpenClaw 网关域名,所有路径都过网关鉴权,返回「请求安全验证失败(002)」,与后端无关。
 
-**未验证**:真机墨水屏观感(硬件未到)。四色屏下红字编号、藏印、器物图的实际观感待硬件确认。
+**未验证**:真机墨水屏观感(2026-11-01 新屏到货,待复验)。四色屏下红字编号、藏印、器物图的实际观感待确认。
 
 **排版返工(2026-10-23,冰河大人指出「名称后面多了一溜下划线、行距过小、莫名下划线」)**:
 
@@ -757,10 +767,10 @@ WebApp 的预览页目前**没有**传这个参数 —— 所以在页面上反�
 
 ---
 
-## 九、下一步(待硬件到位)
+## 九、下一步(2026-11-01 新屏已到货)
 
-1. 硬件未到 → 固件编译、真机刷写、墨水屏实际观感、真实拉图、账号绑定,**全链路均未端到端验证**
-2. 当前库里 `configs` 0 行、`user_devices` 0 行,`device_state` 只有测试 MAC
+1. 设备 2026-10-27 已到手、已刷机配网(服务器地址 `http://ruohan.site/ink`),真实拉图跑通。原屏 2026-10-30 损坏,**2026-11-01 新屏到货组装完毕,设备一切正常**;观感与刷新速度待复验
+2. ~~当前库里 `configs` 0 行、`user_devices` 0 行,`device_state` 只有测试 MAC~~ → **2026-10-30:设备已注册,实际生效的模式无问题**(冰河大人确认)
 3. 设备到手后的第一步:**先在网页存一份配置**,否则 `GET /config/{mac}` 返回 404,固件不重试,专注/常亮/轮播全是默认值
 4. 再把 `CUSTOM_*` 模式灌进 builtin 目录或数据库,并设 `refreshStrategy=cycle`
 5. 本文档提到的"我们自己的内容"目前只做了「宋人日课」一个。**后续要做的新内容,先跟冰河大人沟通再开工**
@@ -1179,4 +1189,279 @@ provider 必须复刻渲染器几何算行数（`core/rihen.py` 的 `_geometry()
 **未做（等冰河大人定）**
 
 - **设备 `configs.modes` 轮转列表没动**（2026-10-26 定的规矩：轮转他自己操作）。模式已在 `/api/modes` 里可选用。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 补充：CUSTOM_EWORLD「电子世界」模式（2026-10-28 落地）
+
+**形态**：一张 400×300 四色固定版图，四方电子生命逐日攻伐。不是阅读器，是「一屏一景、一日一事件」。
+
+- **版面**：顶栏（日期 + 四色图例 + 各家盘数）/ 中部 32 州郡固定大陆 / 底部当日战报（两行）
+- **四色**：只用现有黑白红黄。州界与文字纯黑 1px；荒原=黑白网点，饕餮=纯红、穷奇=纯黄、梼杌=纯白、白泽=黑白斜纹
+- **状态**：无持久化状态表。以 epoch=2026-10-28 按 `hash(epoch, 第N天)` 逐日推进，关机后重开直接补算当天状态，同一天对所有设备一致
+- **规则**：盘数+士气在相邻郡作战，胜方取 1–2 郡；亡国进入「待复」，9–20 天后在龙兴之地复国；一方统一全图后其余方仍陆续复国，世界持续演化
+- **战报**：本地模板 + 词库拼装，不调 LLM、不联网
+
+**关键实现决定**
+
+- **州郡几何**：手写 18 个大陆轮廓点 + 32 个州郡种子点，运行时用 Sutherland–Hodgman 裁剪求 Voronoi 单元。
+  这样 32 块**严格无缝拼满**、邻接关系可从共边反推，比手写 32 组多边形坐标可靠（手写多边形不可能严丝合缝）
+- **四色零误差**：整屏自己渲染成 RGB PNG，只用调色板精确值 (0,0,0)/(255,255,255)/(232,176,0)/(200,0,0)；
+  文字走「二值掩膜 + 纯黑粘贴」避免抗锯齿灰。实测经 `convert_image_block` 四色量化后 **120000/120000 像素完全一致**
+- **尺寸必须与渲染器对齐**：`json_renderer` 的 `ctx.scale = max(0.92, screen_w/400)`，image 块尺寸会被它缩放。
+  provider 必须按同一公式出图（`LOGICAL_BLOCKS`），否则二次重采样会把四色抖成噪点。`modes-ours/eworld.json` 的
+  `layout_overrides` 与 provider 的 `LOGICAL_BLOCKS` 必须一致（测试有断言）
+- **战报严格对应**：战报里出现的州郡名集合必须**恰好等于**当日易主集合（测试逐日校验 366 天）
+- **易主标记**：州郡顶部内侧 7px 处钉一个黑色实心圆（顶点在凸多边形内，沿质心方向内缩保证落在州内）
+
+**参数调过一轮（重要）**
+
+- 初版战力 = 基础 + 盘数×系数 + 士气 → 强者滚雪球，**第 16 天就统一全图**，之后 277/365 天地图全红不动
+- 改成 **扩张惩罚**模型：战力 = 基础 + 士气 − 超出舒适规模(18 郡)的每郡惩罚。帝国打不动、小势力敢下手，疆界天天挪
+- 现在参数：`_OVEREXT_PIVOT=18 _OVEREXT=0.012 _HOME_BONUS=0.18` → 一年内 **第 110 天统一全图，第 114 天被复国打破**；
+  每日易主 0–4 郡（战报名单行放得下），全年约 650 战 / 480 次守成
+
+**代码落点**
+
+- `backend/core/eworld.py` = provider（仿真 + 渲染 + 战报）
+- `backend/core/data/eworld.json` = 数据集（大陆轮廓、州郡种子、势力、模板词库）
+- `backend/core/json_content.py` 增加 `provider == "eworld"` 分支
+- `backend/core/mode_catalog.py` 增加 `CUSTOM_EWORLD` 条目（名称「电子世界」）
+- 源文件 `modes-ours/eworld.json`；部署副本 `backend/core/modes/builtin/custom_eworld.json`（**不跟踪，需手动同步**）
+- 测试 `backend/tests/test_eworld.py`：几何无缝、365 天不崩不复原、统一与复国、像素级可复现、
+  战报与地图严格对应、标记落点、四色纯净、模式 JSON 与 LOGICAL_BLOCKS 一致 → **全量 357 passed**（基线 341）
+- 服务重启用 **user scope**：`systemctl --user restart openclaw-inksight.service`（系统 scope 无此 unit）
+
+**第二轮完善（同日追加）**
+
+- **等比缩放**：原来横竖各自拉伸（sx=宽比、sy=高比），换屏就变形。现在统一比例 `u=min(tw/vw, th/vh)` 居中留边，400x300 仍像素级不变
+- **短屏紧凑版**：屏高 < 200（如 296x128）时整屏塞不下图例与战报，只画地图本体（顶栏/州郡名/战报全略，易主标记保留），不再挤成一团
+- **图例纹样拉开差距**：斜纹密度 4px、网点 7px 且点是 2x2 方点；12x12 色块。之前斜纹与网点在小色块上几乎分不出来（视觉模型两次都认错）
+- **战报折行**：报告区 3 行、按「、」断行，折回去一字不差（战报与地图的对应关系不能丢字）
+- **位图字体档位**：PCF 只有 12/13/14/16，缩放时优先贴住档位，超出档位才退回 TTF
+- 测试从 16 条加到 20 条（等比缩放、短屏紧凑版、折行不丢字、设计尺寸稳定性），**全量 361 passed**（基线 341）
+
+**未做（等冰河大人定）**
+
+- **设备 `configs.modes` 轮转列表没动**（规矩：轮转他自己操作）。模式已在 `/api/modes` 里可选用。
+- **设备请求的 `colors` 值没查到**（渲染日志不记该字段，journal 无记录）。模式按四色设计；若某设备只发 colors=2，四色会被压成黑白，需另做单色版式
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+---
+
+## CUSTOM_DAYOVERVIEW「每日总览」（每日推荐 + 天气看板 + 老黄历 三合一）
+
+**目标**：把 DAILY / WEATHER / ALMANAC 三个模式压进一屏，**字段一个不丢**。零后端代码改动——`composite` 本就能把多个 provider 合成一张扁平字段表。
+
+### 实现约束（这轮踩到的坑）
+
+- **`composite` 的 `{字段}` 注入只对 `type: "llm"` 生效**，`llm_json` 拿不到前序步骤算出的字段 → 推荐语步骤用 `type:"llm"` + `output_format:"json"` + `output_fields`：既有权威节气/实况温度注入提示词，又保留字段级兜底（`_parse_json_output` 按 `output_fields` 逐字段回退）
+- **`composite` 顶层 `fallback` 是合并基底**：`merged = dict(fallback); merged.update(result)`。任一 provider 整体失败，该来源字段由顶层 fallback 补齐，其余步骤照常产出
+- **`composite` 只捕获** `LLMKeyMissingError / httpx.HTTPError / OSError / TypeError / ValueError / JSONDecodeError`——provider 自己要兜住自己的异常（`weather_forecast` 已内部兜住并返回自身 fallback）
+- **`text` 块推进量 = (行数-1)×line_height + 字形 bbox 高**，不是 line_height×行数。给每块显式写 `line_height`（字号+3）能省出整行的空间
+- **`forecast_cards` 没有开关能藏 date 行**，date 一定会画；卡片总高 ≈ day+date+icon+desc+temp+间距
+- **`two_column` 右栏宽度按 `screen_w - right_x` 算**（不是父容器宽度）→ 顶层两栏 + 顶层整幅行混排安全，**嵌套两栏会算错**
+- `_generate_composite_content` 里 `{context}` 保留不替换（后续由 `_build_context_str` 处理），其余占位符空值会被替换成空串
+
+### 版式（400×300，body 36→276）
+
+| 行 | 内容 |
+|---|---|
+| A（两栏） | 左＝大日期 + 年月星期 + 年度进度条 + 节气农历；右＝当前温度 + 天气图标 + 城市 + 高低温·湿度·风 + 日出日落 |
+| B（整幅三行） | 宜/忌 ｜ 神位 + 星宿 ｜ 岁煞 + 冲 + 时令 |
+| C（两栏） | 左＝语录 + 作者；右＝书名 + 作者 + 简介 + 贴士 |
+| D（整幅） | 未来四天预报卡（图标 + 日期 + 天气 + 温度） |
+| E（整幅） | 穿衣建议 · 养生提示 |
+
+日期栏只去重不删字段：年度进度、农历、节气、星期全在。黄历的岁煞/冲是**新增**（原 ALMANAC 版面没展示）。
+
+### 尺寸适配（实测墨迹 vs 页脚线）
+
+- 400×300：常规内容余量 12px、**真实内容余量 18px**、极限内容余量 7px
+- 296×128：余量 9px
+- 648×480：走基线版式自动缩放（1.62×），余量 87px——**没有手写 648 覆盖**：648×480 与 400×300 同比例，基线缩放正好；早先手写的大字号版本实测溢出 167px，已撤掉
+
+### 测试
+
+`backend/tests/test_dayoverview.py` 13 条：JSON 合法 + 源部署一致 + 目录注册、四来源合成、LLM 步骤必须是 `type=llm`、顶层 fallback 覆盖全部 33 字段、版式真的引用了每个字段（别名：`today_range` 已含 today_low/today_high，`lunar_date_display` 即农历）、模板占位符不得指向不存在的字段、天气失败不影响其余步骤、LLM 失败不影响天气黄历、三尺寸内容不压页脚 → **全量 374 passed**（基线 361）
+
+服务重启后：`/api/modes` 出现 `CUSTOM_DAYOVERVIEW`（source=builtin_json），`/api/modes/catalog` 分类 custom、名称「每日总览」、中英 i18n 齐全；真实预览 API 三个尺寸全部 HTTP 200。
+
+### 发现（既有问题，非本次引入）
+
+- **服务端 `TIANAPI_KEY` 环境变量未配置** → 黄历 API 取不到真数据，内置 ALMANAC 模式同样只显示兜底文案（同一 provider、同一路径）。合并模式照常降级不空屏。要真黄历需在 unit 里加 `EnvironmentFile` 配 `TIANAPI_KEY`
+- 设备请求的 `colors` 值仍未知；本模式内容为单色（实测 2–3 色），2 色屏也能显示
+
+### 未做
+
+- **设备 `configs.modes` 轮转列表没动**（规矩：轮转冰河大人自己操作）
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+---
+
+## v2 改版（2026-10-28 下午，冰河大人批准后实施）
+
+**目标**：删荐书、删命理字段（宜/忌/神位/二十八宿/冲煞/岁煞），保留农历 + 干支纪年/生肖 + 节气 + 节气倒数，新增「今日历史」，节气改本地计算。
+
+### 代码改动（唯一一处后端代码）
+
+- `backend/core/json_content.py`：新增 `_local_almanac_fields()` + provider `almanac_local`
+  - 农历月日来自 `zhdate.ZhDate.chinese()`（拆 `二零二六年九月十九 丙午年 (马年)` → `九月十九` / `丙午马年`）
+  - 当前节气与下一节气来自 `core/config.py` 的 `SOLAR_TERMS`（2024–2030 表），按日期差算倒数
+  - 完全离线，摘除本模式对 `tianapi`/`almanac_api` 的依赖；其它内置模式不受影响（没动 `daily_meta`/`almanac_api`）
+- `backend/core/mode_catalog.py`：目录 tip 改写
+- `backend/tests/test_dayoverview.py`：字段/断言重写，13 → 15 条
+
+### 版式（400×300）
+
+A 两栏（日期+进度 / 天气实况）→ 历法带「农历九月十九 · 丙午马年 · 霜降 · 距立冬10天」→ 语录 17px + 作者 → 今日历史（年+标题 / 描述）→ 四天预报卡（去掉图标下重复描述）→ 底部「穿衣建议 · 贴士」
+
+### 今日历史
+
+复用**同一个** LLM 步骤多出 3 个字段（`hist_year`/`hist_title`/`hist_desc`），不额外调模型。prompt 要求「与今天同月同日真实发生过的历史事件，年份必须准确」。2026-10-28 实测 LLM 给出「1922 墨索里尼进军罗马」——事实正确。温度 0.7、max_tokens 8192（默认 4096 会被 MiniMax 推理吃光）。
+
+### 实测
+
+- 预览 API 走通，LLM ok、内容字段齐（`_llm_used/_llm_ok` 均 true）
+- 三尺寸墨迹 vs 页脚：400×300 真实内容余量 33px / 极限内容 12px；296×128 余量 18px；648×480 余量 92px
+- 无文本截断（逐块 wrap 检测）
+- 全量后端测试 **376 passed**（基线 374）
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+### v3 版式重排（2026-10-28 14:50）
+
+冰河大人看真机图批「挤、底部空一块、字号有大有小」。用渲染器逐块量了旧版：正文结束在 y=242、页脚顶 276 → **底部空 34px**；字号 9/10/11/12/13/17/28/32 **8 档**。
+
+改法：
+
+1. **字号收到 4 档**：大数字（日期 32 / 温度 30）、引文（语录 16）、正文（历法带 / 历史标题 / 历史描述 / 天气描述 13）、注释（作者 / 温湿风 / 日出日落 / 建议贴士 / 预报卡 11）
+2. **段落间加 spacer**（6 / 6 / 8 / 6 / 4px），正文从 242 铺到 267，底部余量 9px
+3. **预报卡去掉日期行**：`core/json_renderer.py` 新增 `show_date` 开关（默认 True，其它模式不受影响），卡片内 day/temp 统一 11px、图标 20px
+4. 语录 prompt 从 20 字收紧到 18 字，保证 16px 单行不折行（max_lines=1）
+
+三尺寸实测：400×300 余量 8px、296×128 13px、648×480 60px；无截断；全量 **376 passed**。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 城市可配置（2026-10-28 15:05）
+
+**根因**：WebApp 配置页 `app/config/page.tsx` 的 `requiresParamModal()` 是硬编码白名单，只有名单里的模式点「预览 / 加入轮播」才弹参数弹窗；WEATHER 在名单里所以能选城市，`CUSTOM_DAYOVERVIEW` 不在，所以不能。同文件另有一个「模式设置」弹窗也带城市 LocationPicker，但 `setSettingsMode` 全文只被传 `null` → **死代码，无入口**。
+
+**改法（数据驱动，不再加白名单）**：
+
+1. 模式 JSON 的 `settings_schema` 增加 `{"key": "city", "label": "城市", "type": "location", "description": "留空则使用设备位置"}` → 模式自声明「需要用户指定位置」
+2. `app/config/page.tsx`：`modeNeedsLocation(modeId)`（查 `modeSchemaMap` 的 `type==="location"`）→ `requiresParamModal` 加这一条；`openParamModal` 对这类模式复用同一个城市弹窗；弹窗标题「城市设置」、按钮「跟随设备位置 / 保存并预览」；选「跟随设备位置」= 清掉该模式的 city 覆盖（`clearSavedOverride`），回到设备位置
+3. `app/preview/page.tsx`：同样按 schema 判定，预览时也提供城市入口
+4. **后端零改动**：`core/pipeline.py::get_effective_mode_config` 本来就把 `mode_overrides[MODE].city/latitude/longitude` 合并进 config，`extract_location_settings` 照单取用
+
+**验证**：catalog 下发 location 条目 ✓；`mode_overrides[CUSTOM_DAYOVERVIEW]={city:洛阳,lat/lon}` → 合并后 city=洛阳，内容 city=洛阳、天气取洛阳（18° 阴）✓；webapp `npm run build` 通过 + 服务重启；后端 376 passed。
+
+**未验证**：浏览器点击路径（browser 控制服务起不来，18800 端口被占）。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+
+### 模式自带城市:通用配方(2026-10-29 补)
+
+三个模式已经接上城市,配方完全一样,以后新模式要城市照抄:
+
+| 模式 | 槽位 | 用途 |
+|---|---|---|
+| `CUSTOM_DAYOVERVIEW` | 1 个(`city`) | 预报天气 |
+| `CUSTOM_SUN_MOON` | 1 个(`city`) | 日出日落 + 月相 |
+| `CUSTOM_POETRY_DAY` | 2 个(`poetry_home` / `poetry_away`) | 两地天气 |
+
+五步:
+
+1. **模式 JSON** 加槽位:
+   ```jsonc
+   "settings_schema": [
+     { "key": "city", "label": "城市", "type": "location", "description": "留空则使用设备位置" }
+   ]
+   ```
+   多槽位用带语义的键(`poetry_home` / `poetry_away`),别都叫 `city`。
+2. **前端不用改**:配置页 `modeNeedsLocation()` 查 schema 里的 `type==="location"`,
+   预览页 `modeLocationItems()` 同理,两个页面会自动出现城市选择器。
+   前提:`backend/core/modes/schema/mode_schema.json` 的 type 枚举里有 `location`。
+3. **值存在哪**:扁平存 `mode_overrides.<MODE_ID>` 顶层(**不是** `mode_settings`),
+   字段 `city` / `latitude` / `longitude` / `timezone` / `admin1` / `country`。
+   `get_effective_mode_config` 会提升到 config 顶层,provider 读 `config["city"]` 即可。
+4. **provider 解析地点**:优先用模式覆盖,没有就跟随设备全局位置
+   (`config["city"]` / `config["latitude"]` / `config["longitude"]`)。
+   **地点当一个整体解析** —— 城市名和坐标必须同源,不能一半来自覆盖、一半来自全局。
+5. **没有覆盖 = 跟随设备位置**:用户在配置页选「跟随设备位置」= 清掉该模式的 city 覆盖
+   (`clearSavedOverride`),回到设备全局位置。不要给模式塞默认城市。
+
+四个坑(2026-10-29 踩的):
+
+- **预览只换全局 city,不换坐标**:`api/shared.py` 里 `preview_city_override` 只改 `config["city"]`,
+  坐标还是设备原来的 → 会算出「杭州名字 + 郑州日出」。
+  解法:provider 里城市名与坐标差超过 1° 就以城市名为准(同城小偏差保留设备精确坐标)。
+- **别用设备时区算「今天是哪天」**:跨时区城市会差一天,「今天」和昼夜判定都会错。
+  Open-Meteo 用 `timezone=auto`,接口直接回当地日期、当地时刻和 `utc_offset_seconds`。
+- **缓存要按地点分桶**:原来 `runtime_cache/sun_moon.json` 的每日数据和 LLM 文案都只有日期维度,
+  两座城市会互相覆盖。改成 `locations[城市|经纬]` 分桶;旧结构(写死郑州)自动迁移到郑州桶,不丢已生成文案。
+- **模式文件里不许再写死城市**:description / fallback / 页脚 attribution 里的城市名都去掉,
+  页脚改成 `{city} {date_cn}`,由内容里的 `city` 字段填。
+
+验证套路:
+
+- 专项测试:未覆盖时跟随设备、选了城市用对应经纬时区、缓存分桶隔离、源文件与部署副本一致。
+- 真机链路:`curl -H "X-Device-Token: $TOKEN" "http://127.0.0.1:18834/api/preview?persona=CUSTOM_SUN_MOON&mac=...&city_override=上海&mode_override={...}"` 出 PNG,
+  再查 `content_history` 表的 `content` 字段核对城市、日出日落、文案。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+---
+
+## 历史回顾页 `/ink/gallery`（2026-10-29）
+
+**决策**：自建模式的每日产出（一张图 / 一段话）**永久保留，不做备份**。
+只覆盖自建的 9 个模式，不动通用内置模式和独立 App。
+
+### 收录范围与形态
+
+| 形态 | 模式 | 数据来源 |
+|------|------|----------|
+| `grid` | 天工阁、丹青谱、海错图、大宋梦影、躺平巴拉 | `runtime_cache/<mode>/state.json` |
+| `text` | 日痕、草地铺道蚁 | 同上 |
+| `wide` | 电子世界、汴京梦华 | 按日期现算，不落盘 |
+
+### 关键实现要点
+
+- **不新建数据库表**：画廊直接读各模式已有的 `state.json`（本来就是各模式的账本）。
+- **图片清理逻辑取消**：5 个生图模式原本 `_cleanup_art` 只留 2 天（躺平巴拉、大宋梦影）
+  或 7 天（天工阁、丹青谱、海错图），已全部去掉，改为永久保留。
+  体积参考：单张 3～94KB，5 个模式全留一年约 90MB。
+- **旧记录缺 `art_url` 时按命名规则找回**：`obj_{YYYYMMDD}_{NNN}.png` /
+  `art_…` / `beast_…` / `dream_{YYYYMMDD}.png`。
+  ⚠️ 索引是**三位补零**（`_001`），补零不对就找不回来。
+- **grid 形态只收还留着图的日子**，图没了那天不占位（不留空格子）。
+  text 形态不看有没有图。
+- **webapp 够不着后端 `/static/`**（nginx 只有 `/ink/api/*` 直连后端），
+  所以加了 `GET /api/device/{mac}/gallery/image?mode=&day=` 代发图片。
+- **wide 形态按日期现算**，翻过去任何一天都能出，不需要等落盘。
+
+### 接口
+
+- `GET /api/device/{mac}/gallery` → 收录哪些模式（mode_id / name / form）
+- `GET /api/device/{mac}/gallery?mode=<MODE_ID>` → 该模式条目
+- `GET /api/device/{mac}/gallery?mode=<MODE_ID>&day=YYYY-MM-DD` → wide 形态现算那一天
+- `GET /api/device/{mac}/gallery/image?mode=<MODE_ID>&day=YYYY-MM-DD` → PNG
+
+鉴权统一走 `ensure_web_or_device_access`（设备 token 或网页 session 都行）。
+
+### 前端
+
+- 独立页面 `webapp/app/gallery/page.tsx` → `/ink/gallery`（basePath=/ink）。
+  不塞进配置页或预览页——回顾是「给这台设备回看」，和「给没设备的人试」是两种心智。
+- 顶部模式 tab 横向排（窄屏横向滚动），首页和导航栏都有「回顾」入口。
+- 移动端（390px）：tab 横向滚动、网格单列、图片不变形、无内容截断。
+
+### 验证
+
+- 专项测试 `backend/tests/test_gallery.py`（24 条）：收录清单、三形态解析、缺图跳过、
+  补零找回、路径越界拒绝、wide 现算与确定性、清理逻辑不得再删图。
+- 全量 `pytest tests/` 528 passed。
+- 真实 HTTP：`http://127.0.0.1:18835/ink` 与 `http://ruohan.site/ink` 均 200，
+  图片接口 200 image/png。
+- 浏览器实拍：走 `/usr/bin/chromium` + CDP 直连 9222 端口截图，
+  绕开 OpenClaw 浏览器工具的 18800 端口冲突（被 stamp-collection 占用，不要杀它）。
+
 <!-- project: path:/home/open/.openclaw/workspace -->
