@@ -20,6 +20,7 @@ from api.shared import (
     limiter,
     log_render_stats,
     logger,
+    night_refresh_minutes_for_config,
     reconnect_threshold_seconds,
     resolve_preview_voltage,
     resolve_refresh_minutes_for_device_state,
@@ -49,6 +50,12 @@ def _sse_event(event: str, payload: dict) -> str:
 
 
 def _configured_refresh_minutes(config: Optional[dict]) -> int:
+    # 夜间窗口内改用夜间间隔（设备每 5 秒轮询一次 state，所以 5 秒内生效）。
+    # 这个检查必须放在钳位之前 —— 否则 refresh_interval 越界时会在钳位分支提前 return，
+    # 夜间值就永远不会生效。
+    night_minutes = night_refresh_minutes_for_config(config)
+    if night_minutes > 0:
+        return max(10, min(1440, night_minutes))
     refresh_minutes_raw = config.get("refresh_interval") if config else DEFAULT_REFRESH_INTERVAL
     try:
         refresh_minutes = int(refresh_minutes_raw)
@@ -196,6 +203,19 @@ async def render(
             )
             img = img.resize((params.w, params.h), Image.NEAREST)
 
+        # 真实下发：把设备实际拿到的整屏图存档（画廊主图用）
+        if mac:
+            try:
+                from core.gallery import state_name as gallery_state_name
+                from core.screen_archive import save_screen
+
+                state_key = gallery_state_name(resolved_persona)
+                if state_key:
+                    day = datetime.now().strftime("%Y-%m-%d")
+                    save_screen(state_key, day, img)
+            except Exception as exc:  # 存档失败不该影响下发
+                logger.warning("[RENDER] 整屏存档失败: %s", exc)
+
         if params.colors >= 3:
             out_bytes = image_to_raw_2bpp(img)
             out_media = "application/octet-stream"
@@ -311,6 +331,7 @@ async def preview(
     h: int = Query(default=SCREEN_HEIGHT, ge=100, le=1200),
     no_cache: Optional[int] = Query(default=None),
     intent: Optional[int] = Query(default=None),
+    day: Optional[str] = Query(default=None, description="指定渲染某一天（历史回填用），YYYY-MM-DD"),
     colors: int = Query(default=2, ge=2, le=4),
     ui_language: Optional[str] = Query(default=None, description="Preview only: zh|en, overrides device mode_language"),
     x_device_token: Optional[str] = Header(default=None),
@@ -373,6 +394,11 @@ async def preview(
             intent_only=(intent == 1),
             colors=colors,
             album_bucket=album_bucket,
+            day_override=day,
+            # 画廊收录的模式靠预览页生成内容（它们多数不在设备轮转里），
+            # 这里出图即存档，回顾页才会自己长出来。
+            # mode_override 是用户临时改版式，不算正式画面；day_override 是往期，不归这里管。
+            archive_screen=(parsed_mode_override is None and day is None),
         )
         if intent == 1:
             from fastapi.responses import JSONResponse
@@ -522,6 +548,8 @@ async def preview_stream(
                 current_user_id=current_user_id,
                 colors=colors,
                 album_bucket=album_bucket,
+                # 同上：预览出的正式画面存进画廊。
+                archive_screen=(parsed_mode_override is None),
             )
             # 如果 API key 无效，返回错误事件
             if api_key_invalid:
