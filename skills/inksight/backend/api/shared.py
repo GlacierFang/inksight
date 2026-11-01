@@ -338,6 +338,8 @@ async def build_image(
     intent_only: bool = False,
     colors: int = 2,
     album_bucket: str = "",
+    day_override: Optional[str] = None,
+    archive_screen: bool = False,
 ):
     from core.mode_registry import get_registry
 
@@ -510,6 +512,10 @@ async def build_image(
             json.dumps(preview_mode_override, sort_keys=True).encode()
         ).hexdigest()[:12]
 
+    # 历史日不走预览缓存：缓存键里没有日期，拿到的可能是别的日期的图
+    if day_override:
+        skip_cache = True
+
     if not mac and is_mode_cacheable and not skip_cache:
         # This is a preview request without device mac - use preview cache
         preview_cache_key = content_cache._get_preview_cache_key(persona, screen_w, screen_h, preview_city_override, mode_override_hash, preview_ui_language)
@@ -559,11 +565,18 @@ async def build_image(
 
     if not cache_hit:
         effective_cfg = get_effective_mode_config(config, persona)
-        location_args = extract_location_settings(effective_cfg, fallback_city=DEFAULT_CITY)
-        date_ctx, weather = await asyncio.gather(
-            get_date_context(),
-            get_weather(**location_args),
-        )
+        if day_override:
+            # 历史日：日期取指定那天，天气取不到就留空（不编）
+            from core.history_day import date_ctx_for
+
+            date_ctx = date_ctx_for(day_override)
+            weather = {"temp": 0, "weather_code": -1, "weather_str": ""}
+        else:
+            location_args = extract_location_settings(effective_cfg, fallback_city=DEFAULT_CITY)
+            date_ctx, weather = await asyncio.gather(
+                get_date_context(),
+                get_weather(**location_args),
+            )
         img, content_data = await generate_and_render(
             persona,
             config,
@@ -575,6 +588,7 @@ async def build_image(
             mac=mac or "",
             album_bucket=album_bucket,
             colors=colors,
+            archive_screen=archive_screen,
         )
         if isinstance(content_data, dict):
             logger.debug(
@@ -670,7 +684,70 @@ async def resolve_preview_voltage(v: Optional[float], mac: Optional[str]) -> flo
     return 3.3
 
 
-def resolve_refresh_minutes_for_device_state(config: Optional[dict], state: Optional[dict]) -> int:
+def _local_hour_for_config(config: Optional[dict], now: Optional[datetime] = None) -> int:
+    """按配置里的时区取当前小时。
+
+    设备配置带时区（我们的是 Asia/Shanghai），服务器本身也是东八区，
+    但走配置时区更保险 —— 设备换城市时不用改服务器。
+    """
+    moment = now or datetime.now()
+    tz_name = str((config or {}).get("timezone") or "").strip()
+    if tz_name:
+        try:
+            from zoneinfo import ZoneInfo
+
+            return moment.astimezone(ZoneInfo(tz_name)).hour
+        except Exception:
+            logger.warning("[NIGHT] Invalid timezone %s, falling back to server time", tz_name)
+    return moment.hour
+
+
+def night_refresh_minutes_for_config(
+    config: Optional[dict], *, now: Optional[datetime] = None
+) -> int:
+    """夜间窗口内该用的刷新间隔；不在夜间、或没启用夜间睡眠，返回 0。
+
+    夜间睡眠三件套（都在 configs 表里）：
+      night_refresh_interval = 0  -> 没启用，完全不影响现有行为
+      night_start_hour / night_end_hour -> 夜间窗口，支持跨午夜（23:00 → 06:00）
+
+    为什么要有这个：墨水屏不是耗电，是耗刷新次数。夜间没人看，
+    把间隔拉长，一晚上 18 次刷新降到 1 次，省的是面板寿命。
+    """
+    if not config:
+        return 0
+    try:
+        interval = int(config.get("night_refresh_interval") or 0)
+    except (TypeError, ValueError):
+        return 0
+    if interval <= 0:
+        return 0
+    try:
+        start_raw = config.get("night_start_hour")
+        end_raw = config.get("night_end_hour")
+        start = int(0 if start_raw is None else start_raw)
+        end = int(6 if end_raw is None else end_raw)
+    except (TypeError, ValueError):
+        return 0
+    start = max(0, min(23, start))
+    end = max(0, min(24, end))
+    if start == end:
+        return 0
+    hour = _local_hour_for_config(config, now)
+    if start < end:
+        in_window = start <= hour < end
+    else:
+        # 跨午夜，例如 23:00 → 06:00
+        in_window = hour >= start or hour < end
+    return interval if in_window else 0
+
+
+def resolve_refresh_minutes_for_device_state(
+    config: Optional[dict],
+    state: Optional[dict],
+    *,
+    now: Optional[datetime] = None,
+) -> int:
     refresh_minutes_raw = config.get("refresh_interval") if config else DEFAULT_REFRESH_INTERVAL
     try:
         refresh_minutes = int(refresh_minutes_raw)
@@ -686,6 +763,11 @@ def resolve_refresh_minutes_for_device_state(config: Optional[dict], state: Opti
         expected_refresh = 0
     if expected_refresh > 0:
         refresh_minutes = expected_refresh
+    # 夜间睡眠压过一切：设备自己上报的 expected_refresh_min 也得让路，
+    # 否则服务器说了不算（设备上报值优先级更高）。
+    night_minutes = night_refresh_minutes_for_config(config, now=now)
+    if night_minutes > 0:
+        refresh_minutes = night_minutes
     return refresh_minutes
 
 
