@@ -177,6 +177,7 @@ core/content.py 两处（本机已改 + 已验证，备份 core/content.py.bak.2
 
 - **systemd user scope**：~/.config/systemd/user/openclaw-inksight.service → 127.0.0.1:18834，Type=simple，无 gunicorn/--reload
 - **systemd user scope**：~/.config/systemd/user/openclaw-inksight-web.service → 127.0.0.1:18835（npm run start）
+- **改 webapp/ 源码后必须**：`cd skills/inksight/webapp && npm run build && systemctl --user restart openclaw-inksight-web.service`。`next start` 只服务 `.next/` 预构建产物，不看源码；`webapp/` 在 .gitignore 里（部署副本目录），改源码不触发任何钩子，production 模式也没有 watcher —— 漏了这步 = 前端改动根本没上线（2026-11-01 夜间睡眠入口不显示的根因）。自检：`stat -c %y .next/BUILD_ID` 要晚于源码 mtime
 - **端口登记**：tools/port-registry/ports.json + services.json → 18834 inksight / 18835 inksight-web（pr audit 0 错 1 警，警是 sanxia 老问题）
 - **后端 .env**：skills/inksight/backend/.env（600），含 ADMIN_TOKEN / ENCRYPTION_KEY / INKSIGHT_ALLOWED_HOSTS / INKSIGHT_PUBLIC_API_BASE=/ink/api / INKSIGHT_FIRMWARE_DIR
 - **nginx**：/etc/nginx/sites-enabled/openclaw 加 3 个 location（`= /ink` 301、`/ink/api/` → 18834、`/ink/` → 18835）
