@@ -99,14 +99,10 @@ def test_scene_hint_varies_by_day():
 # ── 调色 ────────────────────────────────────────────────────────────────
 
 
-def test_grade_night_darkens():
-    from PIL import Image
 
-    from core.xiaojing import grade_for_phase
 
-    src = Image.new("RGB", (16, 16), (120, 130, 150))
-    night = grade_for_phase(src, "night")
-    assert max(night.getpixel((0, 0))) < 60
+
+
 
 
 def test_grade_dusk_keeps_red():
@@ -204,3 +200,51 @@ async def test_build_content_history_does_not_generate(monkeypatch, tmp_path):
         date_ctx={"year": 2026, "month": 10, "day": 1},
     )
     assert content["has_image"] == "no"
+
+def test_style_prompt_is_short():
+    """画风段必须短。写长了模型会僵住，出图变成照条文填空。"""
+    from core.xiaojing import _STYLE_PROMPT
+
+    assert len(_STYLE_PROMPT) <= 60, f"画风段太长：{len(_STYLE_PROMPT)} 字"
+
+
+def test_night_prompt_has_no_negative_list():
+    """夜不要写否定清单 —— 第一版的红落日就是一堆 NO sun 反招来的。"""
+    from core.xiaojing import _PHASE_BACKGROUND, _PHASE_PROMPT
+
+    for text in (_PHASE_PROMPT['night'], _PHASE_BACKGROUND['night']):
+        assert 'NO ' not in text
+        assert '不要' not in text
+
+
+def test_night_background_is_stars():
+    from core.xiaojing import _PHASE_BACKGROUND
+
+    assert '星' in _PHASE_BACKGROUND['night']
+    assert '太阳' not in _PHASE_BACKGROUND['night']
+
+
+def test_night_grading_is_mild_not_rescue():
+    """夜只做轻微调整 —— 调色不负责把黑救回来。"""
+    from PIL import Image
+
+    from core.xiaojing import grade_for_phase
+
+    src = Image.new('RGB', (16, 16), (120, 130, 150))
+    night = grade_for_phase(src, 'night')
+    r, g, b = night.getpixel((0, 0))
+    assert 90 < r < 160          # 只是微调，没有压成死黑
+    assert abs(r - b) < 40       # 也只是微冷，不是滤镜
+
+
+def test_night_keeps_detail():
+    """夜不能把画面调平 —— 明暗层次必须还在。"""
+    from PIL import Image
+
+    from core.xiaojing import grade_for_phase
+
+    src = Image.new('RGB', (32, 16), (30, 30, 30))
+    src.paste(Image.new('RGB', (32, 16), (180, 180, 180)), (0, 8))
+    night = grade_for_phase(src, 'night')
+    assert night.getpixel((4, 12))[0] - night.getpixel((4, 4))[0] > 100
+
