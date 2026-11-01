@@ -217,6 +217,12 @@ BUILTIN_CATALOG: list[CatalogItem] = [
         en=CatalogText(name="Grass Ant", tip="A garden ant that rolls a die to decide its day"),
     ),
     CatalogItem(
+        mode_id="CUSTOM_XIAOJING",
+        category="custom",
+        zh=CatalogText(name="小景", tip="每天画一小片世界，跟着此刻的光线换色"),
+        en=CatalogText(name="Xiaojing", tip="A little world painted daily, changing colour with the light"),
+    ),
+    CatalogItem(
         mode_id="CUSTOM_TANGPING",
         category="custom",
         zh=CatalogText(name="躺平巴拉", tip="躺平巴拉今日梦境，一张四色套色版画"),

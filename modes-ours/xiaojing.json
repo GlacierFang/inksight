@@ -1,0 +1,172 @@
+{
+  "mode_id": "CUSTOM_XIAOJING",
+  "display_name": "小景",
+  "icon": "art",
+  "cacheable": false,
+  "description": "每天画一小片世界，跟着此刻的光线换色。晨、昼、暮、夜各是一张。",
+  "content": {
+    "type": "computed",
+    "provider": "xiaojing",
+    "fallback": {
+      "art_url": "",
+      "has_image": "no",
+      "phase_label": ""
+    }
+  },
+  "layout": {
+    "status_bar": {
+      "line_width": 1,
+      "dashed": true
+    },
+    "body_align": "top",
+    "body": [
+      {
+        "type": "conditional",
+        "field": "has_image",
+        "conditions": [
+          {
+            "op": "eq",
+            "value": "yes",
+            "children": [
+              {
+                "type": "image",
+                "field": "art_url",
+                "x": 0,
+                "width": 400,
+                "height": 264,
+                "fit": "cover",
+                "align_x": "center",
+                "align_y": "center",
+                "margin_bottom": 0
+              }
+            ]
+          },
+          {
+            "op": "eq",
+            "value": "no",
+            "children": [
+              {
+                "type": "spacer",
+                "height_px": 100
+              },
+              {
+                "type": "text",
+                "template": "今日无景",
+                "align": "center",
+                "font": "noto_serif_light",
+                "font_size": 16,
+                "max_lines": 1,
+                "margin_bottom": 0
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "footer": {
+      "hidden": true
+    }
+  },
+  "layout_overrides": {
+    "296x128": {
+      "body_align": "top",
+      "body": [
+        {
+          "type": "conditional",
+          "field": "has_image",
+          "conditions": [
+            {
+              "op": "eq",
+              "value": "yes",
+              "children": [
+                {
+                  "type": "image",
+                  "field": "art_url",
+                  "x": 0,
+                  "width": 322,
+                  "height": 99,
+                  "fit": "cover",
+                  "align_x": "center",
+                  "align_y": "center",
+                  "margin_bottom": 0
+                }
+              ]
+            },
+            {
+              "op": "eq",
+              "value": "no",
+              "children": [
+                {
+                  "type": "spacer",
+                  "height_px": 30
+                },
+                {
+                  "type": "text",
+                  "template": "今日无景",
+                  "align": "center",
+                  "font": "noto_serif_light",
+                  "font_size": 11,
+                  "max_lines": 1,
+                  "margin_bottom": 0
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "footer": {
+        "hidden": true
+      }
+    },
+    "648x480": {
+      "body_align": "top",
+      "body": [
+        {
+          "type": "conditional",
+          "field": "has_image",
+          "conditions": [
+            {
+              "op": "eq",
+              "value": "yes",
+              "children": [
+                {
+                  "type": "image",
+                  "field": "art_url",
+                  "x": 0,
+                  "width": 400,
+                  "height": 261,
+                  "fit": "cover",
+                  "align_x": "center",
+                  "align_y": "center",
+                  "margin_bottom": 0
+                }
+              ]
+            },
+            {
+              "op": "eq",
+              "value": "no",
+              "children": [
+                {
+                  "type": "spacer",
+                  "height_px": 180
+                },
+                {
+                  "type": "text",
+                  "template": "今日无景",
+                  "align": "center",
+                  "font": "noto_serif_light",
+                  "font_size": 26,
+                  "max_lines": 1,
+                  "margin_bottom": 0
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "footer": {
+        "hidden": true
+      }
+    }
+  }
+}
