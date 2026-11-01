@@ -964,6 +964,9 @@ async def _generate_computed_content(mode_def: dict, content_cfg: dict, fallback
     if provider == "eworld":
         from .eworld import build_eworld_content
         return await build_eworld_content(fallback, **kwargs)
+    if provider == "xiaojing":
+        from .xiaojing import build_xiaojing_content
+        return await build_xiaojing_content(fallback, **kwargs)
     if provider == "countdown":
         from .content import generate_countdown_content
         config = content_cfg.get("config", {})
