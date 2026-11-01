@@ -52,59 +52,70 @@ LOCK_STALE_SEC = 900
 PHASES = ("dawn", "day", "dusk", "night")
 PHASE_LABEL = {"dawn": "晨", "day": "昼", "dusk": "暮", "night": "夜"}
 
-# ── 时段光线（程序定，不由模型定）──────────────────────────────────────────
+# ── 时段（程序定，不由模型定）────────────────────────────────────────────
+# 只做正面描述，不写「不要日落」这类否定清单。
+# 否定约束越多模型越僵，还容易把不该出现的元素招来 ——
+# 第一版画出一轮血红落日，就是一堆 NO sun / NO sunset 反招的。
 _PHASE_PROMPT = {
-    "dawn": (
-        "early morning, the first pale light of sunrise, the sun low and just clearing the horizon, "
-        "soft golden light lying on the land, low mist, everything quiet and fresh"
-    ),
-    "day": (
-        "high midday, bright overhead sunlight, crisp clear light, sharp short shadows, "
-        "a vivid clear day, the sun high in the sky"
-    ),
-    "dusk": (
-        "the last light of sunset, the sun very low and touching the horizon, "
-        "long stretched shadows, a burning orange-red sky, the end of the day"
-    ),
-    "night": (
-        "the middle of the night, deep darkness, NO sunset, NO sunrise, no orange glow on the horizon, "
-        "a moon high in the sky, stars overhead, the land lit only by cold moonlight, quiet and still"
-    ),
+    "dawn": "清晨，第一缕日光刚落在山脊上",
+    "day": "正午，太阳高悬，光线明亮",
+    "dusk": "黄昏，夕阳贴着地平线，天边烧成橘红",
+    "night": "夜，天空是一张空白的纸，一轮白月亮挂在天上，星星是细密的墨点，地面和树是浓墨的剪影",
 }
 
-# ── 风格规则（固定的部分）────────────────────────────────────────────────
-_STYLE_PROMPT = (
-    "cel-shaded flat-colour cartoon illustration in pop-art comic style, "
-    "bold clean black outlines, flat colour blocks, no gradients, "
-    "ben-day halftone dots, radiating sunburst rays, vintage screen-print texture, "
-    "a restricted palette of only four inks: solid black, paper white, warm yellow and vermilion red, "
-    "a single small solitary figure, tiny in the frame, dwarfed by the surrounding world, "
-    "wide landscape, atmospheric depth, strong readable silhouette, "
-    "absolutely no text, no letters, no numbers, no logo, no watermark, no speech bubble, no caption, no border"
+# ── 风格段（固定，刻意写短）────────────────────────────────────────────
+# 对齐 little-prince 的「水彩，平涂，吉卜力风格」：画风一句话就够。
+# 写长了模型会僵住，出图变成照着条文填空 —— 原来的 400 词约束块就是这么废的。
+_STYLE_PROMPT = "赛璐璐平涂，波普网点，丝网印刷质感，人物很小，四周是更大的世界"
+
+_RETRY_PROMPT = " 画面里不要有任何文字。"
+
+# ── 四色盘段（只管四色怎么用，构图交给模型）────────────────────────────
+# 对齐 danqing 的 PALETTE_SPEC 写法。
+_PALETTE_SPEC = (
+    "画面只用四种颜色：纯白纸面底、墨黑 #000000 勾线、金黄 #E8B000 填色、朱红 #C80000 点缀。"
+    "不要出现第五种色相，不要写实材质纹理，不要照片感。"
+    "构图、疏密、留白由你按场景自己定，主体要在画面里站得住，不要缩在边角。"
+    "不要任何文字、印章、题签、标签、水印、边框。"
 )
 
-_RETRY_PROMPT = (
-    " Keep the composition wide and the figure very small. The picture must contain no lettering of any kind."
-)
+# ── 波普背景（按时段）──────────────────────────────────────────────────
+# 放射光线属于「有太阳」的时段；夜里换成满天的星点。
+# 这里也只做正面描述 —— 夜的背景句里根本没提太阳，就不会有太阳。
+_PHASE_BACKGROUND = {
+    "dawn": "背后一片放射状的光线铺满天空",
+    "day": "背后一片放射状的光线铺满天空",
+    "dusk": "背后一片放射状的光线铺满天空",
+    "night": "天空大片留白，只撒着细密的星点",
+}
+
+# ── 时段对四色配重的影响 ───────────────────────────────────────────────
+# 写进提示词，而不是靠后期调色去救 —— 调色救不回一片黑。
+_PHASE_INK_WEIGHT = {
+    "dawn": "金黄占主调，朱红点缀天空与草木。",
+    "day": "金黄与朱红都要亮起来，白色留白要充分。",
+    "dusk": "朱红占主调，金黄过渡，天空要有层次。",
+    "night": "天空保持纸白，星星用极细的墨点表示；月亮是一个留白的白圆盘，外围一圈细墨边；地面、树和人物是浓墨剪影；金黄只用在一两处点缀",
+}
 
 # ── 每天换一个「场景线索」：只给名词，不给构图 ───────────────────────────
 _SCENE_HINTS = (
-    "a wooden footbridge",
-    "a stand of pine trees",
-    "a winding river",
-    "a field of tall grass",
-    "a row of stone steps",
-    "a cliff above the sea",
-    "a misty lake shore",
-    "a snowfield",
-    "a hillside orchard",
-    "a lonely stone lantern",
-    "a wide wheat field",
-    "a mountain shrine",
-    "a sandbar at low water",
-    "a bamboo grove",
-    "a terraced hillside",
-    "a ruined watchtower",
+    "一座木桥",
+    "一片松林",
+    "一条蜿蜒的河",
+    "一片高高的草地",
+    "一排石阶",
+    "海上的悬崖",
+    "起雾的湖岸",
+    "一片雪原",
+    "山坡上的果园",
+    "一座孤零零的石灯笼",
+    "一片开阔的麦田",
+    "山间的小祠",
+    "退潮后的沙洲",
+    "一片竹林",
+    "层层叠叠的梯田",
+    "一座废弃的瞭望塔",
 )
 
 
@@ -306,16 +317,16 @@ def grade_for_phase(img, phase: str):
         r = r.point(_curve(lambda v: v * 1.16 + 20))
         g = g.point(_curve(lambda v: v * 0.82 + 8))
         b = b.point(_curve(lambda v: v * 0.30))
-    else:  # night
-        # 中低调几乎全灭（只剩墨黑），高光（月亮）留白 —— 夜里只该看得见月亮。
-        def _night(v: float) -> float:
-            if v <= 190:
-                return v * 0.18
-            return 34 + (v - 190) * (221.0 / 65.0)
-
-        r = r.point(_curve(_night))
-        g = g.point(_curve(lambda v: _night(v) * 0.96))
-        b = b.point(_curve(_night))
+    elif phase == "night":
+        # 夜只做很轻的一层：稍冷、稍压红。
+        #
+        # 画面本身该由出图负责（四色盘段里已写明「墨色只作线条与剪影，
+        # 不要大面积涂满」），调色不背这个锅 ——
+        # 之前三轮调色都在救一片黑，救不回来，白费。
+        r = r.point(_curve(lambda v: min(255.0, v * 0.99 + 4)))
+        g = g.point(_curve(lambda v: min(255.0, v * 0.99 + 4)))
+        b = b.point(_curve(lambda v: min(255.0, v * 1.01 + 8)))
+        return Image.merge("RGB", (r, g, b))
     return Image.merge("RGB", (r, g, b))
 
 
@@ -366,9 +377,11 @@ async def _generate_art(phase: str, dest: Path, hint: str, **kwargs) -> tuple[bo
     if not key or key.startswith("sk-your-"):
         return False, "没有可用的生图凭证"
 
+    # 四段结构，对齐 little-prince：时段 + 背景 + 场景 + 四色盘 + 风格。
     prompt = (
-        f"{_PHASE_PROMPT[phase]}. {_STYLE_PROMPT}. "
-        f"Today's scene: {hint} — you decide the rest of the picture."
+        f"{_PHASE_PROMPT[phase]}，{_PHASE_BACKGROUND[phase]}。"
+        f"今天的场景是{hint}，画面其余部分由你自己决定。"
+        f"{_PALETTE_SPEC} {_PHASE_INK_WEIGHT[phase]} {_STYLE_PROMPT}。"
     )
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     reasons: list[str] = []
