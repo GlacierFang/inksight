@@ -42,7 +42,7 @@
                 "field": "title",
                 "align": "left",
                 "font": "noto_serif_bold",
-                "font_size": 22,
+                "font_size": 26,
                 "max_lines": 1,
                 "margin_x": 12,
                 "margin_bottom": 8
@@ -52,44 +52,48 @@
                 "field": "l1",
                 "align": "left",
                 "font": "noto_serif_regular",
-                "font_size": 12,
-                "line_height": 19,
+                "font_size": 15,
+                "line_height": 23,
                 "max_lines": 2,
-                "margin_x": 14,
-                "margin_bottom": 0
+                "margin_x": 12,
+                "margin_bottom": 0,
+                "reserve_line_height": true
               },
               {
                 "type": "text",
                 "field": "l2",
                 "align": "left",
                 "font": "noto_serif_regular",
-                "font_size": 12,
-                "line_height": 19,
+                "font_size": 15,
+                "line_height": 23,
                 "max_lines": 2,
-                "margin_x": 14,
-                "margin_bottom": 0
+                "margin_x": 12,
+                "margin_bottom": 0,
+                "reserve_line_height": true
               },
               {
                 "type": "text",
                 "field": "l3",
                 "align": "left",
                 "font": "noto_serif_regular",
-                "font_size": 12,
-                "line_height": 19,
+                "font_size": 15,
+                "line_height": 23,
                 "max_lines": 2,
-                "margin_x": 14,
-                "margin_bottom": 0
+                "margin_x": 12,
+                "margin_bottom": 0,
+                "reserve_line_height": true
               },
               {
                 "type": "text",
                 "field": "l4",
                 "align": "left",
                 "font": "noto_serif_regular",
-                "font_size": 12,
-                "line_height": 19,
+                "font_size": 15,
+                "line_height": 23,
                 "max_lines": 2,
-                "margin_x": 14,
-                "margin_bottom": 0
+                "margin_x": 12,
+                "margin_bottom": 0,
+                "reserve_line_height": true
               },
               {
                 "type": "spacer",
@@ -100,10 +104,11 @@
                 "template": "「{voice}」",
                 "align": "right",
                 "font": "noto_serif_light",
-                "font_size": 13,
+                "font_size": 16,
                 "max_lines": 2,
                 "margin_x": 12,
-                "margin_bottom": 0
+                "margin_bottom": 0,
+                "reserve_line_height": true
               },
               {
                 "type": "spacer",
@@ -114,7 +119,7 @@
                 "field": "state_line",
                 "align": "left",
                 "font": "noto_serif_light",
-                "font_size": 10,
+                "font_size": 12,
                 "max_lines": 1,
                 "margin_x": 12,
                 "margin_bottom": 2
@@ -124,7 +129,7 @@
                 "field": "trip_line",
                 "align": "right",
                 "font": "noto_serif_light",
-                "font_size": 10,
+                "font_size": 12,
                 "max_lines": 1,
                 "margin_x": 12,
                 "margin_bottom": 0
