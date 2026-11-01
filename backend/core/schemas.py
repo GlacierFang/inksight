@@ -54,6 +54,15 @@ class ConfigRequest(BaseModel):
     refreshInterval: int = Field(
         default=60, ge=10, le=1440, description="刷新间隔(分钟), 10~1440"
     )
+    nightRefreshInterval: int = Field(
+        default=0, ge=0, le=1440, description="夜间刷新间隔(分钟), 0=关闭夜间睡眠"
+    )
+    nightStartHour: int = Field(
+        default=0, ge=0, le=23, description="夜间开始小时(0-23), 本地时区"
+    )
+    nightEndHour: int = Field(
+        default=6, ge=0, le=24, description="夜间结束小时(0-24), 本地时区; 支持跨午夜"
+    )
     language: str = Field(default="zh", description="(deprecated) 语言偏好，已被 modeLanguage 取代")
     modeLanguage: str = Field(default="zh", description="模式内容语言: zh / en")
     contentTone: str = Field(default="neutral", description="调性: positive / neutral / deep / humor")

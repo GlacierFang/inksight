@@ -64,6 +64,9 @@ async def init_db():
                 mode_overrides TEXT DEFAULT '{}',
                 focus_listening INTEGER DEFAULT 0,
                 always_active INTEGER DEFAULT 0,
+                night_refresh_interval INTEGER DEFAULT 0,
+                night_start_hour INTEGER DEFAULT 0,
+                night_end_hour INTEGER DEFAULT 6,
                 is_active INTEGER DEFAULT 1,
                 created_at TEXT NOT NULL
             )
@@ -156,6 +159,9 @@ async def init_db():
             "timezone": "TEXT DEFAULT ''",
             "admin1": "TEXT DEFAULT ''",
             "country": "TEXT DEFAULT ''",
+            "night_refresh_interval": "INTEGER DEFAULT 0",
+            "night_start_hour": "INTEGER DEFAULT 0",
+            "night_end_hour": "INTEGER DEFAULT 6",
         }
         try:
             cursor = await db.execute("PRAGMA table_info(configs)")
@@ -1303,6 +1309,29 @@ async def revoke_device_member(owner_user_id: int, mac: str, target_user_id: int
     return cursor.rowcount > 0
 
 
+def _normalize_night_settings(data: dict) -> tuple[int, int, int]:
+    """把夜间睡眠三件套归一化到合法范围。
+
+    night_refresh_interval = 0 表示不启用夜间睡眠（完全保持原行为）。
+    起止小时用设备配置的时区解释；支持跨午夜（start > end，如 23:00 → 06:00）。
+    """
+    def _int(value, default: int, lo: int, hi: int) -> int:
+        try:
+            v = int(value)
+        except (TypeError, ValueError):
+            return default
+        return max(lo, min(hi, v))
+
+    interval = data.get("nightRefreshInterval", data.get("night_refresh_interval", 0))
+    start = data.get("nightStartHour", data.get("night_start_hour", 0))
+    end = data.get("nightEndHour", data.get("night_end_hour", 6))
+    return (
+        _int(interval, 0, 0, 1440),
+        _int(start, 0, 0, 23),
+        _int(end, 6, 0, 24),
+    )
+
+
 async def save_config(mac: str, data: dict) -> int:
     now = datetime.now().isoformat()
     refresh_strategy = data.get("refreshStrategy", "random")
@@ -1329,6 +1358,7 @@ async def save_config(mac: str, data: dict) -> int:
     mode_overrides_json = json.dumps(
         data.get("modeOverrides", {}) or data.get("mode_overrides", {}), ensure_ascii=False
     )
+    night_interval, night_start, night_end = _normalize_night_settings(data)
     # 注意：API key 不再保存到设备配置中；AI 凭证统一由服务端 .env 托管。
     # 这里依赖 configs 表的默认值将 is_active 设为 1，因此不再显式写入该列，避免列数不匹配。
     cursor = await db.execute(
@@ -1336,8 +1366,9 @@ async def save_config(mac: str, data: dict) -> int:
            (mac, nickname, modes, refresh_strategy, character_tones,
             language, mode_language, content_tone, city, latitude, longitude, timezone, admin1, country,
             refresh_interval, llm_provider, llm_model, image_provider, image_model,
-            countdown_events, time_slot_rules, memo_text, mode_overrides, focus_listening, always_active, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            countdown_events, time_slot_rules, memo_text, mode_overrides, focus_listening, always_active,
+            night_refresh_interval, night_start_hour, night_end_hour, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             mac,
             data.get("nickname", ""),
@@ -1364,6 +1395,9 @@ async def save_config(mac: str, data: dict) -> int:
             mode_overrides_json,
             1 if bool(data.get("is_focus_listening", False)) else 0,
             always_active,
+            night_interval,
+            night_start,
+            night_end,
             now,
         ),
     )
@@ -1423,8 +1457,9 @@ async def update_focus_listening(mac: str, enabled: bool) -> bool:
                 """INSERT INTO configs
                    (mac, nickname, modes, refresh_strategy, character_tones,
                     language, mode_language, content_tone, city, refresh_interval, llm_provider, llm_model, image_provider, image_model,
-                    countdown_events, time_slot_rules, memo_text, mode_overrides, focus_listening, always_active, is_active, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
+                    countdown_events, time_slot_rules, memo_text, mode_overrides, focus_listening, always_active,
+                    night_refresh_interval, night_start_hour, night_end_hour, is_active, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)""",
                 (
                     normalized_mac,
                     prev.get("nickname", "") or "",
@@ -1446,6 +1481,9 @@ async def update_focus_listening(mac: str, enabled: bool) -> bool:
                     mode_overrides_json,
                     1 if enabled else 0,
                     1 if bool(prev.get("always_active", False)) else 0,
+                    prev.get("night_refresh_interval", 0) or 0,
+                    prev.get("night_start_hour", 0) or 0,
+                    prev.get("night_end_hour", 6) if prev.get("night_end_hour") is not None else 6,
                     datetime.now().isoformat(),
                 ),
             )
@@ -1599,6 +1637,13 @@ def _row_to_dict(row, columns) -> dict:
     d["character_tones"] = [t for t in d["character_tones"].split(",") if t]
     d["refreshStrategy"] = d.get("refresh_strategy", DEFAULT_REFRESH_STRATEGY)
     d["refreshInterval"] = d.get("refresh_interval", DEFAULT_REFRESH_INTERVAL)
+    # 夜间睡眠三件套：0 表示没启用夜间刷新间隔
+    d["night_refresh_interval"] = int(d.get("night_refresh_interval") or 0)
+    d["night_start_hour"] = int(d.get("night_start_hour") or 0)
+    d["night_end_hour"] = int(d.get("night_end_hour") if d.get("night_end_hour") is not None else 6)
+    d["nightRefreshInterval"] = d["night_refresh_interval"]
+    d["nightStartHour"] = d["night_start_hour"]
+    d["nightEndHour"] = d["night_end_hour"]
     d["contentTone"] = d.get("content_tone", DEFAULT_CONTENT_TONE)
     d["mode_language"] = d.get("mode_language", "")
     d["modeLanguage"] = d["mode_language"]

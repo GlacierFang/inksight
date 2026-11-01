@@ -404,6 +404,12 @@ interface DeviceConfig {
   refreshInterval?: number;
   refresh_strategy?: string;
   refresh_minutes?: number;
+  nightRefreshInterval?: number;
+  nightStartHour?: number;
+  nightEndHour?: number;
+  night_refresh_interval?: number;
+  night_start_hour?: number;
+  night_end_hour?: number;
   city?: string;
   latitude?: number;
   longitude?: number;
@@ -745,6 +751,9 @@ function ConfigPageInner() {
   const [selectedModes, setSelectedModes] = useState<Set<string>>(new Set(["STOIC", "ZEN", "DAILY"]));
   const [strategy, setStrategy] = useState("random");
   const [refreshMin, setRefreshMin] = useState(60);
+  const [nightRefreshMin, setNightRefreshMin] = useState(0);
+  const [nightStartHour, setNightStartHour] = useState(0);
+  const [nightEndHour, setNightEndHour] = useState(6);
   const [timeSlotRules, setTimeSlotRules] = useState<TimeSlotRule[]>([]);
   const [city, setCity] = useState("");
   const [locationMeta, setLocationMeta] = useState<LocationValue>({});
@@ -1146,6 +1155,9 @@ function ConfigPageInner() {
         if (cfg.modes?.length) setSelectedModes(new Set(cfg.modes.map((m) => m.toUpperCase())));
         if (cfg.refreshStrategy || cfg.refresh_strategy) setStrategy((cfg.refreshStrategy || cfg.refresh_strategy) as string);
         if (cfg.refreshInterval || cfg.refresh_minutes) setRefreshMin((cfg.refreshInterval || cfg.refresh_minutes) as number);
+        if (cfg.nightRefreshInterval !== undefined || cfg.night_refresh_interval !== undefined) setNightRefreshMin((cfg.nightRefreshInterval ?? cfg.night_refresh_interval ?? 0) as number);
+        if (cfg.nightStartHour !== undefined || cfg.night_start_hour !== undefined) setNightStartHour((cfg.nightStartHour ?? cfg.night_start_hour ?? 0) as number);
+        if (cfg.nightEndHour !== undefined || cfg.night_end_hour !== undefined) setNightEndHour((cfg.nightEndHour ?? cfg.night_end_hour ?? 6) as number);
         applyGlobalLocation(extractLocationValue(cfg as Record<string, unknown>));
         setModeLanguage((cfg as Record<string, unknown>).modeLanguage as string || (cfg as Record<string, unknown>).mode_language as string || "zh");
         if (cfg.contentTone || cfg.content_tone) setContentTone(normalizeTone(cfg.contentTone || cfg.content_tone));
@@ -1374,6 +1386,9 @@ function ConfigPageInner() {
       modes: Array.from(modes ?? selectedModes),
       refreshStrategy: strategy,
       refreshInterval: refreshMin,
+      nightRefreshInterval: nightRefreshMin,
+      nightStartHour: nightStartHour,
+      nightEndHour: nightEndHour,
       ...currentLocation,
       modeLanguage,
       contentTone,
@@ -1384,7 +1399,7 @@ function ConfigPageInner() {
       always_active: alwaysActive,
       timeSlotRules: timeSlotRules,
     };
-  }, [alwaysActive, characterTones, contentTone, currentLocation, isFocusListening, mac, memoText, modeLanguage, modeOverrides, refreshMin, sanitizeModeOverride, selectedModes, strategy, timeSlotRules]);
+  }, [alwaysActive, characterTones, contentTone, currentLocation, isFocusListening, mac, memoText, modeLanguage, modeOverrides, nightEndHour, nightRefreshMin, nightStartHour, refreshMin, sanitizeModeOverride, selectedModes, strategy, timeSlotRules]);
 
   const persistConfig = useCallback(async (
     overrides?: Record<string, ModeOverride>,
@@ -2836,6 +2851,12 @@ function ConfigPageInner() {
                   setStrategy={setStrategy}
                   refreshMin={refreshMin}
                   setRefreshMin={setRefreshMin}
+                  nightRefreshMin={nightRefreshMin}
+                  setNightRefreshMin={setNightRefreshMin}
+                  nightStartHour={nightStartHour}
+                  setNightStartHour={setNightStartHour}
+                  nightEndHour={nightEndHour}
+                  setNightEndHour={setNightEndHour}
                   toneOptions={TONE_OPTIONS}
                   personaPresets={PERSONA_PRESETS}
                   strategies={STRATEGIES}
