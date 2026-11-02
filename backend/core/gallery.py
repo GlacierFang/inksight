@@ -78,6 +78,11 @@ _MODES: dict[str, dict] = {
         "fields": [("phase_label", "时段"), ("phase", "时段")],
     },
     "CUSTOM_EWORLD": {"name": "电子世界", "form": "wide", "state": "eworld"},
+    "CUSTOM_WINDOW": {
+        "name": "窗外", "form": "grid", "state": "window", "shape": "map",
+        "title": "city_name", "text": "weather_text", "meta": "",
+        "fields": [("city_name", "城市"), ("weather_text", "天气")],
+    },
 }
 
 

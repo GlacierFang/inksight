@@ -1,0 +1,186 @@
+{
+  "mode_id": "CUSTOM_WINDOW",
+  "display_name": "窗外",
+  "icon": "art",
+  "cacheable": false,
+  "description": "一扇向外的窗。窗外是你所选城市的实时天气，窗外是什么每次都由模型现画。",
+  "content": {
+    "type": "computed",
+    "provider": "window",
+    "fallback": {
+      "art_url": "",
+      "has_image": "no",
+      "city_name": "",
+      "weather_text": ""
+    }
+  },
+  "settings_schema": [
+    {
+      "key": "city",
+      "label": "城市",
+      "type": "location",
+      "description": "窗外取这个城市的实时天气，留空则使用设备位置"
+    }
+  ],
+  "layout": {
+    "status_bar": {
+      "hidden": true
+    },
+    "body_align": "top",
+    "body": [
+      {
+        "type": "conditional",
+        "field": "has_image",
+        "conditions": [
+          {
+            "op": "eq",
+            "value": "yes",
+            "children": [
+              {
+                "type": "image",
+                "field": "art_url",
+                "x": 0,
+                "width": 400,
+                "height": 270,
+                "fit": "cover",
+                "align_x": "center",
+                "align_y": "center",
+                "margin_bottom": 0
+              }
+            ]
+          },
+          {
+            "op": "eq",
+            "value": "no",
+            "children": [
+              {
+                "type": "spacer",
+                "height_px": 100
+              },
+              {
+                "type": "text",
+                "template": "窗外无景",
+                "align": "center",
+                "font": "noto_serif_light",
+                "font_size": 16,
+                "max_lines": 1,
+                "margin_bottom": 0
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "footer": {
+      "label": "窗外",
+      "attribution_template": "{city_name} · {weather_text}",
+      "dashed": true
+    }
+  },
+  "layout_overrides": {
+    "296x128": {
+      "body_align": "top",
+      "body": [
+        {
+          "type": "conditional",
+          "field": "has_image",
+          "conditions": [
+            {
+              "op": "eq",
+              "value": "yes",
+              "children": [
+                {
+                  "type": "image",
+                  "field": "art_url",
+                  "x": 0,
+                  "width": 322,
+                  "height": 99,
+                  "fit": "cover",
+                  "align_x": "center",
+                  "align_y": "center",
+                  "margin_bottom": 0
+                }
+              ]
+            },
+            {
+              "op": "eq",
+              "value": "no",
+              "children": [
+                {
+                  "type": "spacer",
+                  "height_px": 30
+                },
+                {
+                  "type": "text",
+                  "template": "窗外无景",
+                  "align": "center",
+                  "font": "noto_serif_light",
+                  "font_size": 11,
+                  "max_lines": 1,
+                  "margin_bottom": 0
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "footer": {
+        "label": "窗外",
+        "attribution_template": "{city_name} · {weather_text}",
+        "dashed": true
+      }
+    },
+    "648x480": {
+      "body_align": "top",
+      "body": [
+        {
+          "type": "conditional",
+          "field": "has_image",
+          "conditions": [
+            {
+              "op": "eq",
+              "value": "yes",
+              "children": [
+                {
+                  "type": "image",
+                  "field": "art_url",
+                  "x": 0,
+                  "width": 400,
+                  "height": 261,
+                  "fit": "cover",
+                  "align_x": "center",
+                  "align_y": "center",
+                  "margin_bottom": 0
+                }
+              ]
+            },
+            {
+              "op": "eq",
+              "value": "no",
+              "children": [
+                {
+                  "type": "spacer",
+                  "height_px": 180
+                },
+                {
+                  "type": "text",
+                  "template": "窗外无景",
+                  "align": "center",
+                  "font": "noto_serif_light",
+                  "font_size": 26,
+                  "max_lines": 1,
+                  "margin_bottom": 0
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "footer": {
+        "label": "窗外",
+        "attribution_template": "{city_name} · {weather_text}",
+        "dashed": true
+      }
+    }
+  }
+}

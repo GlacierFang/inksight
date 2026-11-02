@@ -967,6 +967,9 @@ async def _generate_computed_content(mode_def: dict, content_cfg: dict, fallback
     if provider == "xiaojing":
         from .xiaojing import build_xiaojing_content
         return await build_xiaojing_content(fallback, **kwargs)
+    if provider == "window":
+        from .window import build_window_content
+        return await build_window_content(fallback, **kwargs)
     if provider == "countdown":
         from .content import generate_countdown_content
         config = content_cfg.get("config", {})
@@ -1007,9 +1010,6 @@ async def _generate_computed_content(mode_def: dict, content_cfg: dict, fallback
             weekday_idx = date_ctx.get("weekday", _now.weekday())
             result.update({
                 "year": date_ctx.get("year"),
-    if provider == "haicuotu":
-        from .haicuotu import build_haicuotu_content
-        return await build_haicuotu_content(fallback, **kwargs)
                 "day": date_ctx.get("day"),
                 "month_cn": _MONTH_EN[month_idx],
                 "weekday_cn": _WEEKDAY_EN[weekday_idx],
