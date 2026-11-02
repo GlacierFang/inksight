@@ -1,0 +1,178 @@
+{
+  "mode_id": "CUSTOM_THROUGH",
+  "display_name": "透屏",
+  "icon": "art",
+  "cacheable": false,
+  "description": "一屏透明的屏。往里看是屏底下的电路板，每次都由模型现画。",
+  "content": {
+    "type": "computed",
+    "provider": "through",
+    "fallback": {
+      "art_url": "",
+      "has_image": "no",
+      "silkscreen": "",
+      "scene": ""
+    }
+  },
+  "layout": {
+    "status_bar": {
+      "hidden": true
+    },
+    "body_align": "top",
+    "body": [
+      {
+        "type": "conditional",
+        "field": "has_image",
+        "conditions": [
+          {
+            "op": "eq",
+            "value": "yes",
+            "children": [
+              {
+                "type": "image",
+                "field": "art_url",
+                "x": 0,
+                "width": 400,
+                "height": 270,
+                "fit": "cover",
+                "align_x": "center",
+                "align_y": "center",
+                "margin_bottom": 0
+              }
+            ]
+          },
+          {
+            "op": "eq",
+            "value": "no",
+            "children": [
+              {
+                "type": "spacer",
+                "height_px": 100
+              },
+              {
+                "type": "text",
+                "template": "未见电路",
+                "align": "center",
+                "font": "noto_serif_light",
+                "font_size": 16,
+                "max_lines": 1,
+                "margin_bottom": 0
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "footer": {
+      "label": "透屏",
+      "attribution_template": "{silkscreen}",
+      "dashed": true
+    }
+  },
+  "layout_overrides": {
+    "296x128": {
+      "body_align": "top",
+      "body": [
+        {
+          "type": "conditional",
+          "field": "has_image",
+          "conditions": [
+            {
+              "op": "eq",
+              "value": "yes",
+              "children": [
+                {
+                  "type": "image",
+                  "field": "art_url",
+                  "x": 0,
+                  "width": 322,
+                  "height": 99,
+                  "fit": "cover",
+                  "align_x": "center",
+                  "align_y": "center",
+                  "margin_bottom": 0
+                }
+              ]
+            },
+            {
+              "op": "eq",
+              "value": "no",
+              "children": [
+                {
+                  "type": "spacer",
+                  "height_px": 30
+                },
+                {
+                  "type": "text",
+                  "template": "未见电路",
+                  "align": "center",
+                  "font": "noto_serif_light",
+                  "font_size": 11,
+                  "max_lines": 1,
+                  "margin_bottom": 0
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "footer": {
+        "label": "透屏",
+        "attribution_template": "{silkscreen}",
+        "dashed": true
+      }
+    },
+    "648x480": {
+      "body_align": "top",
+      "body": [
+        {
+          "type": "conditional",
+          "field": "has_image",
+          "conditions": [
+            {
+              "op": "eq",
+              "value": "yes",
+              "children": [
+                {
+                  "type": "image",
+                  "field": "art_url",
+                  "x": 0,
+                  "width": 400,
+                  "height": 261,
+                  "fit": "cover",
+                  "align_x": "center",
+                  "align_y": "center",
+                  "margin_bottom": 0
+                }
+              ]
+            },
+            {
+              "op": "eq",
+              "value": "no",
+              "children": [
+                {
+                  "type": "spacer",
+                  "height_px": 180
+                },
+                {
+                  "type": "text",
+                  "template": "未见电路",
+                  "align": "center",
+                  "font": "noto_serif_light",
+                  "font_size": 26,
+                  "max_lines": 1,
+                  "margin_bottom": 0
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "footer": {
+        "label": "透屏",
+        "attribution_template": "{silkscreen}",
+        "dashed": true
+      }
+    }
+  }
+}
