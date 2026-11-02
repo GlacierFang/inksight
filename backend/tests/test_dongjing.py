@@ -4,7 +4,8 @@
   - 数据集完整性：每条引文 / 条目都是原文的逐字片段（原文在位时校验）；
   - 走读节奏：一天一站，按日期推进，走满一轮回到起点；
   - 节令匹配：今日节令与倒计时；
-  - 路线条：生成 PNG 且走 prefetch 通道；
+  - 路线条已删除：内容里不再有 route_url；
+  - 引文补足：prose 站的引文从原文续到句子边界，且封顶；
   - 兜底：数据集缺失时返回 fallback，不产出空卡；
   - 模式 JSON：注册表校验通过 + provider 接线正常。
 """
@@ -23,7 +24,6 @@ if str(BACKEND_DIR) not in sys.path:
 
 from core import dongjing  # noqa: E402
 from core.dongjing import (  # noqa: E402
-    _build_route_png,
     _festival_text,
     build_dongjing_content,
     load_dataset,
@@ -152,19 +152,25 @@ def test_festival_never_raises_for_any_day():
         day += timedelta(days=1)
 
 
-# ── 路线条 ──────────────────────────────────────────────────
-def test_route_png_is_png():
-    stations = load_dataset()["stations"]
-    png = _build_route_png(stations, 0)
-    assert png[:8] == b"\x89PNG\r\n\x1a\n"
-    assert len(png) > 100
-
-
+# ── 路线条（已删）──────────────────────────────────────────
 @pytest.mark.asyncio
-async def test_content_carries_prefetched_route():
+async def test_content_carries_no_route_strip():
     content = await build_dongjing_content({}, date_ctx=_ctx(EPOCH))
-    assert content["route_url"]
-    assert content["_prefetched_route_url"][:8] == b"\x89PNG\r\n\x1a\n"
+    assert "route_url" not in content
+    assert not any(k.startswith("_prefetched_route") for k in content)
+
+
+# ── 引文补足 ────────────────────────────────────────────────
+def test_prose_quotes_extended_and_capped():
+    from core.data.build_dongjing_dataset import QUOTE_MAX_CHARS, QUOTE_TARGET_CHARS
+
+    stations = load_dataset()["stations"]
+    prose = [s for s in stations if s["kind"] == "prose" and s["quote"]]
+    assert prose
+    for s in prose:
+        assert len(s["quote"]) <= QUOTE_MAX_CHARS
+    long_enough = [s for s in prose if len(s["quote"]) >= QUOTE_TARGET_CHARS - 12]
+    assert len(long_enough) >= len(prose) * 0.6
 
 
 # ── 兜底 ────────────────────────────────────────────────────
@@ -177,7 +183,6 @@ async def test_fallback_when_dataset_missing(monkeypatch):
     )
     assert content["title"] == "汴京"
     assert content["quote"] == "凡百所卖饮食之人"
-    assert content["route_url"] == ""
 
 
 # ── 模式定义 ────────────────────────────────────────────────

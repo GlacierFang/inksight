@@ -570,11 +570,107 @@ def parse_sections(raw: str) -> list[dict]:
             cur["paras"].append(s)
     for sec in sections:
         sec["text"] = "".join(sec["paras"])
+        # 逐行留着：续接引文必须落在原文同一行内
+        sec["lines"] = list(sec["paras"])
     return sections
 
 
 def join_spans(spans: list[str]) -> str:
     return "……".join(s for s in spans if s)
+
+
+# 屏上正文区只有 234px（状态栏 36 → 页脚 270）。18px 字号下一行装 20 个字，
+# 六行就是 120 字。精选表里的引文最长 95 字，短的那天（比如 72 字）底下空一截 ——
+# 所以从原文里接着往下取，取到句子边界为止。
+# 接的是紧邻的连续文字，所以不加分隔符「……」：那是跨段落省略才用的。
+# 屏上正文区只有 234px（状态栏 36 → 页脚 270），扣掉标题、副标题、节令提示，
+# 引文能占 6 行；18px 字号下一行装 21 个字，六行约 126 字。
+# 精选表里的引文最长 95 字，短的那天底下空一截 —— 所以从原文里接着往下取。
+#
+# 两步：
+#  1. 每段引文补到句子边界（精选表常在句中断开，如「如内前」「每群万数」）
+#  2. 还不够就继续往后接
+#
+# 接的都是原文里紧邻的连续文字（逐字片段），构建器的校验照样过；
+# 「……」只留给跨段落的省略，不用于同一段内的续接。
+QUOTE_TARGET_CHARS = 116
+QUOTE_MAX_CHARS = 124
+
+# 后人的校勘注（如「宣德注：“德”误刻“和”。」）不是正文，不能接进来。
+NOTE_MARKERS = ("注：",)
+
+# 原文自己的省略号。跨过它会把两段不连续的文字接起来 —— 那不是原文的连续片段。
+ELLIPSIS = "…"
+
+
+def _cut_at_boundary(text, budget):
+    """在句读边界处切，取不超过 budget 的最长一段。"""
+    text = text.split(ELLIPSIS)[0]
+    best = ""
+    for m in re.finditer(r"[。！？]", text):
+        if m.end() <= budget:
+            best = text[: m.end()]
+    if best:
+        return best
+    for m in re.finditer(r"[，、；：]", text):
+        if m.end() <= budget:
+            best = text[: m.end()]
+    return best or text[:budget]
+
+
+def _extend_span(lines, span, budget, next_span=""):
+    """把 span 在它所在的原文行内往后延。
+
+    产出的必须是**同一行**的连续子串 —— 原文段落是分行排的，跨行拼出来的东西
+    不是原文的逐字片段（逐字校验会挂），而且很容易跨进后人的校勘注。
+    """
+    if not span or span[-1] in "。！？":
+        return span
+    for line in lines:
+        i = line.find(span)
+        if i < 0:
+            continue
+        rest = line[i + len(span):]
+        if next_span:
+            j = rest.find(next_span)
+            if j >= 0:
+                rest = rest[:j]
+        for marker in NOTE_MARKERS:
+            k = rest.find(marker)
+            if k >= 0:
+                rest = rest[:k]
+        if not rest:
+            return span
+        cut = _cut_at_boundary(rest, budget)
+        if not cut:
+            return span
+        return span + cut
+    return span
+
+
+def extend_quote(lines, spans, target=QUOTE_TARGET_CHARS, max_chars=QUOTE_MAX_CHARS):
+    """把引文补足到 target 字，封顶 max_chars。
+
+    超了屏上放不下，渲染器只能在末尾加省略号 —— 所以必须封顶。
+    每段补完都验一次「是不是某一行原文的连续子串」，不是就退回原样。
+    """
+    if not spans:
+        return ""
+
+    out = []
+    used = 0
+    for i, span in enumerate(spans):
+        nxt = spans[i + 1] if i + 1 < len(spans) else ""
+        room = max_chars - used - 2  # 2 = 分隔符「……」
+        piece = span
+        if room > 0:
+            grown = _extend_span(lines, span, room, nxt)
+            if any(grown in line for line in lines):
+                piece = grown
+        out.append(piece)
+        used += len(piece)
+
+    return join_spans(out)[:max_chars]
 
 
 def check_item(item: str, text: str, where: str, errors: list[str]) -> None:
@@ -604,12 +700,18 @@ def build(source_path: Path) -> tuple[dict, list[str]]:
         for item in items:
             check_item(item, text, f"{vol} · {title}", errors)
         axis = "space" if vol in SPACE_VOLS else "season"
+        # prose 站的引文接着原文往下续；list 站的名录本身已经占满屏，不再续。
+        quote = (
+            extend_quote(sec.get("lines") or [text], spans)
+            if kind == "prose"
+            else join_spans(spans)
+        )
         stations.append({
             "vol": vol,
             "title": title,
             "kind": kind,
             "axis": axis,
-            "quote": join_spans(spans),
+            "quote": quote,
             "lead": join_spans(lead_spans),
             "items": list(items),
         })
