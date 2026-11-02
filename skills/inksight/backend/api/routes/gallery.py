@@ -94,4 +94,10 @@ async def gallery_image(
     data = gallery_screen_png(mode.upper(), day)
     if not data:
         raise HTTPException(status_code=404, detail="no screen for that day")
-    return Response(content=data, media_type="image/png")
+    # 不让浏览器缓存：布局改过、整屏图重出之后，URL 没变，
+    # 缓存住旧图的话回顾页上看到的还是老样子。
+    return Response(
+        content=data,
+        media_type="image/png",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
