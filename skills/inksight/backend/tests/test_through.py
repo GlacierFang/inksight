@@ -1,8 +1,8 @@
 """透屏模式测试。
 
 透屏 = 窗外换个方向：同一块玻璃，往里看是电路板。
-固定下来的是：透屏（从屏背面往里看）、伪透视纵深、电路板、四色。
-不固定的是：板上有什么元件、视角角度、构图。
+固定下来的是：透屏（从屏背面往里看）、正交俯视平摊、电路板、四色。
+不固定的是：板上有什么元件、构图。
 """
 
 from __future__ import annotations
@@ -17,25 +17,28 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 
-def test_through_spec_mentions_screen_and_depth():
-    """「透屏」不能丢 —— 提示词里必须写明是从屏背面往里看、要有纵深。"""
+def test_through_spec_mentions_screen_and_orthographic_view():
+    """「透屏」不能丢 —— 从屏背面往里看，且是垂直俯视的正投影平面图。"""
     from core.through import THROUGH_SPEC, THROUGH_SPEC_RETRY
 
-    assert "屏" in THROUGH_SPEC
-    assert "纵深" in THROUGH_SPEC
-    assert "屏" in THROUGH_SPEC_RETRY
-    assert "纵深" in THROUGH_SPEC_RETRY
+    for text in (THROUGH_SPEC, THROUGH_SPEC_RETRY):
+        assert "屏" in text
+        assert "俯视" in text
+        assert "垂直" in text or "正交" in text
+        # 旧版要求的透视纵深已废弃
+        assert "没入暗处" not in text
+        assert "纵深" not in text
 
 
-def test_prompt_has_no_composition_constraints():
-    """板上有什么交给 AI：不预设元件种类、不预设角度、不预设构图。"""
+def test_prompt_fixes_view_but_not_components():
+    """视角定死（垂直俯视的正投影），板上有什么交给 AI：不预设元件种类、不预设构图。"""
     from core.through import THROUGH_SPEC, THROUGH_SPEC_RETRY, PALETTE_SPEC
 
     for text in (THROUGH_SPEC, THROUGH_SPEC_RETRY):
+        assert "俯视" in text
         assert "电阻" not in text
         assert "芯片" not in text
         assert "特写" not in text
-        assert "俯视" not in text
     assert "四色" in PALETTE_SPEC or "颜色" in PALETTE_SPEC
 
 
