@@ -265,7 +265,7 @@ DAY_PROMPT = """你是一只{SPECIES_NAME}，代号{name}，住在{home}。
 请写今天的记录，严格按下面格式，每行一条，不要多余的话：
 标题：<2-8 字>
 {line_spec}
-心：<12-22 字>
+心：<10-18 字>
 
 规矩：
 - 第一人称，是那只蚂蚁在写自己，不是写它。
@@ -275,6 +275,7 @@ DAY_PROMPT = """你是一只{SPECIES_NAME}，代号{name}，住在{home}。
 - 不许出现这些词：{forbidden}
 - 不许抒情成散文。短句，像观察记录。
 - 纪事要具体：写了什么、搬了什么、走到哪、看见了什么。
+- 每一行不超过 20 个字。写不下就少写一句，别把两件事挤在一行。
 - 心声只有一句，是它说不出口的那半句。
 - 正文里不要写具体数字（行程数字由别的部分显示）。
 - 不要提"今天""记录"这类词，直接写。"""
@@ -509,11 +510,34 @@ def _weak_drift(text: str, today_key: str) -> list:
     return out
 
 
+# 屏上正文区只有 234px（状态栏 36 → 页脚 270）。15px 汉字一字宽 15px，
+# 376px 的行宽只装得下 25 字 —— 一旦折行，下面的心声/体力/行程就被挤出屏幕。
+# 所以正文每行硬压到 20 字，超了就在标点处断。
+LINE_MAX_CHARS = 20
+VOICE_MAX_CHARS = 20
+
+
+def _clamp_line(text: str, limit: int) -> str:
+    """把一行压到 limit 字以内。优先在标点处断；硬切时去掉结尾的悬空标点。"""
+    s = " ".join(str(text or "").split())
+    if len(s) <= limit:
+        return s
+    # 在标点处断，但不带走这个标点：末行留个逗号像话没说完。
+    for i in range(min(limit, len(s) - 1), max(0, limit - 8), -1):
+        if s[i] in "。！？；，、：":
+            return s[:i].rstrip("，、；：")
+    return s[:limit].rstrip("，、；：")
+
+
 def _line_spec(magnitude: int) -> str:
-    """幅度骰决定这张卡写多满：投入浅就少写几句，投入深才铺开。"""
+    """幅度骰决定这张卡写多满：投入浅就少写几句，投入深才铺开。
+
+    深度靠「写几句」表达，不靠「每句多长」—— 句长一涨就折行，
+    折行会把屏下面挤没。
+    """
     count = {1: 2, 2: 2, 3: 3, 4: 3, 5: 4, 6: 4}.get(int(magnitude), 3)
-    span = {1: "14-22", 2: "16-26", 3: "18-30", 4: "20-32", 5: "22-34", 6: "24-36"}.get(
-        int(magnitude), "18-30"
+    span = {1: "10-14", 2: "12-16", 3: "14-18", 4: "16-18", 5: "16-20", 6: "18-20"}.get(
+        int(magnitude), "14-18"
     )
     labels = ("一", "二", "三", "四")
     lines = [f"{labels[i]}：<{span} 字>" for i in range(count)]
@@ -718,7 +742,7 @@ async def _generate_once(date_key: str, force: bool, **kwargs) -> dict | None:
         else:
             dice = dict(dice, base_magnitude=dice["magnitude"])
 
-        card = await _llm_day(dice, states, recent, creature, **kwargs)
+        card = await _llm_day(dice, states, recent[-RECENT_KEEP:], creature, **kwargs)
         if not card:
             card = _fallback_card(date_key, dice.get("action", ""))
 
@@ -741,13 +765,23 @@ async def _generate_once(date_key: str, force: bool, **kwargs) -> dict | None:
         state["date"] = date_key
         state["states_end"] = new_states
         recent = [r for r in recent if r.get("date") != date_key]
+        # 完整保存当日卡：四行、心声、状态、行程、掷骰动作、反常信息、巢身份。
+        # 画廊重建整屏要用这些字段；缺了只能如实标「历史缺失」。
         recent.append({
             "date": date_key,
             "title": card["title"],
-            "lines": card["lines"][:2],
+            "lines": list(card["lines"]),
+            "voice": card.get("voice", ""),
+            "dice": dice,
+            "states": new_states,
+            "state_delta": delta,
+            "trip_m": trip,
+            "name": creature.get("name", ""),
+            "home": creature.get("home", ""),
+            "signature": creature.get("signature", ""),
         })
         recent.sort(key=lambda r: str(r.get("date", "")))
-        state["recent"] = recent[-RECENT_KEEP:]
+        state["recent"] = recent  # 全留：画廊要回看往期（prompt 只取最近 RECENT_KEEP 条）
         _write_state(state)
         return today
     finally:
@@ -763,14 +797,61 @@ async def generate_today_card(force: bool = False, **kwargs) -> dict | None:
     return None
 
 
+
+def _history_card(state: dict, date_key: str) -> dict:
+    """往期记录里那一天的那张卡；旧记录只存了标题和前两行，其余如实标「历史缺失」。"""
+    from .history_day import MISSING
+
+    for item in reversed(state.get("recent") or []):
+        if isinstance(item, dict) and str(item.get("date")) == date_key:
+            lines = item.get("lines")
+            lines = [str(v) for v in lines] if isinstance(lines, list) else []
+            # 旧记录只存了前两行，后面的行如实标「历史缺失」
+            while len(lines) < 4:
+                lines.append(MISSING)
+            return {
+                "date": date_key,
+                "title": str(item.get("title") or MISSING),
+                "lines": lines,
+                "voice": str(item.get("voice") or MISSING),
+                "states": item.get("states") if isinstance(item.get("states"), dict) else {},
+                "state_delta": item.get("state_delta") if isinstance(item.get("state_delta"), dict) else {},
+                "trip_m": item.get("trip_m"),
+                "name": str(item.get("name") or MISSING),
+                "home": str(item.get("home") or MISSING),
+                "signature": str(item.get("signature") or MISSING),
+                "_history": True,
+            }
+    return {
+        "date": date_key,
+        "title": MISSING,
+        "lines": [MISSING, MISSING, MISSING, MISSING],
+        "voice": MISSING,
+        "states": {},
+        "state_delta": {},
+        "trip_m": None,
+        "name": MISSING,
+        "home": MISSING,
+        "signature": MISSING,
+        "_history": True,
+    }
+
+
 async def build_ant_content(fallback: dict | None = None, **kwargs) -> dict:
-    date_key = datetime.now().strftime("%Y-%m-%d")
+    from .history_day import resolve_day
+
+    date_key = resolve_day(kwargs)
     state = _read_state()
-    _roll_state(state, date_key)
     today = state.get("today")
     card = today if isinstance(today, dict) and today.get("date") == date_key else None
+
+    # 历史日：从往期记录里找那一天。找不到就如实标「历史缺失」，不补生成。
     if card is None:
-        card = await generate_today_card(**kwargs)
+        if date_key != datetime.now().strftime("%Y-%m-%d"):
+            card = _history_card(state, date_key)
+        else:
+            _roll_state(state, date_key)
+            card = await generate_today_card(**kwargs)
     card = card or {}
 
     creature = state.get("creature") if isinstance(state.get("creature"), dict) else {}
@@ -788,16 +869,29 @@ async def build_ant_content(fallback: dict | None = None, **kwargs) -> dict:
         value = int(states.get(key, 0))
         d = int(delta.get(key, 0))
         mark = "↑" if d > 0 else ("↓" if d < 0 else "·")
-        state_parts.append(f"{STATE_LABEL[key]} {value}{mark}")
+        # 状态行只有一行 376px：标签、数值、分隔符都不留空格才装得下。
+        state_parts.append(f"{STATE_LABEL[key]}{value}{mark}")
+
+    if card.get("_history"):
+        # 历史记录没记到的就是没记到 —— 显示 0 等于编造
+        from .history_day import MISSING as _MISSING
+        state_line = "·".join(state_parts) if states else _MISSING
+        trip_line = (
+            f"今日行程 {trip:g} 米 ≈ 你走 {int(round(trip * 100))} 米"
+            if card.get("trip_m") is not None else _MISSING
+        )
+    else:
+        state_line = "·".join(state_parts)
+        trip_line = f"今日行程 {trip:g} 米 ≈ 你走 {int(round(trip * 100))} 米"
     content = {
         "title": (f"今天反常 · {title}" if anomaly else title),
-        "l1": lines[0] if len(lines) > 0 else "",
-        "l2": lines[1] if len(lines) > 1 else "",
-        "l3": lines[2] if len(lines) > 2 else "",
-        "l4": lines[3] if len(lines) > 3 else "",
-        "voice": card.get("voice", ""),
-        "state_line": " · ".join(state_parts),
-        "trip_line": f"今日行程 {trip:g} 米 ≈ 你走 {int(round(trip * 100))} 米",
+        "l1": _clamp_line(lines[0], LINE_MAX_CHARS) if len(lines) > 0 else "",
+        "l2": _clamp_line(lines[1], LINE_MAX_CHARS) if len(lines) > 1 else "",
+        "l3": _clamp_line(lines[2], LINE_MAX_CHARS) if len(lines) > 2 else "",
+        "l4": _clamp_line(lines[3], LINE_MAX_CHARS) if len(lines) > 3 else "",
+        "voice": _clamp_line(card.get("voice", ""), VOICE_MAX_CHARS),
+        "state_line": state_line,
+        "trip_line": trip_line,
         "name": creature.get("name", ""),
         "home": creature.get("home", ""),
         "signature": creature.get("signature", ""),
