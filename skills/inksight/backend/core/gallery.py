@@ -75,6 +75,11 @@ _MODES: dict[str, dict] = {
                    ("state_line", "状态"), ("trip_line", "行程"),
                    ("signature", "签名")],
     },
+    "CUSTOM_MIAOLI": {
+        "name": "狸行记", "form": "grid", "state": "miaoli", "shape": "map",
+        "title": "title", "text": "scene", "meta": "",
+        "fields": [("title", "标题"), ("scene", "画面"), ("signature", "签名")],
+    },
     "CUSTOM_XIAOJING": {
         "name": "小景", "form": "grid", "state": "xiaojing", "shape": "map",
         # 一天四张（晨/昼/暮/夜）：一天出多张图，条目按「日期+时段」展开。
