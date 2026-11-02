@@ -301,6 +301,24 @@ BUILTIN_CATALOG: list[CatalogItem] = [
         en=CatalogText(name="E-World", tip="Four electronic powers fight over a fixed continent daily; the report matches the map exactly"),
     ),
     CatalogItem(
+        mode_id="CUSTOM_DAYOVERVIEW",
+        category="custom",
+        zh=CatalogText(name="每日总览", tip="一屏看完：日期与年度进度、天气实况与四天预报、农历干支与节气倒数、今日历史、语录与贴士"),
+        en=CatalogText(name="Day Overview", tip="One screen: date and year progress, weather and 4-day forecast, lunar calendar and solar-term countdown, today in history, quote and tip"),
+    ),
+    CatalogItem(
+        mode_id="CUSTOM_POETRY_DAY",
+        category="custom",
+        zh=CatalogText(name="诗笺日课", tip="一屏四块：当日主诗、宋代掌故、当天到家出门事实与双城天气"),
+        en=CatalogText(name="Poetry Day", tip="One screen: the poem of the day, a Song-dynasty anecdote, today's home/away fact and the two-city weather"),
+    ),
+    CatalogItem(
+        mode_id="CUSTOM_DAILY_TRIO",
+        category="custom",
+        zh=CatalogText(name="日课三则", tip="一屏三样：毒舌一句、谜语一道、微故事一个，一次模型调用出齐"),
+        en=CatalogText(name="Daily Trio", tip="One screen: a roast, a riddle and a micro story, all from one model call"),
+    ),
+    CatalogItem(
         mode_id="CUSTOM_WINDOW",
         category="custom",
         zh=CatalogText(name="窗外", tip="一扇向外的窗，窗外是你所选城市的实时天气"),

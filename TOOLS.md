@@ -1,4 +1,8 @@
-# TOOLS.md - Local Notes
+# TOOLS.md - 环境事实速查
+
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+> 硬件 / 网络 / 端口 / 路径 / 服务清单。**按需读，不每轮注入**。
 
 > 📌 2026-08-07 16:25 测试：助理 edit 工具可用性验证
 
@@ -6,7 +10,16 @@
 
 - **设备：** Raspberry Pi 4B 8G
 - **存储：** 128GB SSD（ext4，挂载点 `/`，已用约 12%）
-- **启动介质：** SD卡（mmcblk0，bootfs + rootfs 分区）
+- **启动介质：** SD卡（mmcblk0,bootfs + rootfs 分区）
+
+### 电子墨水屏（InkSight 墨水屏设备）
+
+- **色数：四色** —— 黑 / 白 / 金黄 `#E8B000` / 朱红 `#C80000`
+- **屏尺寸：** 400 × 300
+- **色数定义处：** `skills/inksight/backend/core/config.py` 的 `EINK_4COLOR_PALETTE`（扁平 int 列表，每色 3 通道）
+- **屏上没有灰。** 浅阴影要用金黄网点表现，灰网点会被 Atkinson 抖成脏黄网纹
+- 生图提示词要把四个色值直接写死给模型，别让它自由发挥 —— 参考 `core/xiaojing.py` 的 `_PALETTE_SPEC`（同类：同样每天一张画）
+- ⚠️ 不要凭印象以为它是 2 色屏 —— 这个错误在狸行记里犯过，还被当成了禁用上色的理由
 
 ## 网络与地址
 
@@ -74,6 +87,7 @@
 | **18825** | **my-island** | **/my-island/** | **my-island App - Life Island 汉化版**（2026-08-07 由梦华里端口复用） |
 | **18899** | **tangping** | **/tangping/** | **躺平巴拉 App 后端**（沉浸式水豚养成游戏） |
 | **18838** | **shanhe** | **/shanhe/** | **山河图记 App 后端**（地理研学，11 章；研学 v2 每章 1 主题） |
+| **18841** | **little-prince** | **/little-prince/** | **小王子の日历 App 后端**（2026-10-27 新增；每日生图 + 台词，systemd `openclaw-little-prince.service`） |
 
 ### 端口分配（system scope / daemon & 内部）
 
@@ -90,10 +104,17 @@
 |------|------|------|
 | bt-presence | 常驻 daemon | 蓝牙感知（回家/离家推送，**user scope**） |
 | scraps-push | 常驻 daemon | 灵感碎片推送（system scope） |
-| knowledge-briefing | timer 20:30 | 每日知识简报 |
-| news-fetcher | timer 每小时 | 新闻抓取 |
-| news-summary | timer 22:15 | 新闻 LLM 汇总 |
-| natfrp | 常驻 daemon | 内网穿透 frpc（system scope `sakura-frp.service`，承载 ruohan.site / xia.ruohan.site 隧道；配置 `~/.natfrp/frpc.ini`） |
+| little-prince-pregen | timer 18:00 | 小王子日历次日预生成（system scope `openclaw-little-prince-pregen.timer`） |
+| unit-watch | timer 每小时 | systemd failed unit 新增监控（system scope，零 token，飞书推送） |
+| certbot.timer | 已 mask | 证书续期空转（证书 10-01 已过期，ruohan.site HTTPS 不通），已 mask 不再报 failed |
+| natfrp | 常驻 daemon | 内网穿透 frpc（system scope `sakura-frp.service`，承载 ruohan.site 隧道；配置 `~/.natfrp/frpc.ini`） |
+
+### 外网访问 ruohan.site（2026-10-24 实测）
+
+- **只有 HTTP 可用**：`http://ruohan.site/` 与 `http://ruohan.site/ink/` 均 200
+- **HTTPS 不可用**：`https://ruohan.site/` 报 `tlsv1 unrecognized name`（TLS alert 112）。原因是 frpc 只配了 `type = http` 隧道，frp-cup 边缘节点没有该域名的 SNI/证书，443 直接拒绝握手；无 SNI 时 edge 也不返回证书
+- **子域名一律 503**：frpc 只绑 `custom_domains = ruohan.site`，`www.ruohan.site` / `xia.ruohan.site` 返回 503（后者连 DNS 都没有）；只能走路径前缀
+- 边缘节点 IP `45.95.212.18`，80/443 均开放但 443 无可用证书
 
 ### Nginx 配置
 
