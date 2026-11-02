@@ -29,6 +29,7 @@ import {
   X,
   Users,
   Keyboard,
+  Pencil,
 } from "lucide-react";
 import { authHeaders, fetchCurrentUser, onAuthChanged } from "@/lib/auth";
 import { localeFromPathname, withLocalePath } from "@/lib/i18n";
@@ -499,6 +500,9 @@ function ConfigPageInner() {
   const prefillCode = searchParams.get("code") || "";
   const [currentUser, setCurrentUser] = useState<{ user_id: number; username: string } | null | undefined>(undefined);
   const [userDevices, setUserDevices] = useState<UserDevice[]>([]);
+  const [editingNicknameMac, setEditingNicknameMac] = useState<string | null>(null);
+  const [nicknameDraft, setNicknameDraft] = useState("");
+  const [savingNickname, setSavingNickname] = useState(false);
   const [devicesLoading, setDevicesLoading] = useState(false);
   const [pairCodeInput, setPairCodeInput] = useState("");
   const [pairingDevice, setPairingDevice] = useState(false);
@@ -655,6 +659,42 @@ function ConfigPageInner() {
     } catch {
       showToast("绑定失败", "error");
       return null;
+    }
+  };
+
+  const startRenameDevice = (device: UserDevice) => {
+    setEditingNicknameMac(device.mac);
+    setNicknameDraft(device.nickname || "");
+  };
+
+  const cancelRenameDevice = () => {
+    setEditingNicknameMac(null);
+    setNicknameDraft("");
+  };
+
+  const saveRenameDevice = async (deviceMac: string) => {
+    setSavingNickname(true);
+    try {
+      const res = await fetch(apiUrl(`/api/user/devices/${encodeURIComponent(deviceMac)}`), {
+        method: "PATCH",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ nickname: nicknameDraft.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(typeof data.error === "string" ? data.error : "保存失败", "error");
+        return;
+      }
+      const saved = typeof data.nickname === "string" ? data.nickname : nicknameDraft.trim();
+      setUserDevices((prev) =>
+        prev.map((item) => (item.mac === deviceMac ? { ...item, nickname: saved } : item))
+      );
+      showToast("已保存", "success");
+      cancelRenameDevice();
+    } catch {
+      showToast("保存失败", "error");
+    } finally {
+      setSavingNickname(false);
     }
   };
 
@@ -2530,11 +2570,57 @@ function ConfigPageInner() {
                     <div className="flex items-center gap-3">
                       <Monitor size={18} className="text-ink-light" />
                       <div>
-                        <p className="text-sm font-medium text-ink">
-                          {d.nickname || d.mac}
-                        </p>
-                        {d.nickname && (
-                          <p className="text-xs text-ink-light font-mono">{d.mac}</p>
+                        {editingNicknameMac === d.mac ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              autoFocus
+                              value={nicknameDraft}
+                              onChange={(e) => setNicknameDraft(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  saveRenameDevice(d.mac);
+                                } else if (e.key === "Escape") {
+                                  e.preventDefault();
+                                  cancelRenameDevice();
+                                }
+                              }}
+                              maxLength={32}
+                              placeholder={"别名（可留空）"}
+                              className="w-44 rounded-sm border border-ink/30 px-2 py-1 text-sm"
+                            />
+                            <button
+                              onClick={() => saveRenameDevice(d.mac)}
+                              disabled={savingNickname}
+                              className="p-1.5 text-ink-light hover:text-ink transition-colors disabled:opacity-40"
+                              title={"保存别名"}
+                            >
+                              <Save size={14} />
+                            </button>
+                            <button
+                              onClick={cancelRenameDevice}
+                              className="p-1.5 text-ink-light hover:text-ink transition-colors"
+                              title={"取消"}
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <p className="text-sm font-medium text-ink flex items-center gap-1.5">
+                              {d.nickname || d.mac}
+                              <button
+                                onClick={() => startRenameDevice(d)}
+                                className="p-0.5 text-ink-light hover:text-ink transition-colors"
+                                title={"设置别名"}
+                              >
+                                <Pencil size={12} />
+                              </button>
+                            </p>
+                            {d.nickname && (
+                              <p className="text-xs text-ink-light font-mono">{d.mac}</p>
+                            )}
+                          </>
                         )}
                         <p className="text-xs text-ink-light">
                           {"权限"}: {d.role === "owner" ? "Owner" : "Member"}

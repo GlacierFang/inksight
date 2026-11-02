@@ -20,6 +20,7 @@ from core.config_store import (
     get_user_devices,
     reject_access_request,
     revoke_device_member,
+    set_device_nickname,
     share_device_with_user,
     unbind_device,
 )
@@ -55,6 +56,23 @@ async def unbind_user_device(mac: str, force: bool = False, user_id: int = Depen
     if result == "owner_has_members":
         return JSONResponse({"error": "owner 仍有共享成员，无法解绑；添加 ?force=true 强制解绑并移除所有成员"}, status_code=409)
     return {"ok": True}
+
+
+@router.patch("/user/devices/{mac}")
+async def rename_user_device(mac: str, body: dict, request: Request, user_id: int = Depends(require_user)):
+    normalized_mac = validate_mac_param((mac or "").strip().upper())
+    if not normalized_mac:
+        return JSONResponse({"error": "MAC 地址不能为空"}, status_code=400)
+    nickname = (body.get("nickname") or "").strip()
+    if len(nickname) > 32:
+        return JSONResponse({"error": "别名最长 32 个字符"}, status_code=400)
+    result = await set_device_nickname(user_id, normalized_mac, nickname)
+    if result is None:
+        return JSONResponse({"error": "设备未绑定"}, status_code=404)
+    await log_user_activity(
+        user_id, "device.rename", request=request, metadata={"mac": normalized_mac}
+    )
+    return {"ok": True, **result}
 
 
 @router.get("/user/devices/requests")
