@@ -1,0 +1,163 @@
+{
+  "mode_id": "CUSTOM_SOLAR_TERMS",
+  "display_name": "节气倒计时",
+  "icon": "calendar",
+  "cacheable": false,
+  "description": "当年二十四节气逐个倒数：过去的算已过几天，将来的算还有几天",
+  "content": {
+    "type": "computed",
+    "provider": "solar_terms",
+    "fallback": {
+      "title": "二十四节气",
+      "year": "",
+      "current_name": "",
+      "current_index": "",
+      "next_name": "",
+      "next_days": 0,
+      "rows": []
+    }
+  },
+  "layout": {
+    "status_bar": {
+      "line_width": 1,
+      "dashed": false,
+      "left_text_template": "{title}  {year}"
+    },
+    "layout_engine": "component_tree",
+    "body": {
+      "type": "column",
+      "padding_x": 8,
+      "gap": 4,
+      "children": [
+        {
+          "type": "row",
+          "gap": 6,
+          "align": "center",
+          "children": [
+            {
+              "type": "column",
+              "width": 150,
+              "children": [
+                {
+                  "type": "text",
+                  "template": "{current_name}",
+                  "font_size": 18,
+                  "line_height": 21,
+                  "align": "left",
+                  "max_lines": 1
+                },
+                {
+                  "type": "text",
+                  "template": "第 {current_index} 个",
+                  "font_size": 9,
+                  "line_height": 11,
+                  "align": "left",
+                  "max_lines": 1
+                }
+              ]
+            },
+            {
+              "type": "column",
+              "grow": 1,
+              "children": [
+                {
+                  "type": "text",
+                  "template": "距 {next_name}",
+                  "font_size": 9,
+                  "line_height": 11,
+                  "align": "right",
+                  "max_lines": 1
+                },
+                {
+                  "type": "big_number",
+                  "field": "next_days",
+                  "unit": " 天",
+                  "font_size": 24,
+                  "align": "right"
+                }
+              ]
+            }
+          ]
+        },
+        {"type": "spacer", "height": 1},
+        {
+          "type": "separator",
+          "style": "solid",
+          "line_width": 1,
+          "margin_x": 0
+        },
+        {"type": "spacer", "height": 2},
+        {
+          "type": "repeat",
+          "field": "rows",
+          "gap": 0,
+          "item": {
+            "type": "row",
+            "gap": 4,
+            "align": "center",
+            "children": [
+              {
+                "type": "text",
+                "field": "l_name",
+                "font_size": 12,
+                "line_height": 14,
+                "width": 30,
+                "align": "left",
+                "max_lines": 1
+              },
+              {
+                "type": "text",
+                "field": "l_md",
+                "font_size": 9,
+                "line_height": 14,
+                "width": 26,
+                "align": "left",
+                "max_lines": 1
+              },
+              {
+                "type": "text",
+                "field": "l_days",
+                "font_size": 9,
+                "line_height": 14,
+                "grow": 1,
+                "align": "right",
+                "max_lines": 1
+              },
+              {
+                "type": "text",
+                "field": "r_name",
+                "font_size": 12,
+                "line_height": 14,
+                "width": 30,
+                "align": "left",
+                "max_lines": 1
+              },
+              {
+                "type": "text",
+                "field": "r_md",
+                "font_size": 9,
+                "line_height": 14,
+                "width": 26,
+                "align": "left",
+                "max_lines": 1
+              },
+              {
+                "type": "text",
+                "field": "r_days",
+                "font_size": 9,
+                "line_height": 14,
+                "grow": 1,
+                "align": "right",
+                "max_lines": 1
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "footer": {
+      "label": "节气倒计时",
+      "line_width": 0
+    }
+  }
+}
