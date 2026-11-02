@@ -294,6 +294,12 @@ BUILTIN_CATALOG: list[CatalogItem] = [
         zh=CatalogText(name="电子世界", tip="四方电子生命逐日攻伐固定大陆：州郡易主、当日战报与地图严格对应"),
         en=CatalogText(name="E-World", tip="Four electronic powers fight over a fixed continent daily; the report matches the map exactly"),
     ),
+    CatalogItem(
+        mode_id="CUSTOM_WINDOW",
+        category="custom",
+        zh=CatalogText(name="窗外", tip="一扇向外的窗，窗外是你所选城市的实时天气"),
+        en=CatalogText(name="Window", tip="A window looking out; outside is the live weather of your chosen city"),
+    ),
 ]
 
 
