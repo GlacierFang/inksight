@@ -10,6 +10,7 @@
 用法：
     python3 scripts/history_backfill.py              # 回填全部
     python3 scripts/history_backfill.py --dry-run    # 只看清单
+    python3 scripts/history_backfill.py --force      # 已存在的也重出（布局改了就用这个）
     python3 scripts/history_backfill.py CUSTOM_HAICUOTU
 """
 from __future__ import annotations
@@ -56,6 +57,9 @@ def _days_for(mode_id: str) -> list[str]:
 
 async def main(argv: list[str]) -> int:
     dry_run = "--dry-run" in argv
+    # --force：已存在的整屏图也重出。布局/排版改过之后，旧图留在回顾页上
+    # 就是错的 —— 页面上看到的应该是当前管线出的图。
+    force = "--force" in argv
     modes = [a.upper() for a in argv if not a.startswith("-")]
     if not modes:
         modes = list(gallery._MODES.keys())
@@ -73,7 +77,7 @@ async def main(argv: list[str]) -> int:
         print(f"\n=== {spec['name']} ({mode_id}) —— {len(days)} 天")
         for day in days:
             target = history_render.screen_path(state_name, day)
-            if target.is_file():
+            if target.is_file() and not force:
                 print(f"  已有 {day}")
                 done += 1
                 continue
