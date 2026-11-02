@@ -68,6 +68,43 @@ def _configured_refresh_minutes(config: Optional[dict]) -> int:
     return refresh_minutes
 
 
+# mode_override 里这些键是「这个模式存着的设置」，不是用户临时改的版式。
+# 「窗外」按城市取天气就靠它（settings_schema 的 location）。
+_LOCATION_OVERRIDE_KEYS = {"city", "latitude", "longitude", "timezone", "admin1", "country"}
+
+
+def _is_location_only(override: Optional[dict]) -> bool:
+    """mode_override 只有位置字段 → 仍算正式画面，可以存档。
+
+    纯临时改版式（memo_text 之类）不算正式画面，不存档。
+    位置覆盖要存档：否则配置页看到的「窗外」和回顾里存的是两次生成，图文对不上。
+    """
+    if not override:
+        return True
+    return all(str(k) in _LOCATION_OVERRIDE_KEYS for k in override)
+
+
+async def _archive_device_screen(persona: str, img) -> None:
+    """把设备实际拿到的整屏图存进回顾（画廊主图）。
+
+    正常轮播和推送预览两条路都走这里 —— 设备拿到的是哪张，回顾里就该是哪张。
+    """
+    try:
+        from core.gallery import state_name as gallery_state_name
+        from core.history_render import DEVICE_HEIGHT, DEVICE_WIDTH
+        from core.screen_archive import save_screen
+
+        state_key = gallery_state_name(persona)
+        if not state_key:
+            return
+        # 只收设备画幅（400x300）：别的尺寸不是设备画面。
+        if img.size != (DEVICE_WIDTH, DEVICE_HEIGHT):
+            return
+        save_screen(state_key, datetime.now().strftime("%Y-%m-%d"), img)
+    except Exception as exc:  # 存档失败不该影响下发
+        logger.warning("[RENDER] 整屏存档失败 %s: %s", persona, exc)
+
+
 @router.get("/render")
 @limiter.limit("10/minute")
 async def render(
@@ -122,6 +159,9 @@ async def render(
                         out_media = "image/bmp"
                     elapsed_ms = int((time.time() - start_time) * 1000)
                     resolved_persona = pushed_payload.get("mode") or params.persona or "PUSH_PREVIEW"
+                    # 设备实际拿到这张，先存档再返回。
+                    # 原来这个分支直接 return，屏上那张从没进过回顾。
+                    await _archive_device_screen(resolved_persona, img)
                     await log_render_stats(
                         mac,
                         resolved_persona,
@@ -205,16 +245,7 @@ async def render(
 
         # 真实下发：把设备实际拿到的整屏图存档（画廊主图用）
         if mac:
-            try:
-                from core.gallery import state_name as gallery_state_name
-                from core.screen_archive import save_screen
-
-                state_key = gallery_state_name(resolved_persona)
-                if state_key:
-                    day = datetime.now().strftime("%Y-%m-%d")
-                    save_screen(state_key, day, img)
-            except Exception as exc:  # 存档失败不该影响下发
-                logger.warning("[RENDER] 整屏存档失败: %s", exc)
+            await _archive_device_screen(resolved_persona, img)
 
         if params.colors >= 3:
             out_bytes = image_to_raw_2bpp(img)
@@ -398,7 +429,7 @@ async def preview(
             # 画廊收录的模式靠预览页生成内容（它们多数不在设备轮转里），
             # 这里出图即存档，回顾页才会自己长出来。
             # mode_override 是用户临时改版式，不算正式画面；day_override 是往期，不归这里管。
-            archive_screen=(parsed_mode_override is None and day is None),
+            archive_screen=(_is_location_only(parsed_mode_override) and day is None),
         )
         if intent == 1:
             from fastapi.responses import JSONResponse
@@ -549,7 +580,7 @@ async def preview_stream(
                 colors=colors,
                 album_bucket=album_bucket,
                 # 同上：预览出的正式画面存进画廊。
-                archive_screen=(parsed_mode_override is None),
+                archive_screen=_is_location_only(parsed_mode_override),
             )
             # 如果 API key 无效，返回错误事件
             if api_key_invalid:
