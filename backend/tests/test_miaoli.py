@@ -128,21 +128,19 @@ def test_parse_day():
     assert card["signature"] == "此路有我，概不收租。"
 
 
-def test_parse_day_reads_two_panels():
-    """新的分镜格式：第一格起势，第二格爆发（冰河大人 2026-11-02 定的）。"""
+def test_parse_day_reads_single_scene():
+    """一格单幅（冰河大人 2026-11-02 定的：双格效果太差，改一格）。"""
     from core.miaoli import _parse_day
 
     raw = (
         "标题：扑蝶\n"
-        "第一格：喵狸压低身子，耳朵先动，眼睛盯住白蝴蝶\n"
-        "第二格：喵狸后腿一蹬扑出去，胡须被风拉直\n"
+        "画面：喵狸后腿一蹬扑向白蝴蝶，胡须被风拉直\n"
         "签名：来此一爪。\n"
     )
     card = _parse_day(raw)
     assert card["title"] == "扑蝶"
-    assert card["panel1"].startswith("喵狸压低身子")
-    assert card["panel2"].startswith("喵狸后腿一蹬")
-    assert "→" in card["scene"]
+    assert "扑向白蝴蝶" in card["scene"]
+    assert "panel1" not in card
 
 
 def test_parse_day_requires_scene():
@@ -172,65 +170,147 @@ def test_parse_day_defaults_signature():
 # ── 提示词 ────────────────────────────────────────────────────────────
 
 
-def test_image_prompt_fixes_cat_and_manga_style():
-    """角色设定和风格每次复用同一段 —— 2 色屏上的一致性锚点。"""
-    from core.miaoli import CAT_SPEC, MANGA_SPEC, _image_prompt
+def test_image_prompt_keeps_scene_and_style():
+    """提示词结构：前面是风格要求，后面是 LLM 写的动作。
 
-    prompt = _image_prompt("喵狸蹲在旧粮店的檐砖上")
-    assert "狸花" in prompt
-    assert "M 字纹" in prompt
-    assert "漫画" in prompt
-    assert "不要颜色" in prompt
-    assert CAT_SPEC in prompt
-    assert MANGA_SPEC in prompt
+    冰河大人 2026-11-02：「前面是风格要求：日漫风格，狸花猫，
+    后面是 llm 生成的动作。」
+    """
+    from core.miaoli import STYLE_SPEC, _image_prompt
 
-
-def test_image_prompt_has_equal_panels_and_motion():
-    """左右等宽双格 + 动感 —— 冰河大人 2026-11-02 定的两件事。"""
-    from core.miaoli import DYNAMIC_SPEC, PANEL_SPEC, _image_prompt
-
-    prompt = _image_prompt(
-        "喵狸压低身子 → 喵狸扑出去",
-        panel1="喵狸压低身子，耳朵先动",
-        panel2="喵狸扑出去，胡须被风拉直",
-    )
-    assert PANEL_SPEC in prompt
-    assert DYNAMIC_SPEC in prompt
-    assert "等宽" in prompt
-    assert "速度线" in prompt
-    # 两格分镜各占一行，模型才分得清哪句是哪格
-    assert "喵狸压低身子，耳朵先动" in prompt
-    assert "喵狸扑出去，胡须被风拉直" in prompt
+    prompt = _image_prompt("它蹲在旧粮店的檐砖上")
+    assert STYLE_SPEC in prompt
+    assert "它蹲在旧粮店的檐砖上" in prompt
+    # 风格和主体必须在动作前面
+    assert prompt.index(STYLE_SPEC) < prompt.index("它蹲在旧粮店的檐砖上")
 
 
-def test_image_prompt_forbids_portrait_style():
-    """之前跑偏成素描插画 —— 排除项要钉死。"""
-    from core.miaoli import NEGATIVE_SPEC, _image_prompt
+def test_image_prompt_uses_screen_four_color_palette():
+    """屏是四色：黑 / 白 / 金黄 #E8B000 / 朱红 #C80000。
+
+    提示词必须把这四个色值写死给生图模型，不能让它自由发挥；
+    也不能再说「不要颜色」—— 那是把没查过的假设当事实。
+
+    浅阴影用金黄网点：屏上没有灰，灰网点会被抖成脏黄网纹。
+    """
+    from core.config import EINK_4COLOR_PALETTE
+    from core.miaoli import _image_prompt
+
+    prompt = _image_prompt("它蹲在旧粮店的檐砖上")
+    assert "#E8B000" in prompt
+    assert "#C80000" in prompt
+    assert "#000000" in prompt
+    assert "纯白纸面底" in prompt
+    assert "不要颜色" not in prompt
+    # 四色屏的物理色必须与调色板一致（扁平 int 列表，每色 3 个通道）
+    pal = EINK_4COLOR_PALETTE
+    assert tuple(pal[6:9]) == (232, 176, 0)   # 金黄
+    assert tuple(pal[9:12]) == (200, 0, 0)    # 朱红
+
+
+def test_image_prompt_has_no_negative_constraint_block():
+    """提示词不做否定清单 —— 照小景 core/xiaojing.py 的教训。
+
+    小景文件里写着：否定约束越多模型越僵，还容易把不该出现的元素招来；
+    它自己原来的 400 词约束块就是这么废的。所以只留两句必要的话
+    （不要第五种色相 / 不要文字印章），其余全部改成正面描述。
+    """
+    from core.miaoli import STYLE_SPEC, _image_prompt
 
     prompt = _image_prompt("某个场景")
-    assert NEGATIVE_SPEC in prompt
-    assert "动物肖像插画" in prompt
-    assert "静态坐姿摆拍" in prompt
+    for banned in (
+        "不要动物肖像插画", "不要素描", "不要3D渲染", "不要柔焦",
+        "不要水彩", "不要儿童绘本", "不要静态坐姿摆拍", "不要两格姿势雷同",
+        "不要版权字样", "不要橘色", "不要棕色", "不要橙色",
+        "不要第五种色相",
+    ):
+        assert banned not in prompt, f"不该有否定清单条目：{banned}"
+    # 风格段一句话就够（小景：写长了模型会僵住，出图变成照着条文填空）
+    assert len(STYLE_SPEC) < 20
 
 
-def test_day_prompt_asks_for_two_beats():
-    """LLM 要写两拍：起势 + 爆发，否则画出来还是摆拍。"""
+def test_image_prompt_has_no_invented_character_spec():
+    """不给猫编设定 —— 冰河大人 2026-11-02：
+
+    「一只狸花猫：额头一个 M 字纹……我有说这些么？没有，
+    你限制的越多，出图的效果越差！」
+    """
+    from core.miaoli import _image_prompt
+
+    prompt = _image_prompt("某个场景")
+    for invented in (
+        "M 字纹", "狸花条纹", "尾巴梢", "耳尖", "铜钱", "项圈",
+        "额头", "杏仁眼", "尖下颌", "细腰长腿",
+    ):
+        assert invented not in prompt, f"不该写猫的设定：{invented}"
+
+
+def test_image_prompt_only_gives_style():
+    """提示词只给风格要求，不限定猫的造型，不写动态表达。
+
+    冰河大人 2026-11-02：「你只需要给风格要求不就好了，
+    折腾这么多有的没的意义在哪里？」
+    """
+    from core.miaoli import _image_prompt
+
+    prompt = _image_prompt("喵狸后腿一蹬扑向白蝴蝶，胡须被风拉直")
+    # 不写动态表达
+    for banned in ("速度线", "集中线", "斜切构图", "飞溅", "残影", "扑出去"):
+        assert banned not in prompt, f"不该写动态表达：{banned}"
+    # 不限定造型
+    for banned in ("杏仁眼", "尖下颌", "细腰长腿", "Q 版", "Q版", "造型"):
+        assert banned not in prompt, f"不该限定猫的造型：{banned}"
+    # 不提分格
+    assert "两格" not in prompt
+    assert "分格" not in prompt
+    assert "等宽" not in prompt
+    # 画面描述原样保留
+    assert "喵狸后腿一蹬扑向白蝴蝶，胡须被风拉直" in prompt
+
+
+def test_style_spec_is_user_wording():
+    """风格段用冰河大人的原话 —— 不自己换词。"""
+    from core.miaoli import STYLE_SPEC
+
+    assert STYLE_SPEC == "日漫风格，狸花猫"
+
+
+def test_image_prompt_retry_only_appends_one_sentence():
+    """重试就是原提示词加一句 —— 照小景，不另写一份平行约束。"""
+    from core.miaoli import RETRY_PROMPT, _image_prompt
+
+    base = _image_prompt("某个场景")
+    retry = _image_prompt("某个场景", retry=True)
+    assert retry == base + RETRY_PROMPT
+    assert "不要有任何文字" in RETRY_PROMPT
+
+
+def test_day_prompt_asks_for_one_moving_moment():
+    """LLM 写一个动作瞬间，且画面要有速度。"""
     from core.miaoli import DAY_PROMPT
 
-    assert "第一格" in DAY_PROMPT
-    assert "第二格" in DAY_PROMPT
-    assert "同一个动作的接续" in DAY_PROMPT
+    assert "画面" in DAY_PROMPT
     assert "画面要有速度" in DAY_PROMPT
+    assert "第一格" not in DAY_PROMPT
+    assert "第二格" not in DAY_PROMPT
+
+
+def test_day_prompt_uses_third_person():
+    """画面用「它」—— 提示词开头已经有「狸花猫」，主语不能打架。"""
+    from core.miaoli import DAY_PROMPT
+
+    assert "它" in DAY_PROMPT
+    assert "不要用「我」" in DAY_PROMPT
 
 
 def test_image_prompt_forbids_text_and_bubbles():
-    """屏上的字由程序排；模型画的字在 2 色屏上会糊成一团。"""
+    """屏上的字由程序排；模型画的字在屏上会糊成一团。"""
     from core.miaoli import _image_prompt
 
-    prompt = _image_prompt("某个场景", )
-    assert "不要有任何文字" in prompt
-    assert "气泡框" in prompt
-    assert "对话框" in prompt
+    prompt = _image_prompt("某个场景")
+    assert "不要任何文字" in prompt
+    assert "印章" in prompt
+    assert "水印" in prompt
 
 
 def test_day_prompt_has_no_real_system_data():
