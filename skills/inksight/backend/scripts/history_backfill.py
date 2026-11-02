@@ -52,7 +52,31 @@ def _days_for(mode_id: str) -> list[str]:
         return out
 
     state = gallery._read_state(str(spec.get("state") or ""))
+    if spec.get("multi_phase"):
+        # 多时段模式：_rows 的 key 是「日期_时段」，这里只要日期
+        days = set()
+        for key, _item in gallery._rows(state, spec):
+            days.add(str(key).rsplit("_", 1)[0])
+        return sorted(days)
     return [day for day, _item in gallery._rows(state, spec)]
+
+
+def _phases_for(mode_id: str, day: str) -> list[str]:
+    """这一天要出哪几个时段的图。
+
+    多时段模式（小景）按状态里记过的时段来 —— 那天真出过哪几个时段就补哪几个，
+    不硬凑四个。其余模式只有一个（空串 = 不带时段）。
+    """
+    spec = gallery._spec(mode_id)
+    if not spec or not spec.get("multi_phase"):
+        return [""]
+    state = gallery._read_state(str(spec.get("state") or ""))
+    phases = state.get("phases")
+    day_phases = phases.get(day) if isinstance(phases, dict) else None
+    if not isinstance(day_phases, dict):
+        return [""]
+    out = [p for p in sorted(day_phases) if isinstance(day_phases.get(p), dict)]
+    return out or [""]
 
 
 async def main(argv: list[str]) -> int:
@@ -73,24 +97,26 @@ async def main(argv: list[str]) -> int:
             continue
         state_name = str(spec.get("state") or "")
         days = _days_for(mode_id)
-        total += len(days)
+        total += sum(len(_phases_for(mode_id, day)) for day in days)
         print(f"\n=== {spec['name']} ({mode_id}) —— {len(days)} 天")
         for day in days:
-            target = history_render.screen_path(state_name, day)
-            if target.is_file() and not force:
-                print(f"  已有 {day}")
+            for phase in _phases_for(mode_id, day):
+                label = f"{day} {phase}" if phase else day
+                target = history_render.screen_path(state_name, day, phase)
+                if target.is_file() and not force:
+                    print(f"  已有 {label}")
+                    done += 1
+                    continue
+                if dry_run:
+                    print(f"  待出 {label}")
+                    continue
+                data = await history_render.render_day(mode_id, day, phase=phase)
+                if not data:
+                    print(f"  失败 {label}")
+                    continue
+                history_render.save_png(state_name, day, data, phase=phase)
                 done += 1
-                continue
-            if dry_run:
-                print(f"  待出 {day}")
-                continue
-            data = await history_render.render_day(mode_id, day)
-            if not data:
-                print(f"  失败 {day}")
-                continue
-            history_render.save_png(state_name, day, data)
-            done += 1
-            print(f"  出图 {day} ({len(data)} bytes)")
+                print(f"  出图 {label} ({len(data)} bytes)")
 
     print(f"\n合计 {total} 天，已完成 {done} 天" + ("（dry-run，未出图）" if dry_run else ""))
     return 0

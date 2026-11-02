@@ -21,6 +21,7 @@ interface Field {
 
 interface Entry {
   date: string;
+  phase?: string;
   title: string;
   text: string;
   meta: string;
@@ -204,18 +205,22 @@ function GalleryInner() {
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {items.map((entry) => (
                   <figure
-                    key={`${entry.date}-${entry.title}`}
+                    key={`${entry.date}-${entry.phase || entry.title}`}
                     className="rounded-lg border border-ink/10 bg-white p-3"
                   >
                     <img
                       src={apiUrl(
-                        `/api/gallery/image?mode=${encodeURIComponent(activeMode.mode_id)}&day=${entry.date}`,
+                        `/api/gallery/image?mode=${encodeURIComponent(activeMode.mode_id)}&day=${entry.date}` +
+                          (entry.phase ? `&phase=${encodeURIComponent(entry.phase)}` : ""),
                       )}
                       alt={entry.title || entry.date}
                       className="w-full rounded border border-ink/5 bg-paper object-contain"
                     />
                     <figcaption className="mt-2">
-                      <div className="text-xs text-ink-light">{entry.date}</div>
+                      <div className="text-xs text-ink-light">
+                        {entry.date}
+                        {entry.phase && ` · ${entry.title || entry.phase}`}
+                      </div>
                       {entry.title && (
                         <div className="text-sm font-semibold text-ink mt-0.5">{entry.title}</div>
                       )}

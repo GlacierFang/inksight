@@ -30,6 +30,9 @@ _BACKEND_DIR = Path(__file__).resolve().parent.parent
 STATE_DIR = _BACKEND_DIR / "runtime_cache"
 STATIC_DIR = _BACKEND_DIR / "static"
 
+# 时段中文名（小景一天四张，回顾里按这个标）
+PHASE_LABEL_CN = {"dawn": "晨", "day": "昼", "dusk": "暮", "night": "夜"}
+
 # shape=map  状态里是 {日期: 条目} 的字典
 # shape=list 状态里是 [{日期: 条目}] 的列表（rows 指明取哪个键）
 # form=wide  按日期现算（电子世界）
@@ -74,8 +77,10 @@ _MODES: dict[str, dict] = {
     },
     "CUSTOM_XIAOJING": {
         "name": "小景", "form": "grid", "state": "xiaojing", "shape": "map",
-        "title": "phase_label", "text": "phase", "meta": "",
-        "fields": [("phase_label", "时段"), ("phase", "时段")],
+        # 一天四张（晨/昼/暮/夜）：一天出多张图，条目按「日期+时段」展开。
+        "multi_phase": True,
+        "title": "phase_label", "text": "phase_label", "meta": "",
+        "fields": [("phase_label", "时段")],
     },
     "CUSTOM_EWORLD": {"name": "电子世界", "form": "wide", "state": "eworld"},
     "CUSTOM_WINDOW": {
@@ -113,9 +118,42 @@ def _read_state(name: str) -> dict:
     try:
         with (STATE_DIR / name / "state.json").open("r", encoding="utf-8") as fh:
             data = json.load(fh)
-        return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
+def _read_mode_state(mode_id: str) -> dict:
+    """读某模式的状态；多时段模式顺带把缺失的时段记录补出来。
+
+    小景一天四张，时段记录存在 state.json 的 phases 里。旧存档只有 days，
+    但素材图本来就按时段分文件存在磁盘上 —— 补得回来，不算编造。
+    """
+    spec = _spec(mode_id)
+    state_name = str(spec.get("state") or "") if spec else ""
+    state = _read_state(state_name)
+    if not spec or not spec.get("multi_phase"):
+        return state
+    if isinstance(state.get("phases"), dict) and state.get("phases"):
+        return state
+    try:
+        from .xiaojing import reconstruct_phases
+
+        phases = reconstruct_phases(state)
+    except Exception as exc:  # pragma: no cover - 重建失败不该让回顾页整个挂掉
+        logger.warning("[Gallery] 重建时段记录失败 %s: %s", mode_id, exc)
+        return state
+    if phases:
+        try:
+            path = STATE_DIR / state_name / "state.json"
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(path)
+        except OSError as exc:
+            logger.warning("[Gallery] 写回时段记录失败 %s: %s", mode_id, exc)
+    return state
 
 
 def _eworld_epoch() -> date:
@@ -135,7 +173,35 @@ def _as_text(value) -> str:
     return str(value or "")
 
 
+def _phase_rows(state: dict, spec: dict) -> list[tuple[str, dict]]:
+    """多时段模式（小景）：一天一条展开成一天四条（晨/昼/暮/夜）。
+
+    条目 key 是「日期_时段」，这样同一个时段重复出图是覆盖而不是多出一条。
+    整屏图路径也按同一套 key 走（runtime_cache/<state>/screens/<日期>_<时段>.png）。
+    """
+    out: list[tuple[str, dict]] = []
+    phases = state.get("phases")
+    if not isinstance(phases, dict):
+        return out
+    for day in sorted(phases):
+        day_phases = phases.get(day)
+        if not isinstance(day_phases, dict):
+            continue
+        for phase in sorted(day_phases):
+            item = day_phases.get(phase)
+            if not isinstance(item, dict):
+                continue
+            record = dict(item)
+            record.setdefault("date", day)
+            record.setdefault("phase", phase)
+            record.setdefault("phase_label", PHASE_LABEL_CN.get(phase, phase))
+            out.append((f"{day}_{phase}", record))
+    return out
+
+
 def _rows(state: dict, spec: dict) -> list[tuple[str, dict]]:
+    if spec.get("multi_phase"):
+        return _phase_rows(state, spec)
     if spec.get("shape") == "map":
         days = state.get("days")
         if not isinstance(days, dict):
@@ -177,6 +243,18 @@ def _has_screen(state: str, day: str) -> bool:
     return history_render.screen_path(state, day).is_file()
 
 
+def _entry_key(mode_id: str, item_key: str) -> tuple[str, str]:
+    """条目 key（「日期」或「日期_时段」）拆成 (日期, 时段)。
+
+    整屏图路径由这两个分量拼出来 —— 多时段模式一天多张，靠时段分开。
+    """
+    spec = _spec(mode_id)
+    if spec and spec.get("multi_phase") and "_" in item_key:
+        day, _, phase = item_key.rpartition("_")
+        return day, phase
+    return item_key, ""
+
+
 def entries(mode_id: str) -> list[dict]:
     """某模式的往期条目，按日期升序。
 
@@ -186,13 +264,20 @@ def entries(mode_id: str) -> list[dict]:
     if not spec or spec.get("form") == "wide":
         return []
     state_name = str(spec.get("state") or "")
-    state = _read_state(state_name)
+    state = _read_mode_state(mode_id)
     out: list[dict] = []
     for date_key, item in _rows(state, spec):
-        if not _has_screen(state_name, date_key):
+        day, phase = _entry_key(mode_id, date_key)
+        # 多时段模式：只认该时段自己的整屏图（<日期>_<时段>.png）。
+        # 其余模式：当天那张 <日期>.png。
+        if phase:
+            if not history_render.screen_path(state_name, day, phase).is_file():
+                continue
+        elif not _has_screen(state_name, day):
             continue
         out.append({
-            "date": date_key,
+            "date": day,
+            "phase": phase,
             "title": _as_text(item.get(spec.get("title") or "")),
             "text": _as_text(item.get(spec.get("text") or "")),
             "meta": _as_text(item.get(spec.get("meta") or "")),
@@ -202,12 +287,12 @@ def entries(mode_id: str) -> list[dict]:
     return out
 
 
-def screen_png(mode_id: str, day: str) -> bytes | None:
-    """某一天的整屏 PNG 字节。"""
+def screen_png(mode_id: str, day: str, phase: str = "") -> bytes | None:
+    """某一天的整屏 PNG 字节。多时段模式带上 phase 才是那一张。"""
     spec = _spec(mode_id)
     if not spec:
         return None
-    return history_render.read_png(str(spec.get("state") or ""), day)
+    return history_render.read_png(str(spec.get("state") or ""), day, phase)
 
 
 def _data_url(png: bytes | None) -> str:
