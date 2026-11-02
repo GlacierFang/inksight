@@ -2,6 +2,7 @@
 
 2026-11-02 冰河大人定：
 - 天气取用户填的城市，每次渲染现取现用（走 cache.py 已有的 Open-Meteo 预取链路）。
+- 城市名只用来取天气，不进任何 prompt：进了模型就照着那座城写，窗外就不再随机。
 - 窗外是什么完全交给 AI：不预设地点、不预设时段、不预设构图。
 - 窗必须存在：窗写进生图提示词，出图失败重试时再强调一次。
   不额外调看图模型去复核 —— 那是白烧 token。
@@ -51,12 +52,10 @@ WINDOW_SPEC_RETRY = " 画面必须是从屋内透过一扇窗向外看的视角�
 
 # ── 窗外景象（LLM 写一句）──────────────────────────────────────────────
 SCENE_PROMPT = (
-    "现在是{city}的天气：{desc}{temp}。\n"
+    "现在的天气：{desc}{temp}。\n"
     "用一句话（不超过40字）写出你从屋里透过一扇窗向外看到的景象。"
     "窗外是什么完全由你决定，只要和上面的天气对得上就行。只写那一句，不要解释。"
 )
-
-_FALLBACK_CITY = "杭州"
 
 
 # ── 小工具 ────────────────────────────────────────────────────────────
@@ -120,14 +119,20 @@ def _art_name(city: str, weather_code) -> str:
 
 # ── LLM：写窗外那一句 ─────────────────────────────────────────────────
 
-async def _llm_scene(city: str, desc: str, temp: str, **kwargs) -> str:
+async def _llm_scene(desc: str, temp: str, **kwargs) -> str:
+    """让 LLM 写一句窗外景象。
+
+    城市名故意不进 prompt：城市只用来取天气，取到什么天气就说什么天气。
+    把城市名喂进去，模型会照着那座城写（实测杭州/晴 ->
+    "窗外是晴空下的杭州街景"），这句又原样进生图 prompt，
+    窗外是什么就不再是随机的了。
+    """
     from .content import _call_llm
 
     provider = str(kwargs.get("llm_provider") or "").strip() or "minimax"
     model = str(kwargs.get("llm_model") or "").strip()
     models = (model,) if model else LLM_MODELS
     prompt = SCENE_PROMPT.format(
-        city=city or _FALLBACK_CITY,
         desc=desc or "天气不明",
         temp=(temp + " ") if temp else "",
     )
@@ -303,7 +308,7 @@ async def build_window_content(fallback: dict | None = None, **kwargs) -> dict:
     content["weather_text"] = weather_text or "天气未知"
 
     dest = ART_DIR / _art_name(city, kwargs.get("weather_code", -1))
-    scene = await _llm_scene(city, desc, temp, **kwargs)
+    scene = await _llm_scene(desc, temp, **kwargs)
     if not scene:
         logger.warning("[Window] 没拿到窗外景象")
         content["has_image"] = "no"
