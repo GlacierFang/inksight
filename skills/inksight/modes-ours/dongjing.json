@@ -30,10 +30,10 @@
         "field": "title",
         "align": "left",
         "font": "noto_serif_bold",
-        "font_size": 25,
+        "font_size": 26,
         "max_lines": 1,
         "margin_x": 16,
-        "margin_bottom": 2
+        "margin_bottom": 12
       },
       {
         "type": "text",
@@ -43,7 +43,7 @@
         "font_size": 13,
         "max_lines": 1,
         "margin_x": 16,
-        "margin_bottom": 6
+        "margin_bottom": 4
       },
       {
         "type": "conditional",
@@ -59,16 +59,18 @@
                 "align": "left",
                 "font": "noto_serif_light",
                 "font_size": 13,
-                "max_lines": 2,
+                "line_height": 16,
+                "max_lines": 3,
                 "margin_x": 16,
-                "margin_bottom": 6
+                "margin_bottom": 3,
+                "reserve_line_height": true
               },
               {
                 "type": "list",
                 "field": "items",
                 "font": "noto_serif_regular",
-                "font_size": 15,
-                "item_spacing": 19,
+                "font_size": 16,
+                "item_spacing": 18,
                 "max_items": 8,
                 "align": "left",
                 "margin_x": 16
@@ -84,11 +86,12 @@
                 "field": "quote",
                 "align": "left",
                 "font": "noto_serif_regular",
-                "font_size": 18,
-                "line_height": 24,
+                "font_size": 16,
+                "line_height": 26,
                 "max_lines": 6,
                 "margin_x": 16,
-                "margin_bottom": 4
+                "margin_bottom": 6,
+                "min_height": 144
               },
               {
                 "type": "text",
@@ -108,7 +111,7 @@
       "label": "汴京梦华",
       "attribution_template": "{festival_line}",
       "dashed": true,
-      "font_size": 12
+      "font_size": 13
     }
   }
 }
