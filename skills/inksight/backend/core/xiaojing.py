@@ -144,6 +144,59 @@ def _write_state(data: dict) -> None:
         logger.warning("[Xiaojing] 写状态失败", exc_info=True)
 
 
+def _write_phase_record(state: dict, date_key: str, phase: str, record: dict) -> None:
+    """记下某天某时段的那张图。
+
+    一天四张（晨/昼/暮/夜）各记各的 —— 顶层 days[日期] 只存当前时段，
+    回顾要一天四张，全靠这里分开记。
+    """
+    phases = state.get("phases")
+    if not isinstance(phases, dict):
+        phases = {}
+    day_phases = phases.get(date_key)
+    if not isinstance(day_phases, dict):
+        day_phases = {}
+    day_phases[phase] = record
+    phases[date_key] = day_phases
+    state["phases"] = phases
+
+
+def reconstruct_phases(state: dict) -> dict:
+    """状态里没有 phases 时，从磁盘上真实存在的图反推出来。
+
+    早于 phases 记录的存档只有 days（一天一条），但素材图本来就是按时段分开的
+    （scene_<日期>_<时段>.png）—— 图在磁盘上，这条记录就补得回来，不算编造。
+    """
+    phases = state.get("phases")
+    if not isinstance(phases, dict):
+        phases = {}
+    days = state.get("days")
+    if not isinstance(days, dict):
+        return phases
+    for day in sorted(days):
+        day_phases = phases.get(day)
+        if not isinstance(day_phases, dict):
+            day_phases = {}
+        for phase in PHASES:
+            if phase in day_phases:
+                continue
+            art_name = _art_name(day, phase)
+            if not (ART_DIR / art_name).is_file():
+                continue
+            day_phases[phase] = {
+                "date": day,
+                "phase": phase,
+                "phase_label": PHASE_LABEL.get(phase, ""),
+                "art_url": f"/static/xiaojing/{art_name}",
+                "has_image": "yes",
+                "note": "按时段重建",
+            }
+        if day_phases:
+            phases[day] = day_phases
+    state["phases"] = phases
+    return phases
+
+
 def _lock_acquire() -> bool:
     try:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -466,10 +519,16 @@ async def generate_scene(
     date_key: str,
     *,
     force: bool = False,
+    update_current: bool = True,
     **kwargs,
 ) -> dict:
-    """出（或复用）今天这张小景。跨时段就换一张。"""
+    """出（或复用）某天某时段这张小景。跨时段就换一张。
+
+    一天四张（晨/昼/暮/夜）各记各的：顶层记当前时段，phases 记全部时段 ——
+    回顾要一天四张，不能互相覆盖。
+    """
     state = _read_state()
+    reconstruct_phases(state)
     days = state.get("days")
     if not isinstance(days, dict):
         days = {}
@@ -481,13 +540,18 @@ async def generate_scene(
     art_path = ART_DIR / art_name
 
     if not force and today.get("phase") == phase and art_path.exists():
-        return {
+        record = {
             "date": date_key,
             "phase": phase,
+            "phase_label": PHASE_LABEL.get(phase, ""),
             "art_url": f"/static/xiaojing/{art_name}",
             "has_image": "yes",
             "note": "复用",
         }
+        state["days"] = days
+        _write_phase_record(state, date_key, phase, record)
+        _write_state(state)
+        return record
 
     if not _lock_acquire():
         # 别的进程正在出图：有旧图就用旧的，没有就退成无图。
@@ -520,7 +584,7 @@ async def generate_scene(
     finally:
         _lock_release()
 
-    today = {
+    record = {
         "date": date_key,
         "phase": phase,
         "phase_label": PHASE_LABEL.get(phase, ""),
@@ -528,11 +592,18 @@ async def generate_scene(
         "has_image": "yes" if art_url else "no",
         "note": reason,
     }
-    days[date_key] = today
+    # 顶层只跟今天 —— 历史日回填不能改掉当天正在用的那条。
+    # update_current=False 时连今天也不动：回填补的是「那天各时段那几张」，
+    # 不是「设备此刻该显示哪张」。
+    if update_current and date_key == datetime.now().strftime("%Y-%m-%d"):
+        days[date_key] = record
+    else:
+        days.setdefault(date_key, {"date": date_key})
     state["days"] = days
+    _write_phase_record(state, date_key, phase, record)
     _write_state(state)
 
-    return today
+    return record
 
 
 def _history_content(record: dict, fallback: dict | None) -> dict:
@@ -560,23 +631,39 @@ async def build_xiaojing_content(fallback: dict | None = None, **kwargs) -> dict
     config = kwargs.get("config")
     config = config if isinstance(config, dict) else {}
 
+    # 指定时段（历史回填用）：渲染那天的某一个时段，而不是当前时段。
+    date_ctx = kwargs.get("date_ctx") or {}
+    phase_override = str(date_ctx.get("phase_override") or "")
+    if phase_override not in PHASES:
+        phase_override = ""
+
     state = _read_state()
     days = state.get("days")
     today = days.get(date_key) if isinstance(days, dict) else None
 
     # 历史日：只读已有记录。绝不补生成 —— 那天没生成过就是没生成过。
+    # 指定了时段是例外：回填要补的正是那一天各时段那几张。
     if not isinstance(today, dict) or not today.get("art_url"):
-        if date_key != datetime.now().strftime("%Y-%m-%d"):
+        if date_key != datetime.now().strftime("%Y-%m-%d") and not phase_override:
             return _history_content(today or {}, fallback)
 
-    phase, now_local = await current_phase(config)
-    record = await generate_scene(phase, date_key, **kwargs)
+    if phase_override:
+        # 指定时段：只补那一张，不改「设备此刻该显示哪张」。
+        phase = phase_override
+        real_phase, _now = await current_phase(config)
+        update_current = (phase == real_phase)
+    else:
+        phase, now_local = await current_phase(config)
+        update_current = True
+    record = await generate_scene(phase, date_key, update_current=update_current, **kwargs)
 
     content = {
         "art_url": str(record.get("art_url") or ""),
         "has_image": str(record.get("has_image") or "no"),
         "phase": PHASE_LABEL.get(phase, ""),
         "phase_label": PHASE_LABEL.get(phase, ""),
+        # 英文时段 key：存档层靠它把同一时段的那张图归到一处。
+        "phase_key": phase,
     }
     if isinstance(fallback, dict):
         for key, value in fallback.items():
