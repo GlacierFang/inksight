@@ -217,6 +217,12 @@ BUILTIN_CATALOG: list[CatalogItem] = [
         en=CatalogText(name="Grass Ant", tip="A garden ant that rolls a die to decide its day"),
     ),
     CatalogItem(
+        mode_id="CUSTOM_MIAOLI",
+        category="custom",
+        zh=CatalogText(name="狸行记", tip="一只狸花猫的日漫日记，每天一张黑白日漫分格图"),
+        en=CatalogText(name="Miaoli", tip="A tabby cat's daily manga journal: one black-and-white two-panel page a day"),
+    ),
+    CatalogItem(
         mode_id="CUSTOM_XIAOJING",
         category="custom",
         zh=CatalogText(name="小景", tip="每天画一小片世界，跟着此刻的光线换色"),

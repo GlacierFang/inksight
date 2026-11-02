@@ -1,0 +1,73 @@
+{
+  "mode_id": "CUSTOM_MIAOLI",
+  "display_name": "狸行记",
+  "icon": "art",
+  "cacheable": false,
+  "description": "喵狸的日漫一日。一张图，一句话都没有。",
+  "content": {
+    "type": "computed",
+    "provider": "miaoli",
+    "fallback": {
+      "art_url": "",
+      "has_image": "no",
+      "title": "",
+      "scene": "",
+      "signature": ""
+    }
+  },
+  "layout": {
+    "status_bar": {
+      "hidden": true
+    },
+    "body_align": "top",
+    "body": [
+      {
+        "type": "conditional",
+        "field": "has_image",
+        "conditions": [
+          {
+            "op": "eq",
+            "value": "yes",
+            "children": [
+              {
+                "type": "image",
+                "field": "art_url",
+                "x": 0,
+                "width": 400,
+                "height": 270,
+                "fit": "cover",
+                "align_x": "center",
+                "align_y": "center",
+                "margin_bottom": 0
+              }
+            ]
+          },
+          {
+            "op": "eq",
+            "value": "no",
+            "children": [
+              {
+                "type": "spacer",
+                "height_px": 110
+              },
+              {
+                "type": "text",
+                "template": "今日未画",
+                "align": "center",
+                "font": "noto_serif_light",
+                "font_size": 16,
+                "max_lines": 1,
+                "margin_bottom": 0
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "footer": {
+      "label": "狸行记",
+      "attribution_template": "{name}·{signature}",
+      "dashed": true
+    }
+  }
+}
