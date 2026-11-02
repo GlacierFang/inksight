@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, Suspense } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { apiUrl } from "@/lib/api";
-import { authHeaders } from "@/lib/auth";
-import { localeFromPathname, t } from "@/lib/i18n";
+import { authHeaders, clearToken } from "@/lib/auth";
+import { localeFromPathname, t, withLocalePath } from "@/lib/i18n";
 
 interface GalleryMode {
   mode_id: string;
@@ -59,6 +59,7 @@ function monthLabel(key: string): string {
 
 function GalleryInner() {
   const pathname = usePathname();
+  const router = useRouter();
   const locale = localeFromPathname(pathname || "/");
 
   const [modes, setModes] = useState<GalleryMode[]>([]);
@@ -69,6 +70,14 @@ function GalleryInner() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // 未登录：跟 preview / profile 页一样跳登录页，登录后回到回顾
+  const redirectToLogin = useCallback(() => {
+    clearToken();
+    router.replace(
+      `${withLocalePath(locale, "/login")}?next=${encodeURIComponent("/gallery")}`,
+    );
+  }, [router, locale]);
+
   const loadModes = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -76,6 +85,10 @@ function GalleryInner() {
       const res = await fetch(apiUrl("/api/gallery"), {
         headers: authHeaders(),
       });
+      if (res.status === 401) {
+        redirectToLogin();
+        return;
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const list: GalleryMode[] = data.modes || [];
@@ -86,7 +99,7 @@ function GalleryInner() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [redirectToLogin]);
 
   useEffect(() => {
     loadModes();
@@ -109,6 +122,10 @@ function GalleryInner() {
         apiUrl(`/api/gallery?mode=${encodeURIComponent(activeMode.mode_id)}`),
         { headers: authHeaders() },
       );
+      if (res.status === 401) {
+        redirectToLogin();
+        return;
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setEntries(data.entries || []);
@@ -118,7 +135,7 @@ function GalleryInner() {
     } finally {
       setLoading(false);
     }
-  }, [activeMode]);
+  }, [activeMode, redirectToLogin]);
 
   const loadWide = useCallback(async () => {
     if (!activeMode || activeMode.form !== "wide") return;
@@ -129,6 +146,10 @@ function GalleryInner() {
         apiUrl(`/api/gallery?mode=${encodeURIComponent(activeMode.mode_id)}&day=${wideDay}`),
         { headers: authHeaders() },
       );
+      if (res.status === 401) {
+        redirectToLogin();
+        return;
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setWide(data.entry || null);
@@ -138,7 +159,7 @@ function GalleryInner() {
     } finally {
       setLoading(false);
     }
-  }, [activeMode, wideDay]);
+  }, [activeMode, wideDay, redirectToLogin]);
 
   useEffect(() => {
     if (!activeMode) return;
