@@ -1022,6 +1022,9 @@ async def _generate_computed_content(mode_def: dict, content_cfg: dict, fallback
     if provider == "year_progress":
         from .year_progress import build_year_progress_content
         return await build_year_progress_content(fallback, **kwargs)
+    if provider == "solar_terms":
+        from .solar_terms import build_solar_terms_content
+        return await build_solar_terms_content(fallback, **kwargs)
     if provider == "prince":
         from .prince import build_prince_content
         return await build_prince_content(fallback, **kwargs)
