@@ -300,6 +300,12 @@ BUILTIN_CATALOG: list[CatalogItem] = [
         zh=CatalogText(name="窗外", tip="一扇向外的窗，窗外是你所选城市的实时天气"),
         en=CatalogText(name="Window", tip="A window looking out; outside is the live weather of your chosen city"),
     ),
+    CatalogItem(
+        mode_id="CUSTOM_THROUGH",
+        category="custom",
+        zh=CatalogText(name="透屏", tip="一屏透明的屏，往里看是屏底下的电路板"),
+        en=CatalogText(name="Through Screen", tip="A transparent screen; look inside and see the circuit board beneath"),
+    ),
 ]
 
 

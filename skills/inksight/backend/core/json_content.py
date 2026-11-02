@@ -970,6 +970,9 @@ async def _generate_computed_content(mode_def: dict, content_cfg: dict, fallback
     if provider == "window":
         from .window import build_window_content
         return await build_window_content(fallback, **kwargs)
+    if provider == "through":
+        from .through import build_through_content
+        return await build_through_content(fallback, **kwargs)
     if provider == "countdown":
         from .content import generate_countdown_content
         config = content_cfg.get("config", {})

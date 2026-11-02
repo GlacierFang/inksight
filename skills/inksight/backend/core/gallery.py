@@ -83,6 +83,11 @@ _MODES: dict[str, dict] = {
         "title": "city_name", "text": "weather_text", "meta": "",
         "fields": [("city_name", "城市"), ("weather_text", "天气")],
     },
+    "CUSTOM_THROUGH": {
+        "name": "透屏", "form": "grid", "state": "through", "shape": "map",
+        "title": "silkscreen", "text": "scene", "meta": "",
+        "fields": [("silkscreen", "丝印"), ("scene", "所见")],
+    },
 }
 
 
