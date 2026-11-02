@@ -18,7 +18,6 @@ import json
 import logging
 from datetime import date, datetime, time as dt_time
 from functools import lru_cache
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -32,10 +31,6 @@ except Exception:  # pragma: no cover - 农历依赖缺失时只影响角标
     ZhDate = None  # type: ignore[assignment]
 
 _DATA_PATH = Path(__file__).resolve().parent / "data" / "dongjing.json"
-
-# 路线条尺寸（与模式 JSON 里 image 块的 width/height 一致）
-ROUTE_WIDTH = 400
-ROUTE_HEIGHT = 26
 
 _SPACE_WORD = "城"
 _SEASON_WORD = "岁"
@@ -179,68 +174,6 @@ def _join_hint(fest: dict) -> str:
     return "……".join(hints)
 
 
-# ── 路线条 ──────────────────────────────────────────────────
-def _build_route_png(stations: list[dict], index: int) -> bytes:
-    """画一条两轴路线条：上排空间轴（实线），下排岁时轴（虚线），当前站为实心大点。"""
-    from PIL import Image, ImageDraw
-
-    img = Image.new("L", (ROUTE_WIDTH, ROUTE_HEIGHT), 255)
-    draw = ImageDraw.Draw(img)
-
-    space_n = sum(1 for s in stations if s.get("axis") == "space")
-    season_n = len(stations) - space_n
-    left, right = 14, ROUTE_WIDTH - 14
-    span = right - left
-
-    def _row_y(axis: str) -> int:
-        return 8 if axis == "space" else 19
-
-    def _pos_of(axis: str) -> int | None:
-        same = [s for s in stations if s.get("axis") == axis]
-        for i, s in enumerate(same):
-            if s is stations[index]:
-                return i
-        return None
-
-    rows = (("space", space_n, False), ("season", season_n, True))
-    for axis, count, dashed in rows:
-        if count <= 0:
-            continue
-        y = _row_y(axis)
-        step = span / (count - 1) if count > 1 else 0
-        pos = _pos_of(axis)
-        cut = left + (pos * step if pos is not None else -1)
-        if dashed:
-            # 虚线：已走过的部分实线，未走的部分虚线
-            if cut > left:
-                draw.line([(left, y), (min(cut, right), y)], fill=0, width=1)
-            x = max(left, cut)
-            while x < right:
-                draw.line([(x, y), (min(x + 3, right), y)], fill=0, width=1)
-                x += 7
-        else:
-            draw.line([(left, y), (right, y)], fill=0, width=1)
-        for i in range(count):
-            x = left + i * step
-            draw.ellipse([x - 1.6, y - 1.6, x + 1.6, y + 1.6], fill=0)
-
-    station = stations[index] if 0 <= index < len(stations) else {}
-    axis = station.get("axis")
-    if axis in ("space", "season"):
-        pos = _pos_of(axis) or 0
-        count = space_n if axis == "space" else season_n
-        step = span / (count - 1) if count > 1 else 0
-        x = left + pos * step
-        y = _row_y(axis)
-        # 白圈 + 实心大点 = 你在这里
-        draw.ellipse([x - 4.6, y - 4.6, x + 4.6, y + 4.6], fill=255)
-        draw.ellipse([x - 3.4, y - 3.4, x + 3.4, y + 3.4], fill=0)
-
-    buf = BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
-
-
 # ── 内容 ────────────────────────────────────────────────────
 def _station_content(stations: list[dict], index: int, today: date) -> dict:
     station = stations[index]
@@ -273,7 +206,6 @@ def _fallback_content(fallback: dict | None) -> dict:
         "items": list(fb.get("items") or []),
         "festival_line": fb.get("festival_line", "今日 · 岁序平常"),
         "festival_hint": fb.get("festival_hint", ""),
-        "route_url": fb.get("route_url", ""),
     }
 
 
@@ -298,13 +230,5 @@ async def build_dongjing_content(fallback: dict | None = None, **kwargs: Any) ->
     line, hint = _festival_text(today)
     content["festival_line"] = line
     content["festival_hint"] = hint
-
-    try:
-        png = _build_route_png(stations, index)
-        content["route_url"] = "/runtime_dongjing/route.png"
-        content["_prefetched_route_url"] = png
-    except Exception as exc:  # pragma: no cover - 路线条失败不影响正文
-        logger.warning("[Dongjing] 路线条生成失败：%s", exc)
-        content["route_url"] = ""
 
     return content
