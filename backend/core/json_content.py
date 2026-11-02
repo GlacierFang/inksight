@@ -126,6 +126,64 @@ def _normalize_lunar_display(value: Any) -> str:
     return f"{month}月{_normalize_lunar_day_text(day)}"
 
 
+def _local_almanac_fields(date_ctx: dict | None = None) -> dict:
+    """本地历法字段：农历月日、干支生肖、当前节气与下一节气倒数。
+
+    完全离线计算（zhdate + 本地节气表），不依赖天象/黄历 API。
+    """
+    out: dict[str, Any] = {
+        "lunar_display": "",
+        "ganzhi_zodiac": "",
+        "solar_term": "",
+        "next_term": "",
+        "days_to_next_term": 0,
+    }
+    try:
+        src = datetime.fromisoformat(_resolve_almanac_date(date_ctx))
+    except (TypeError, ValueError):
+        return out
+
+    # 农历 + 干支生肖
+    try:
+        from zhdate import ZhDate
+        text = ZhDate.from_datetime(src).chinese()
+    except Exception:  # pragma: no cover - zhdate 缺失或日期越界
+        text = ""
+    if text:
+        parts = text.split()
+        if parts:
+            head = re.sub(r"^[〇零一二三四五六七八九十]+年", "", parts[0]).strip()
+            out["lunar_display"] = head
+        ganzhi = parts[1] if len(parts) > 1 else ""
+        zodiac = parts[2].strip("()（）") if len(parts) > 2 else ""
+        if ganzhi:
+            out["ganzhi_zodiac"] = (ganzhi[:-1] + zodiac) if zodiac else ganzhi
+
+    # 当前节气 + 下一节气倒数
+    try:
+        from .config import SOLAR_TERMS
+    except Exception:  # pragma: no cover
+        return out
+    prev_name, prev_date = "", None
+    next_name, next_date = "", None
+    for (y, m, d), name in SOLAR_TERMS.items():
+        try:
+            tdate = datetime(y, m, d)
+        except ValueError:
+            continue
+        if tdate <= src:
+            if prev_date is None or tdate > prev_date:
+                prev_date, prev_name = tdate, name
+        else:
+            if next_date is None or tdate < next_date:
+                next_date, next_name = tdate, name
+    out["solar_term"] = prev_name
+    out["next_term"] = next_name
+    if next_date is not None:
+        out["days_to_next_term"] = (next_date.date() - src.date()).days
+    return out
+
+
 def _normalize_almanac_list(value: Any, limit: int | None = None) -> str:
     text = str(value or "").strip().strip(".,，。、 ")
     if not text:
@@ -925,6 +983,12 @@ async def _generate_computed_content(mode_def: dict, content_cfg: dict, fallback
     if provider == "home_sign":
         from .bt_presence import build_home_sign_content
         return build_home_sign_content(fallback)
+    if provider == "poetry_day":
+        from .poetry_day import build_poetry_day_content
+        return await build_poetry_day_content(fallback, **kwargs)
+    if provider == "song_lore":
+        from .poetry_day import build_song_lore
+        return build_song_lore(fallback)
     if provider == "pi_status":
         from .pi_status import build_pi_status_content
         return build_pi_status_content(fallback)
@@ -940,6 +1004,9 @@ async def _generate_computed_content(mode_def: dict, content_cfg: dict, fallback
     if provider == "songmeng":
         from .songmeng import build_songmeng_content
         return await build_songmeng_content(fallback, **kwargs)
+    if provider == "haicuotu":
+        from .haicuotu import build_haicuotu_content
+        return await build_haicuotu_content(fallback, **kwargs)
     if provider == "tangping":
         from .tangping import build_tangping_content
         return await build_tangping_content(fallback, **kwargs)
@@ -1043,6 +1110,11 @@ async def _generate_computed_content(mode_def: dict, content_cfg: dict, fallback
                 "lunar_date": lunar_date,
                 "lunar_date_display": lunar_date_display,
             })
+        return result
+    if provider == "almanac_local":
+        date_ctx = kwargs.get("date_ctx", {}) or {}
+        result = dict(fallback)
+        result.update(_local_almanac_fields(date_ctx))
         return result
     if provider == "almanac_api":
         date_ctx = kwargs.get("date_ctx", {}) or {}
