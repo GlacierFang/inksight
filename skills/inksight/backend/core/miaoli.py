@@ -1,23 +1,25 @@
 """狸行记 provider（CUSTOM_MIAOLI）：喵狸的日漫一日。
 
 极简（2026-11-02 冰河大人定的方向）：
-- 一句话：给一段 prompt，出一张日漫分格图。
-- 一次 LLM 写出今天画什么（标题 + 两格分镜 + 它的签名），一次生图出一张图。
+- 一句话：给一段 prompt，出一张日漫图。
+- 一次 LLM 写出今天画什么（标题 + 画面 + 它的签名），一次生图出一张图。
 - 没有骰子、没有状态轴、没有收集册 —— 那些是草地铺道蚁的东西，不是猫的。
 
 屏上结构照抄「透屏」：整版图占满，屏上一句话都没有。
 - 画面描述只进生图 prompt，另存进回顾页字段（回头翻能读）。
 - 签名进页脚。
-- 日漫黑白的「粗轮廓线 + 网点纸 + 大留白」恰好是 2 色屏 + Atkinson 抖动的强项，
-  所以提示词写黑白漫画，不写赛璐璐上色。
-- 角色一致性靠固定设定段（狸花纹、额头 M 字纹、白尾梢、旧铜钱项圈），
-  每次 prompt 复用同一段 —— 2 色下毛色不可靠，靠花纹和配饰认猫。
+- 提示词只给风格要求（2026-11-02 冰河大人定的）：
+  「你只需要给风格要求不就好了，折腾这么多有的没的意义在哪里？」
+  「你限制的越多，出图的效果越差！」
+  所以提示词 = LLM 写的画面 + 四色盘 + 一句风格。
+  不写猫的造型，不写角色锚点，不写动态表达 —— 那些交给模型。
+- 四色盘写死：屏是四色（core/config.py: EINK_4COLOR_PALETTE =
+  黑/白/金黄 #E8B000/朱红 #C80000），把色值告诉模型，别让它自己发挥。
+  这是屏幕的物理事实，不是创作限制。
 
-分格与动感（2026-11-02 冰河大人定的）：
-- 版式：左右等宽双格，中间一条粗黑竖分隔线贯穿，两格带黑边框。不做非等分切入。
-- 动感：两格是同一个动作的接续 —— 左格起势，右格爆发。
-  动感靠斜切构图、集中线、速度线、飞溅物、离开地面的身体。
-- 一次生图出一页（两格在同一个图里），所以两格的猫必然是同一只。
+一格单幅（2026-11-02 冰河大人定的）：
+- 一格。之前的左右双格效果太差 —— 一次生图只能出一张图，两格塞进同一张里
+  每格太小，猫画不清，动作也断。宁可一格画大、画透。
 """
 
 from __future__ import annotations
@@ -60,63 +62,36 @@ ART_DISPLAY = (400, 270)
 
 CAT_NAME = "喵狸"
 
-# ── 固定角色设定：每次 prompt 复用同一段 ─────────────────────────────────
-# 2 色屏上毛色不可靠，辨识度靠花纹 + 配饰。
-CAT_SPEC = (
-    "一只狸花猫：额头有一个 M 字纹，背上有清楚的狸花条纹，"
-    "尾巴梢一截白，右耳尖一个小缺口，"
-    "脖子上系着一圈项圈，项圈正中挂一枚圆形旧铜钱。"
-    "猫要画成日漫里的猫：杏仁形上挑的眼睛，尖下颌，细腰长腿，关节处线条加粗。"
+# ── 风格与主体：固定在前面 ────────────────────────────────────────────
+# 冰河大人 2026-11-02 定的结构：
+#   「前面是风格要求：日漫风格，狸花猫，后面是 llm 生成的动作。」
+# 风格和主体先读，模型才知道按什么画；动作在后。
+STYLE_SPEC = "日漫风格，狸花猫"
+
+# ── 四色盘 ──────────────────────────────────────────────────────────────
+# 屏是四色：黑 / 白 / 金黄 #E8B000 / 朱红 #C80000（core/config.py 的 EINK_4COLOR_PALETTE）。
+# 这是屏的物理事实，不是创作限制 —— 写成最短的一句。
+PALETTE_SPEC = (
+    "画面只用四种颜色：纯白纸面底、墨黑 #000000 勾线、金黄 #E8B000 填色、朱红 #C80000 点缀。"
+    "不要任何文字、印章、水印。"
 )
 
-# ── 日漫黑白风格 ────────────────────────────────────────────────────────
-MANGA_SPEC = (
-    "黑白日式漫画：粗细均匀的黑色勾线，线条干净不毛躁；"
-    "阴影用细密的黑色网点表现（网点纸，不要灰色块面）；"
-    "大面积留白；只有黑、白和网点灰三个层次，不要颜色、不要渐变、不要上色。"
-)
-
-# ── 分格页版式：左右等宽双格 ────────────────────────────────────────────
-# 冰河大人 2026-11-02 定：左右等宽双格，不做非等分切入。
-PANEL_SPEC = (
-    "这是一页日式漫画的分格页：画面左右分成等宽的两格并排，"
-    "中间一条粗黑实线竖分隔线从上贯到下，两格外沿有黑色边框线。"
-)
-
-# ── 动感 ────────────────────────────────────────────────────────────────
-DYNAMIC_SPEC = (
-    "画面要动起来：左格是蓄势的起手，右格是动作爆发的瞬间。"
-    "用斜切构图、放射状集中线、速度线（平行拖影）、"
-    "飞溅的尘土和水花、掠过的残影、被掀起的毛。"
-    "右格里猫的身体要伸展开、离开地面或正在碰撞，不要端正坐着摆拍。"
-    "两格的动作姿势必须明显不同，视角也要不同"
-    "（一格平视贴近，一格俯拍或仰拍拉远），"
-    "不能两个格都画成同一个蹲着的姿势。"
-)
-
-# ── 排除项 ──────────────────────────────────────────────────────────────
-NEGATIVE_SPEC = (
-    "不要动物肖像插画，不要素描插画，不要3D渲染，不要柔焦照片感，"
-    "不要水彩，不要儿童绘本，不要静态坐姿摆拍，不要两格姿势雷同，"
-    "不要版权字样，不要作者署名，不要印刷厂标记，不要任何角标。"
-)
+# 重试只在原提示词后面加一句 —— 照小景的做法，不另写一份平行约束。
+RETRY_PROMPT = " 画面里不要有任何文字。"
 
 # ── 提示词 ────────────────────────────────────────────────────────────
 
-DAY_PROMPT = """你是喵狸，一只住在院子里的狸花猫。
+DAY_PROMPT = """你在替一只住在院子里的狸花猫「喵狸」写今天的记录。
 
 请写今天的记录，严格按下面格式，每行一条，不要多余的话：
 标题：<2-6 字>
-第一格：<不超过 30 字，起势：它在准备，蓄力，耳朵先动，眼睛盯住目标，低身弓背>
-第二格：<不超过 30 字，爆发：同一个动作的下一瞬，扑出去、撞上、落地、钻过，带出动静>
+画面：<不超过 30 字，一个动作瞬间，看得出它在动>
 签名：<不超过 12 字，一句话，是它自己刻在石头上的>
 
 规矩：
-- 两格必须是同一个动作的接续：左格是起，右格是爆。场景、目标、姿态要接得上。
-- 两格的姿势要明显不同，视角也要不同：一格贴近平视，一格俯拍或仰拍拉远。
-  不能两格都画成同一个蹲姿。
-- 两格里是同一只猫、同一个地方。
-- 画面要有速度：扑、撞、跳、追、钻、翻。要能看出它在动，不是在摆姿势。
+- 画面用「它」来写，不要用「我」—— 提示词开头已经有「狸花猫」了，主语不能打架。
+- 画面是能画成一张漫画的瞬间：具体的场景，具体的一个动作。
+- 画面要有速度：扑、撞、跳、追、钻、翻。
 - 像猫一样感知：爪垫、尾巴、鼻子、胡子、风、毛、影子、地上的味道。
 - 语气可以痞、可以懒、可以有点仙 —— 流浪猫的那种江湖气。
 - 短句，不要抒情成散文。
@@ -124,32 +99,6 @@ DAY_PROMPT = """你是喵狸，一只住在院子里的狸花猫。
 - 签名里不要出现「喵狸」这个名字（页脚已经写了名字）。
 - 不要解释，不要展开。
 """
-
-# 图像提示词：画面 + 固定角色 + 固定风格。
-# 屏上一句话都没有，气泡框也不能有 —— 模型画的字会糊成一团。
-IMAGE_SPEC = (
-    "{cat_spec}"
-    "画面里必须是同一只狸花猫（{cat_spec}），不要画成别的猫、不要变成人。"
-    "{panel_spec}"
-    "{manga_spec}"
-    "{dynamic_spec}"
-    "{negative_spec}"
-    "每一格里猫都是主体，占画面主要位置，中景，不要远景空镜。"
-    "画面里不要有任何文字、气泡框、对话框、签名、水印，"
-    "四个角落尤其干净，不要在角上放小字。"
-)
-
-IMAGE_SPEC_RETRY = (
-    "{cat_spec}"
-    "画面里必须是同一只狸花猫（{cat_spec}），不要画成别的猫、不要变成人。"
-    "{panel_spec}"
-    "左格右格一样宽，中间一条粗黑竖线把两格分开。"
-    "{manga_spec}"
-    "{dynamic_spec}"
-    "{negative_spec}"
-    "画面里不要有任何文字、气泡框、对话框、签名、水印，"
-    "四个角落尤其干净，不要在角上放小字。"
-)
 
 DEFAULT_SIGNATURE = "此路有我，概不收租。"
 STRIP_CHARS = "「」『』" + chr(34) + "'"
@@ -240,22 +189,14 @@ def _strip_name(signature: str) -> str:
 
 
 def _parse_day(raw: str) -> dict:
-    parsed = _parse_kv(raw, ("标题", "第一格", "第二格", "左格", "右格", "画面", "签名"))
-    panel1 = parsed.get("第一格") or parsed.get("左格") or ""
-    panel2 = parsed.get("第二格") or parsed.get("右格") or ""
-    # 两格在先（新的分镜格式），老格式只有「画面」时用画面当整页描述。
-    if panel1 or panel2:
-        scene = " → ".join(p for p in (panel1, panel2) if p)
-    else:
-        scene = parsed.get("画面", "")
+    parsed = _parse_kv(raw, ("标题", "画面", "签名"))
+    scene = parsed.get("画面", "")
     if not scene:
         return {}
     signature = _strip_name(parsed.get("签名", ""))[:16]
     return {
         "title": parsed.get("标题", "")[:8],
-        "scene": scene[:80],
-        "panel1": panel1,
-        "panel2": panel2,
+        "scene": scene[:60],
         "signature": signature or DEFAULT_SIGNATURE,
     }
 
@@ -293,9 +234,7 @@ async def _llm_day(**kwargs) -> dict:
         return card
     return {
         "title": "今日",
-        "scene": "喵狸在院子里的墙根下蹲着，尾巴卷住前爪 → 喵狸猛地蹬墙窜上屋脊，胡须被风拉直。",
-        "panel1": "喵狸在院子里的墙根下蹲着，尾巴卷住前爪，耳朵先动。",
-        "panel2": "喵狸猛地蹬墙窜上屋脊，胡须被风拉直。",
+        "scene": "喵狸猛地蹬墙窜上屋脊，胡须被风拉直。",
         "signature": DEFAULT_SIGNATURE,
     }
 
@@ -307,23 +246,22 @@ def _art_name(date_key: str) -> str:
     return "miaoli_" + date_key.replace("-", "") + ".png"
 
 
-def _image_prompt(scene: str, panel1: str = "", panel2: str = "", retry: bool = False) -> str:
-    """生图提示词：两格分镜 + 固定角色 + 固定版式 + 固定风格。
+def _image_prompt(scene: str, retry: bool = False) -> str:
+    """生图提示词：风格 + 主体 + LLM 写的动作 + 四色盘。
 
-    描述不画进图里 —— 屏上的字和回顾页的字都由程序排。
+    冰河大人 2026-11-02 定的结构：
+    「前面是风格要求：日漫风格，狸花猫，后面是 llm 生成的动作。」
+
+    只给风格要求。不限定猫的造型，不写角色锚点，不写动态表达 —— 交给模型。
     """
-    spec = IMAGE_SPEC_RETRY if retry else IMAGE_SPEC
-    beats = [b.strip() for b in (panel1, panel2) if b and b.strip()]
-    if not beats:
-        beats = [scene.strip()]
-    tail = spec.format(
-        cat_spec=CAT_SPEC,
-        manga_spec=MANGA_SPEC,
-        panel_spec=PANEL_SPEC,
-        dynamic_spec=DYNAMIC_SPEC,
-        negative_spec=NEGATIVE_SPEC,
-    )
-    return ("\n".join(beats) + "\n" + tail).strip()
+    parts = [
+        STYLE_SPEC + "。" + scene.strip() + "。",
+        PALETTE_SPEC,
+    ]
+    prompt = "".join(p for p in parts if p)
+    if retry:
+        prompt += RETRY_PROMPT
+    return prompt
 
 
 def _prepare_art(src: Path, dest: Path) -> tuple[bool, str]:
@@ -351,7 +289,7 @@ def _prepare_art(src: Path, dest: Path) -> tuple[bool, str]:
     return True, str(dw) + "x" + str(dh)
 
 
-async def _generate_art(dest: Path, scene: str, panel1: str = "", panel2: str = "", **kwargs) -> tuple[bool, str]:
+async def _generate_art(dest: Path, scene: str, **kwargs) -> tuple[bool, str]:
     import httpx
 
     key = (kwargs.get("image_api_key") or "").strip() or os.getenv("MINIMAX_API_KEY", "").strip()
@@ -361,7 +299,7 @@ async def _generate_art(dest: Path, scene: str, panel1: str = "", panel2: str = 
     headers = {"Authorization": "Bearer " + key, "Content-Type": "application/json"}
     reasons: list[str] = []
     for retry in (False, True):
-        prompt = _image_prompt(scene, panel1=panel1, panel2=panel2, retry=retry)
+        prompt = _image_prompt(scene, retry=retry)
         payload = {
             "model": IMAGE_MODEL,
             "prompt": prompt,
@@ -442,13 +380,7 @@ async def generate_today_art(date_key: str, force: bool = False, **kwargs) -> di
         card = await _llm_day(**kwargs)
 
         dest = ART_DIR / _art_name(date_key)
-        ok, reason = await _generate_art(
-            dest,
-            card["scene"],
-            panel1=str(card.get("panel1") or ""),
-            panel2=str(card.get("panel2") or ""),
-            **kwargs,
-        )
+        ok, reason = await _generate_art(dest, card["scene"], **kwargs)
         art_url = ""
         if ok:
             art_url = "/static/miaoli/" + dest.name
@@ -459,8 +391,6 @@ async def generate_today_art(date_key: str, force: bool = False, **kwargs) -> di
             "date": date_key,
             "title": card["title"],
             "scene": card["scene"],
-            "panel1": str(card.get("panel1") or ""),
-            "panel2": str(card.get("panel2") or ""),
             "signature": card["signature"],
             "art_url": art_url,
             "has_image": "yes" if art_url else "no",
@@ -540,12 +470,10 @@ async def regenerate_art(date_key: str, **kwargs) -> tuple[bool, str]:
     scene = str(item.get("scene") or "")
     if not scene:
         return False, "那天没有记录"
-    panel1 = str(item.get("panel1") or "")
-    panel2 = str(item.get("panel2") or "")
     ART_DIR.mkdir(parents=True, exist_ok=True)
     dest = ART_DIR / _art_name(date_key)
     try:
         dest.unlink(missing_ok=True)
     except OSError:
         pass
-    return await _generate_art(dest, scene, panel1=panel1, panel2=panel2, **kwargs)
+    return await _generate_art(dest, scene, **kwargs)
