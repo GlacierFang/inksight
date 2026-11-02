@@ -330,6 +330,12 @@ BUILTIN_CATALOG: list[CatalogItem] = [
         zh=CatalogText(name="透屏", tip="一屏透明的屏，往里看是屏底下的电路板"),
         en=CatalogText(name="Through Screen", tip="A transparent screen; look inside and see the circuit board beneath"),
     ),
+    CatalogItem(
+        mode_id="CUSTOM_SOLAR_TERMS",
+        category="custom",
+        zh=CatalogText(name="节气倒计时", tip="当年二十四节气逐个倒数：过去的算已过几天，将来的算还有几天"),
+        en=CatalogText(name="Solar Terms", tip="Count down to all 24 solar terms of the year, past and upcoming"),
+    ),
 ]
 
 
