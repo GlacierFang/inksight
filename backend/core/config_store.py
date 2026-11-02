@@ -1172,6 +1172,33 @@ async def get_user_devices(user_id: int) -> list[dict]:
     ]
 
 
+async def set_device_nickname(user_id: int, mac: str, nickname: str) -> Optional[dict]:
+    """改当前用户名下这台设备的别名。
+
+    别名存在 device_memberships.nickname 上，键是 (mac, user_id)，
+    所以每个成员可以给同一台设备起自己的名字，互不影响。
+    空串 = 清除别名（列表会回退显示 MAC）。
+    """
+    upper_mac = mac.upper()
+    db = await get_main_db()
+    now = datetime.now().isoformat()
+    await db.execute(
+        """UPDATE device_memberships
+           SET nickname = ?, updated_at = ?
+           WHERE mac = ? AND user_id = ? AND status = 'active'""",
+        (nickname, now, upper_mac, user_id),
+    )
+    await db.commit()
+    cursor = await db.execute(
+        "SELECT nickname FROM device_memberships WHERE mac = ? AND user_id = ?",
+        (upper_mac, user_id),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    return {"mac": upper_mac, "nickname": row[0]}
+
+
 async def get_device_members(mac: str) -> list[dict]:
     db = await get_main_db()
     cursor = await db.execute(
