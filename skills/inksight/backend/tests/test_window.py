@@ -87,6 +87,14 @@ def test_image_prompt_contains_scene():
     assert "窗" in prompt
 
 
+def test_scene_prompt_has_no_city():
+    """城市名不许进 prompt —— 进了模型就照着那座城写，窗外就不再随机。"""
+    from core.window import SCENE_PROMPT
+
+    assert "{city}" not in SCENE_PROMPT
+    assert "现在的天气" in SCENE_PROMPT
+
+
 # ── 城市与天气 ──────────────────────────────────────────────────────────
 
 def test_city_from_config():
@@ -121,8 +129,7 @@ async def test_build_content_uses_city_and_weather(monkeypatch, tmp_path):
     monkeypatch.setattr(window, "STATE_DIR", tmp_path / "state")
     monkeypatch.setattr(window, "STATE_FILE", tmp_path / "state" / "state.json")
 
-    async def _fake_scene(city, desc, temp, **kwargs):
-        assert city == "郑州"
+    async def _fake_scene(desc, temp, **kwargs):
         return "雨打在窗玻璃上"
 
     async def _fake_art(dest, scene, **kwargs):
@@ -159,7 +166,7 @@ async def test_build_content_no_scene_falls_back(monkeypatch, tmp_path):
     monkeypatch.setattr(window, "STATE_DIR", tmp_path / "state")
     monkeypatch.setattr(window, "STATE_FILE", tmp_path / "state" / "state.json")
 
-    async def _no_scene(city, desc, temp, **kwargs):
+    async def _no_scene(desc, temp, **kwargs):
         return ""
 
     async def _boom(dest, scene, **kwargs):
