@@ -340,6 +340,7 @@ async def build_image(
     album_bucket: str = "",
     day_override: Optional[str] = None,
     archive_screen: bool = False,
+    phase_override: Optional[str] = None,
 ):
     from core.mode_registry import get_registry
 
@@ -570,6 +571,9 @@ async def build_image(
             from core.history_day import date_ctx_for
 
             date_ctx = date_ctx_for(day_override)
+            if phase_override:
+                # 小景等多时段模式：渲染那天的某一个时段，而不是当前时段
+                date_ctx["phase_override"] = phase_override
             weather = {"temp": 0, "weather_code": -1, "weather_str": ""}
         else:
             location_args = extract_location_settings(effective_cfg, fallback_city=DEFAULT_CITY)

@@ -85,13 +85,16 @@ async def gallery(
 async def gallery_image(
     mode: str = Query(...),
     day: str = Query(...),
+    phase: Optional[str] = Query(default=None),
     user_id: int = Depends(require_user),
 ):
     """某一天的整屏 PNG（回顾页主图）。
 
     回顾页要的是**整屏图**（状态栏、页脚、字段都在里面），不是素材图。
+
+    多时段模式（小景）一天四张：带 phase 取那一张，不带就取当天当前时段那张。
     """
-    data = gallery_screen_png(mode.upper(), day)
+    data = gallery_screen_png(mode.upper(), day, phase or "")
     if not data:
         raise HTTPException(status_code=404, detail="no screen for that day")
     # 不让浏览器缓存：布局改过、整屏图重出之后，URL 没变，
