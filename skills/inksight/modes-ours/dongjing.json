@@ -15,8 +15,7 @@
       "lead": "",
       "items": [],
       "festival_line": "今日 · 岁序平常",
-      "festival_hint": "",
-      "route_url": ""
+      "festival_hint": ""
     }
   },
   "layout": {
@@ -41,25 +40,8 @@
         "field": "subtitle",
         "align": "left",
         "font": "noto_serif_light",
-        "font_size": 12,
+        "font_size": 13,
         "max_lines": 1,
-        "margin_x": 16,
-        "margin_bottom": 5
-      },
-      {
-        "type": "image",
-        "field": "route_url",
-        "x": 0,
-        "width": 400,
-        "height": 26,
-        "fit": "fill",
-        "align_x": "center",
-        "align_y": "center",
-        "margin_bottom": 3
-      },
-      {
-        "type": "separator",
-        "style": "dashed",
         "margin_x": 16,
         "margin_bottom": 6
       },
@@ -76,17 +58,17 @@
                 "field": "lead",
                 "align": "left",
                 "font": "noto_serif_light",
-                "font_size": 12,
-                "max_lines": 1,
+                "font_size": 13,
+                "max_lines": 2,
                 "margin_x": 16,
-                "margin_bottom": 5
+                "margin_bottom": 6
               },
               {
                 "type": "list",
                 "field": "items",
                 "font": "noto_serif_regular",
-                "font_size": 14,
-                "item_spacing": 16,
+                "font_size": 15,
+                "item_spacing": 19,
                 "max_items": 8,
                 "align": "left",
                 "margin_x": 16
@@ -102,9 +84,9 @@
                 "field": "quote",
                 "align": "left",
                 "font": "noto_serif_regular",
-                "font_size": 16,
-                "line_height": 21,
-                "max_lines": 5,
+                "font_size": 18,
+                "line_height": 24,
+                "max_lines": 6,
                 "margin_x": 16,
                 "margin_bottom": 4
               },
@@ -113,7 +95,7 @@
                 "field": "festival_hint",
                 "align": "left",
                 "font": "noto_serif_light",
-                "font_size": 12,
+                "font_size": 13,
                 "max_lines": 1,
                 "margin_x": 16
               }
