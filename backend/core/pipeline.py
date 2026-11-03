@@ -123,6 +123,7 @@ async def generate_and_render(
         screen_w=screen_w,
         screen_h=screen_h,
         weather_code=weather_code,
+        colors=colors,
     )
 
     eff_cfg = get_effective_mode_config(config, persona)
@@ -184,6 +185,7 @@ async def _generate_content_for_persona(
     screen_w: int = SCREEN_WIDTH,
     screen_h: int = SCREEN_HEIGHT,
     weather_code: int = -1,
+    colors: int = 2,
 ) -> dict:
     """Dispatch content generation to the appropriate handler."""
     from .mode_registry import ContentContext, get_registry
@@ -280,6 +282,7 @@ async def _generate_content_for_persona(
             weather_code=weather_code,
             api_key=device_api_key,
             image_api_key=device_image_api_key,
+            colors=colors,
         )
 
     # Builtin Python mode - use specialized content functions

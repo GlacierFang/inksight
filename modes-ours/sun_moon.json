@@ -30,7 +30,8 @@
       "moon_to_new": "",
       "moon_image": "",
       "line": "",
-      "source": "Open-Meteo"
+      "source": "Open-Meteo",
+      "day_arc": ""
     }
   },
   "layout": {
@@ -57,6 +58,7 @@
                     "template": "日出 {sunrise}",
                     "align": "center",
                     "font_size": 15,
+                    "color": "yellow",
                     "max_lines": 1
                   }
                 ],
@@ -66,20 +68,33 @@
                     "template": "日落 {sunset}",
                     "align": "center",
                     "font_size": 15,
+                    "color": "red",
                     "max_lines": 1
                   }
                 ]
               },
               {
                 "type": "spacer",
-                "height_px": 10
+                "height_px": 4
+              },
+              {
+                "type": "image",
+                "field": "day_arc",
+                "width": 320,
+                "height": 74,
+                "fit": "contain",
+                "margin_bottom": 4
+              },
+              {
+                "type": "spacer",
+                "height_px": 2
               },
               {
                 "type": "text",
                 "template": "白昼时长 {daylight}",
                 "align": "center",
                 "font": "noto_serif_bold",
-                "font_size": 18,
+                "font_size": 17,
                 "max_lines": 1
               },
               {
@@ -90,12 +105,12 @@
                 "type": "text",
                 "field": "delta",
                 "align": "center",
-                "font_size": 12,
+                "font_size": 11,
                 "max_lines": 1
               },
               {
                 "type": "spacer",
-                "height_px": 6
+                "height_px": 4
               },
               {
                 "type": "separator",
@@ -111,7 +126,7 @@
                 "field": "line",
                 "align": "center",
                 "font": "noto_serif_light",
-                "font_size": 14,
+                "font_size": 13,
                 "max_lines": 2
               }
             ]
@@ -130,22 +145,38 @@
               },
               {
                 "type": "text",
-                "template": "{moon_name} · {moon_illum}",
+                "template": "{moon_name}",
                 "align": "center",
                 "font": "noto_serif_bold",
-                "font_size": 17,
+                "font_size": 18,
+                "color": "yellow",
                 "max_lines": 1
               },
               {
+                "type": "spacer",
+                "height_px": 2
+              },
+              {
                 "type": "text",
-                "template": "月龄 {moon_age} · {moon_to_full}",
+                "template": "照亮 {moon_illum}",
                 "align": "center",
                 "font_size": 12,
                 "max_lines": 1
               },
               {
                 "type": "spacer",
-                "height_px": 6
+                "height_px": 1
+              },
+              {
+                "type": "text",
+                "template": "月龄 {moon_age} · {moon_to_full}",
+                "align": "center",
+                "font_size": 11,
+                "max_lines": 1
+              },
+              {
+                "type": "spacer",
+                "height_px": 5
               },
               {
                 "type": "separator",
@@ -161,7 +192,7 @@
                 "field": "line",
                 "align": "center",
                 "font": "noto_serif_light",
-                "font_size": 14,
+                "font_size": 13,
                 "max_lines": 2
               }
             ]
