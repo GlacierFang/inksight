@@ -699,6 +699,7 @@ async def generate_json_mode_content(
     # 个人端 BYOK 已下线：默认 None 表示不提供调用方 Key，由 _get_client 回退到服务端环境变量。
     api_key: str | None = None,
     image_api_key: str | None = None,
+    colors: int = 2,
 ) -> dict:
     """Generate content for a JSON-defined mode.
 
@@ -731,6 +732,7 @@ async def generate_json_mode_content(
         override = {}
 
     common_args = dict(
+        colors=colors,
         date_str=date_str,
         weather_str=weather_str,
         weather_code=weather_code,
