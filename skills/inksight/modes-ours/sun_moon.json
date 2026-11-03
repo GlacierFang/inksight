@@ -3,13 +3,21 @@
   "display_name": "日昼与月相",
   "icon": "weather",
   "cacheable": false,
-  "description": "郑州当日的日出、日落与白昼时长，入夜后换成当晚月相与月相图。数值取自 Open-Meteo，月相本地计算并绘图，一句话由模型当日现写。",
+  "description": "所选城市的当日日出、日落与白昼时长，入夜后换成当晚月相与月相图。数值取自 Open-Meteo，月相本地计算并绘图，一句话由模型当日现写。",
+  "settings_schema": [
+    {
+      "key": "city",
+      "label": "城市",
+      "type": "location",
+      "description": "留空则使用设备位置"
+    }
+  ],
   "content": {
     "type": "computed",
     "provider": "sun_moon",
     "fallback": {
       "period": "day",
-      "city": "郑州",
+      "city": "",
       "date_cn": "",
       "sunrise": "--:--",
       "sunset": "--:--",
@@ -163,7 +171,7 @@
     ],
     "footer": {
       "label": "日昼与月相",
-      "attribution_template": "郑州 {date_cn}",
+      "attribution_template": "{city} {date_cn}",
       "dashed": true
     }
   }
