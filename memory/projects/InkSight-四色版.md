@@ -33,6 +33,12 @@ updated: 2026-11-03
 - 日轨弧（`render_day_arc_png`）：金色白昼带 + 墨黑弧线，弧高按真实昼长，黑点标当前时刻。只白天生成。
 - 文字：日出金黄、日落朱红、月相名金黄；白昼时长和 LLM 那句话保持墨黑。
 
+## 真机验证
+
+2026-11-03 冰河大人在真机上确认：**四色版通过**。
+
+设备固件确实会传 `colors=4`（`GET /api/render?...&colors=4`），链路 `colors → provider` 已跑通。
+
 ## 提交
 
 - `ea91961` fix(inksight): 补回 generate_and_render 的 archive_screen 参数
