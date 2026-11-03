@@ -15,6 +15,12 @@
 
 from __future__ import annotations
 
+from .config import EINK_4COLOR_PALETTE
+
+# 屏上四色原色（顺序同 config.EINK_4COLOR_PALETTE：黑/白/金黄/朱红）
+_PAL = [tuple(EINK_4COLOR_PALETTE[i:i + 3]) for i in range(0, 12, 3)]
+EINK_BLACK_RGB, EINK_WHITE_RGB, EINK_GOLD_RGB, EINK_RED_RGB = _PAL
+
 import hashlib
 import json
 import logging
@@ -42,6 +48,7 @@ _BACKEND_DIR = Path(__file__).resolve().parent.parent
 CACHE_DIR = _BACKEND_DIR / "runtime_cache"
 CACHE_FILE = CACHE_DIR / "sun_moon.json"
 MOON_DIR = _BACKEND_DIR / "static" / "moon"
+ARC_DIR = _BACKEND_DIR / "static" / "arc"
 
 WEATHER_TTL = 1800  # Open-Meteo 结果缓存 30 分钟
 # 月相图画布边长:必须等于模式 JSON 里 image 块的 width/height(104),
@@ -49,7 +56,10 @@ WEATHER_TTL = 1800  # Open-Meteo 结果缓存 30 分钟
 # 边缘没有灰过渡,4 色量化时不会被抖成黄/红杂色。
 MOON_RENDER_SIZE = 104
 # 月相图美术版本号：改动画法就加 1，旧文件自动失效重画
-MOON_ART_VERSION = "v3"
+MOON_ART_VERSION = "v4"
+DAY_ARC_VERSION = "v1"
+ARC_RENDER_WIDTH = 320
+ARC_RENDER_HEIGHT = 74
 
 FALLBACK_LINES = {
     "day": "光一天短一点，省着点用",
@@ -374,11 +384,14 @@ def moon_phase(now_utc: datetime) -> dict:
     }
 
 
-def render_moon_png(frac: float, path: Path) -> bool:
-    """画一张 1-bit 月相图：被照亮的部分填黑，未照亮部分留白，外圈加轮廓。
+def render_moon_png(frac: float, path: Path, colors: int = 4) -> bool:
+    """画一张四色月相图：受光面填金黄，背影面填墨黑，外圈墨黑勾边。
 
     几何模型：把月球视作球体，光源方向 s = (sin(2πf), 0, -cos(2πf))，
     表面法向 n 与 s 点积为正即被照亮，投影后就是真实的月相形状。
+
+    只用屏上四色原色平涂，不做渐变：e-ink 四色走 Atkinson 抖动，
+    中间色会抖成噪点，平涂才干净。2 色屏把金黄抖成白，形状与现在一致。
     """
     try:
         from PIL import Image, ImageDraw
@@ -392,7 +405,7 @@ def render_moon_png(frac: float, path: Path) -> bool:
     angle = 2 * math.pi * frac
     sin_a, cos_a = math.sin(angle), math.cos(angle)
 
-    img = Image.new("L", (size, size), 255)
+    img = Image.new("RGB", (size, size), EINK_WHITE_RGB)
     pixels = img.load()
     r2 = radius * radius
     for y in range(size):
@@ -404,13 +417,15 @@ def render_moon_png(frac: float, path: Path) -> bool:
                 continue
             z = math.sqrt(r2 - d2)
             lit = (dx * sin_a - z * cos_a) > 0
-            # 天文图惯例：受光部分留白，阴影部分填黑
-            pixels[x, y] = 255 if lit else 0
+            # 受光面亮、背影面暗。4 色屏受光面用金黄；
+            # 2 色屏金黄会被抖动成噪点，改用白纸面（天文图惯例）
+            lit_rgb = EINK_GOLD_RGB if colors >= 3 else EINK_WHITE_RGB
+            pixels[x, y] = lit_rgb if lit else EINK_BLACK_RGB
 
     draw = ImageDraw.Draw(img)
     draw.ellipse(
         [center - radius, center - radius, center + radius, center + radius],
-        outline=0,
+        outline=EINK_BLACK_RGB,
         width=2,
     )
     try:
@@ -418,6 +433,56 @@ def render_moon_png(frac: float, path: Path) -> bool:
         img.save(path, "PNG")
     except OSError:
         logger.warning("[SunMoon] 月相图写入失败: %s", path, exc_info=True)
+        return False
+    return True
+
+
+def render_day_arc_png(sunrise, sunset, now, path: Path, colors: int = 4) -> bool:
+    """画一条日轨弧：左端日出、右端日落，弧高按真实昼长，黑点标当前时刻。
+
+    给「日昼与月相」白天侧用。弧下填金黄表示白昼区间，弧线与基线用墨黑。
+    四色屏：金色白昼带 + 墨黑弧；2 色屏：金黄抖成白，只剩墨黑弧，形状照旧。
+    """
+    try:
+        from PIL import Image, ImageDraw
+    except Exception:  # pragma: no cover
+        logger.warning("[SunMoon] PIL 不可用，跳过日轨图", exc_info=True)
+        return False
+
+    w, h = ARC_RENDER_WIDTH, ARC_RENDER_HEIGHT
+    base_y = h - 6
+    img = Image.new("RGB", (w, h), EINK_WHITE_RGB)
+    draw = ImageDraw.Draw(img)
+
+    total = max(1.0, (sunset - sunrise).total_seconds())
+    amp = 10.0 + 44.0 * min(1.0, max(0.0, (total / 3600.0) / 24.0))
+    margin = 10
+    x0, x1 = margin, w - margin
+
+    def point_at(t: float):
+        x = x0 + (x1 - x0) * t
+        y = base_y - amp * math.sin(math.pi * t)
+        return int(round(x)), int(round(y))
+
+    pts = [point_at(i / 120.0) for i in range(121)]
+    if colors >= 3:
+        band = pts + [(x1, base_y), (x0, base_y)]
+        draw.polygon(band, fill=EINK_GOLD_RGB)
+    draw.line(pts, fill=EINK_BLACK_RGB, width=2)
+    draw.line([(x0, base_y), (x1, base_y)], fill=EINK_BLACK_RGB, width=1)
+    for x in (x0, x1):
+        draw.line([(x, base_y), (x, base_y - 7)], fill=EINK_BLACK_RGB, width=1)
+
+    t_now = (now - sunrise).total_seconds() / total
+    t_now = min(1.0, max(0.0, t_now))
+    nx, ny = point_at(t_now)
+    draw.ellipse([nx - 4, ny - 4, nx + 4, ny + 4], fill=EINK_BLACK_RGB)
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        img.save(path, "PNG")
+    except OSError:
+        logger.warning("[SunMoon] 日轨图写入失败: %s", path, exc_info=True)
         return False
     return True
 
@@ -438,19 +503,51 @@ def _prune_moon_images(keep: str, max_age_days: int = 5) -> None:
         pass
 
 
-def _moon_image_url(location_key: str, date_key: str, phase: dict) -> str:
+def _moon_image_url(location_key: str, date_key: str, phase: dict, colors: int = 4) -> str:
     """生成（或复用）当天的月相图，返回可直接给 image 块用的本地 URL。
 
     文件名带地点指纹：不同城市的当地日期可能不同，月相图不能跨城市复用。
     """
     slug = hashlib.md5(location_key.encode("utf-8")).hexdigest()[:8]
-    filename = f"moon_{slug}_{date_key.replace('-', '')}_{phase['index']}_{MOON_ART_VERSION}.png"
+    filename = f"moon_{slug}_{date_key.replace('-', '')}_{phase['index']}_c{colors}_{MOON_ART_VERSION}.png"
     path = MOON_DIR / filename
     if not path.exists():
-        if not render_moon_png(phase["frac"], path):
+        if not render_moon_png(phase["frac"], path, colors=colors):
             return ""
     _prune_moon_images(filename)
     return f"/static/moon/{filename}"
+
+
+def _day_arc_url(location_key: str, date_key: str, sunrise, sunset, now, colors: int = 4) -> str:
+    """生成当天的日轨弧图。
+
+    同一地点同一天共用一个文件名，每次刷新就地重画：当前时刻点会沿弧移动，
+    但文件名不变，磁盘上只留一份（渲染器直接读本地文件，不走 HTTP 缓存）。
+    """
+    slug = hashlib.md5(location_key.encode("utf-8")).hexdigest()[:8]
+    filename = f"arc_{slug}_{date_key.replace('-', '')}_c{colors}_{DAY_ARC_VERSION}.png"
+    path = ARC_DIR / filename
+    if not render_day_arc_png(sunrise, sunset, now, path, colors=colors):
+        return ""
+    _prune_arc_images()
+    return f"/static/arc/{filename}"
+
+
+def _prune_arc_images(max_age_days: int = 3) -> None:
+    """清掉过期日轨图，避免目录无限增长。"""
+    try:
+        import time as _time
+        cutoff = _time.time() - max_age_days * 86400
+        for path in ARC_DIR.glob("arc_*.png"):
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink()
+            except OSError:
+                continue
+    except Exception:  # pragma: no cover
+        logger.warning("[SunMoon] 清理日轨图失败", exc_info=True)
+
+
 
 
 # --------------------------------------------------------------------------
@@ -547,6 +644,7 @@ async def _llm_line(kind: str, date_key: str, prompt: str, location_key: str, **
 async def build_sun_moon_content(fallback: dict | None = None, **kwargs) -> dict:
     """生成日昼与月相内容。"""
     config = kwargs.get("config")
+    colors = int(kwargs.get("colors", 2) or 2)
     location = _resolve_location(config if isinstance(config, dict) else {})
     location_key = _location_key(location)
     city = location["city"]
@@ -593,7 +691,11 @@ async def build_sun_moon_content(fallback: dict | None = None, **kwargs) -> dict
     to_full = f"{phase['days_to_full']:.1f}"
     to_new = f"{phase['days_to_new']:.1f}"
 
-    moon_image = _moon_image_url(location_key, date_key, phase)
+    moon_image = _moon_image_url(location_key, date_key, phase, colors=colors)
+
+    day_arc = ""
+    if period == "day" and sunrise_dt and sunset_dt:
+        day_arc = _day_arc_url(location_key, date_key, sunrise_dt, sunset_dt, now_local, colors=colors)
 
     info = {
         "city": city,
@@ -627,6 +729,7 @@ async def build_sun_moon_content(fallback: dict | None = None, **kwargs) -> dict
         "moon_to_full": f"距满月 {to_full} 天",
         "moon_to_new": f"距新月 {to_new} 天",
         "moon_image": moon_image,
+        "day_arc": day_arc,
         "line": line,
         "source": "Open-Meteo",
     }

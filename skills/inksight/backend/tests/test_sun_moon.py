@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from datetime import datetime, timedelta, timezone
@@ -417,3 +418,120 @@ async def test_fetch_failure_still_renders(monkeypatch, sandbox):
     assert content["sunrise"] == "--:--"
     assert content["sunset"] == "--:--"
     assert content["line"]
+
+
+# ── 四色版 ────────────────────────────────────────────────────
+def test_moon_png_is_flat_four_color():
+    """月相图只用屏上四色原色平涂：受光金黄、背影墨黑、外圈留白。"""
+    from PIL import Image
+    import core.sun_moon as sm
+
+    path = Path(__file__).parent / "_tmp_moon_v4.png"
+    try:
+        assert sm.render_moon_png(0.32, path)
+        img = Image.open(path).convert("RGB")
+        colors = {c for _, c in img.getcolors(999999)}
+    finally:
+        path.unlink(missing_ok=True)
+
+    assert colors <= {sm.EINK_WHITE_RGB, sm.EINK_BLACK_RGB, sm.EINK_GOLD_RGB}, colors
+    assert sm.EINK_GOLD_RGB in colors, "受光面必须是金黄"
+    assert sm.EINK_BLACK_RGB in colors, "背影面必须是墨黑"
+    assert sm.EINK_RED_RGB not in colors, "月相图不占用朱红"
+
+
+def test_day_arc_png_is_gold_band_with_black_arc():
+    """日轨图：金黄白昼带 + 墨黑弧线 + 墨黑当前点。"""
+    from datetime import datetime
+    from PIL import Image
+    import core.sun_moon as sm
+
+    path = Path(__file__).parent / "_tmp_arc.png"
+    try:
+        ok = sm.render_day_arc_png(
+            datetime(2026, 11, 3, 6, 35), datetime(2026, 11, 3, 17, 45),
+            datetime(2026, 11, 3, 12, 0), path,
+        )
+        assert ok
+        img = Image.open(path).convert("RGB")
+        colors = {c for _, c in img.getcolors(999999)}
+    finally:
+        path.unlink(missing_ok=True)
+
+    assert sm.EINK_GOLD_RGB in colors, "白昼带必须是金黄"
+    assert sm.EINK_BLACK_RGB in colors, "弧线和当前点必须是墨黑"
+    assert sm.EINK_RED_RGB not in colors, "日轨不占用朱红"
+
+
+def test_day_arc_height_tracks_daylight_length():
+    """白昼越长弧越高：弧顶像素的 y 值更小。"""
+    from datetime import datetime
+    from PIL import Image
+    import core.sun_moon as sm
+
+    def arc_top(sunrise_h, sunset_h):
+        path = Path(__file__).parent / "_tmp_arc2.png"
+        try:
+            sm.render_day_arc_png(
+                datetime(2026, 11, 3, sunrise_h, 0), datetime(2026, 11, 3, sunset_h, 0),
+                datetime(2026, 11, 3, 12, 0), path,
+            )
+            img = Image.open(path).convert("RGB")
+            w, h = img.size
+            px = img.load()
+            for y in range(h):
+                for x in range(w):
+                    if px[x, y] == sm.EINK_BLACK_RGB:
+                        return y
+        finally:
+            path.unlink(missing_ok=True)
+        return h
+
+    short = arc_top(9, 15)   # 白昼 6 小时
+    long = arc_top(4, 20)    # 白昼 16 小时
+    assert long < short, f"白昼长的弧应更高：long={long} short={short}"
+
+
+def test_mode_definition_uses_colors():
+    """模式定义：日出金黄、日落朱红、月相名金黄。"""
+    mode = _mode()
+    cond = mode["layout"]["body"][0]
+    day = cond["conditions"][0]["children"]
+    night = cond["conditions"][1]["children"]
+    assert day[0]["left"][0]["color"] == "yellow"
+    assert day[0]["right"][0]["color"] == "red"
+    assert any(b.get("field") == "day_arc" for b in day), "白天侧要有日轨图"
+    moon_title = next(b for b in night if b.get("type") == "text" and b.get("template") == "{moon_name}")
+    assert moon_title["color"] == "yellow"
+
+
+def test_day_arc_only_in_day_period(monkeypatch, tmp_path):
+    """日轨只白天生成：夜间不画弧。"""
+    import core.sun_moon as sm
+
+    monkeypatch.setattr(sm, "ARC_DIR", tmp_path / "arc")
+    monkeypatch.setattr(sm, "MOON_DIR", tmp_path / "moon")
+
+    from datetime import datetime as _dt, timezone as _tz
+    async def fake_fetch(loc):
+        return {
+            "rows": [{
+                "date": _dt.now(_tz.utc).strftime("%Y-%m-%d"),
+                "sunrise": "2026-11-03T06:35", "sunset": "2026-11-03T17:45", "daylight": 40200,
+            }],
+            "timezone": "Asia/Shanghai", "utc_offset_seconds": 28800,
+        }
+
+    async def fake_llm(*a, **k):
+        return "天光正好"
+
+    monkeypatch.setattr(sm, "_fetch_daily", fake_fetch)
+    monkeypatch.setattr(sm, "_llm_line", fake_llm)
+
+    cfg = {**DEVICE, "mode_overrides": {}}
+    content = asyncio.run(sm.build_sun_moon_content(config=cfg))
+    assert content["period"] in ("day", "night")
+    if content["period"] == "day":
+        assert content["day_arc"].startswith("/static/arc/")
+    else:
+        assert content["day_arc"] == ""
