@@ -93,11 +93,17 @@ async def generate_and_render(
     mac: str = "",
     album_bucket: str = "",
     colors: int = 2,
+    archive_screen: bool = False,
 ) -> tuple[Image.Image, dict | None]:
     """Generate content for a persona and render to an e-ink image.
 
     Dispatches to either a builtin Python mode or a JSON-defined mode
     via the mode registry.
+
+    archive_screen=True 时，把刚渲染出来的整屏图存档到画廊位置
+    （runtime_cache/<state>/screens/<日期>.png）。这是「生成即存」的唯一落点：
+    走这条路的每一条出图路径（设备下发、缓存批量预热）都会存到同一个地方。
+    预览不传这个开关 —— 预览图不该当成设备真实拿到的画面。
 
     Returns:
         Tuple of (rendered image, content dict).
@@ -138,6 +144,8 @@ async def generate_and_render(
         colors=colors,
         language=_eff_lang,
     )
+    if archive_screen:
+        _archive_screen(persona, img, date_ctx)
     return img, content
 
 
@@ -329,3 +337,40 @@ async def _render_for_persona(
         weather_code=weather_code, time_str=time_str, date_ctx=date_ctx,
         screen_w=screen_w, screen_h=screen_h,
     )
+
+
+def _archive_screen(persona: str, img, date_ctx: dict) -> None:
+    """把刚渲染出来的整屏图存到画廊位置（画廊主图用）。
+
+    规则：
+    - 只存画廊收录的那几个模式（其余模式存了也没人看，白占磁盘）；
+    - 只存当天 —— 往期由回填脚本自己存，预览不污染往期存档；
+    - 只存设备画幅（400x300）—— 预览页可以随便改尺寸，改过的图不是设备画面；
+    - 存档失败不影响出图（这是锦上添花，不是主流程）。
+    """
+    try:
+        from .gallery import state_name as gallery_state_name
+        from .history_day import today_str
+        from .history_render import DEVICE_HEIGHT, DEVICE_WIDTH
+        from .screen_archive import save_screen
+
+        state_key = gallery_state_name(persona)
+        if not state_key:
+            return
+        day = _target_day(date_ctx)
+        if day != today_str():
+            return
+        if img.size != (DEVICE_WIDTH, DEVICE_HEIGHT):
+            return
+        save_screen(state_key, day, img)
+    except Exception as exc:  # pragma: no cover - 存档不该打断出图
+        logger.warning("[Pipeline] 整屏存档失败 %s: %s", persona, exc)
+
+
+def _target_day(date_ctx: dict | None) -> str:
+    """这张图属于哪一天（YYYY-MM-DD）。取不到就用今天。"""
+    ctx = date_ctx or {}
+    try:
+        return f"{int(ctx['year']):04d}-{int(ctx['month']):02d}-{int(ctx['day']):02d}"
+    except (KeyError, TypeError, ValueError):
+        return datetime.now().strftime("%Y-%m-%d")
