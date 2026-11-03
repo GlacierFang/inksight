@@ -1,9 +1,13 @@
-"""日昼与月相 provider（郑州）。
+"""日昼与月相 provider（城市可配）。
 
 分工：
 - 日出 / 日落 / 白昼时长：取自 Open-Meteo 的 daily 接口（真实数据，精度到分钟）。
 - 月相：本地天文算法计算，用 PIL 画成适合墨水屏的相位图（本地静态资源）。
-- 一句话内容：LLM 生成，按「日期 + 昼夜」缓存，一天最多调两次。
+- 一句话内容：LLM 生成，按「城市 + 日期 + 昼夜」缓存，一天最多调两次。
+
+城市：优先取模式专属覆盖 mode_overrides[CUSTOM_SUN_MOON] 里的地点；
+没有覆盖时跟随设备全局位置。地点作为一个整体解析，避免出现
+「城市是上海、坐标还是郑州」的串味。
 
 原则：数值永远不由 LLM 产出，LLM 只负责那句话。LLM 失败时退回写死的备选句，
 不生成假数据。
@@ -11,6 +15,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -21,10 +26,8 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-CITY = "郑州"
-LAT = 34.75
-LON = 113.65
-TZ_NAME = "Asia/Shanghai"
+MODE_ID = "CUSTOM_SUN_MOON"
+DEFAULT_TZ_NAME = "Asia/Shanghai"
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 
 # 新月基准时刻（UTC）与朔望月长度（天）
@@ -57,14 +60,124 @@ _DIGIT_RE = re.compile(r"[0-9０-９]")
 _QUOTE_CHARS = "“”\"'「」『』《》 \t"
 
 
-def _tz():
-    """返回郑州时区；系统缺 tzdata 时退回固定 +08:00。"""
+def _tz(tz_name: str = DEFAULT_TZ_NAME):
+    """返回指定时区；系统缺 tzdata 时退回固定 +08:00。"""
     try:
         from zoneinfo import ZoneInfo
 
-        return ZoneInfo(TZ_NAME)
+        return ZoneInfo(tz_name or DEFAULT_TZ_NAME)
     except Exception:  # pragma: no cover - 取决于宿主 tzdata
         return timezone(timedelta(hours=8))
+
+
+# --------------------------------------------------------------------------
+# 地点解析
+# --------------------------------------------------------------------------
+
+
+def _clean_str(value) -> str:
+    return str(value).strip() if isinstance(value, str) else ""
+
+
+def _coord(value, limit: float) -> float | None:
+    """把任意输入折成合法坐标；不合法返回 None。"""
+    if isinstance(value, bool):
+        return None
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    if num != num or abs(num) > limit:  # NaN / 越界
+        return None
+    return num
+
+
+def _city_coords(city: str) -> tuple[float, float] | None:
+    """按城市名查内置坐标表；查不到返回 None（不猜）。"""
+    if not city:
+        return None
+    try:
+        from .config import CITY_COORDINATES
+        from .context import _normalize_place_name
+
+        coords = CITY_COORDINATES.get(city)
+        if coords:
+            return float(coords[0]), float(coords[1])
+        normalized = _normalize_place_name(city)
+        for name, value in CITY_COORDINATES.items():
+            if _normalize_place_name(name) == normalized:
+                return float(value[0]), float(value[1])
+    except Exception:  # pragma: no cover - 坐标表缺失时按无坐标处理
+        logger.warning("[SunMoon] 城市坐标表不可用: %s", city, exc_info=True)
+    return None
+
+
+def _reconcile_coords(city: str, lat: float | None, lon: float | None) -> tuple[float | None, float | None]:
+    """城市名与坐标对不上时，以城市名为准。
+
+    预览时后端会只把全局 city 换成预览城市，坐标还是设备原来的，
+    不对齐就会算出「杭州名字 + 郑州日出」。偏差小于 1° 视为同城，
+    保留设备自己的精确坐标。
+    """
+    table = _city_coords(city)
+    if not table:
+        return lat, lon
+    tlat, tlon = table
+    if lat is None or lon is None:
+        return tlat, tlon
+    if abs(tlat - lat) > 1.0 or abs(tlon - lon) > 1.0:
+        return tlat, tlon
+    return lat, lon
+
+
+def _resolve_location(config: dict | None) -> dict:
+    """解析本次要用的地点：模式专属覆盖优先，否则跟随设备全局位置。
+
+    地点是一个整体：城市名和经纬度必须来自同一处，不能一半来自覆盖、
+    一半来自设备全局，否则会出现「城市换了、坐标没换」。
+    """
+    cfg = config if isinstance(config, dict) else {}
+    overrides = cfg.get("mode_overrides")
+    if not isinstance(overrides, dict):
+        overrides = {}
+    override = overrides.get(MODE_ID)
+    if not isinstance(override, dict):
+        override = {}
+
+    city = _clean_str(override.get("city"))
+    lat = _coord(override.get("latitude"), 90.0)
+    lon = _coord(override.get("longitude"), 180.0)
+    tz_name = _clean_str(override.get("timezone"))
+
+    if not city:
+        # 没有模式专属地点 → 跟随设备全局位置
+        city = _clean_str(cfg.get("city"))
+        lat = lat if lat is not None else _coord(cfg.get("latitude"), 90.0)
+        lon = lon if lon is not None else _coord(cfg.get("longitude"), 180.0)
+        tz_name = tz_name or _clean_str(cfg.get("timezone"))
+
+    if lat is None or lon is None:
+        coords = _city_coords(city)
+        if coords:
+            lat, lon = coords
+    lat, lon = _reconcile_coords(city, lat, lon)
+
+    return {
+        "city": city,
+        "latitude": lat,
+        "longitude": lon,
+        "timezone": tz_name,
+    }
+
+
+def _location_key(location: dict) -> str:
+    """地点分桶键：城市 + 坐标，缓存按它隔离。"""
+    city = _clean_str(location.get("city")) or "?"
+    lat = location.get("latitude")
+    lon = location.get("longitude")
+    lat_s = f"{float(lat):.3f}" if isinstance(lat, (int, float)) else "?"
+    lon_s = f"{float(lon):.3f}" if isinstance(lon, (int, float)) else "?"
+    return f"{city}|{lat_s}|{lon_s}"
 
 
 # --------------------------------------------------------------------------
@@ -73,12 +186,27 @@ def _tz():
 
 
 def _read_cache() -> dict:
+    """读运行时缓存。旧结构（固定郑州）自动迁移到按地点分桶。"""
     try:
         with CACHE_FILE.open("r", encoding="utf-8") as fh:
             data = json.load(fh)
-        return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
-        return {}
+        return {"locations": {}}
+    if not isinstance(data, dict):
+        return {"locations": {}}
+    if isinstance(data.get("locations"), dict):
+        return data
+
+    legacy_bucket: dict = {}
+    if isinstance(data.get("daily"), dict):
+        legacy_bucket["daily"] = data["daily"]
+    if data.get("daily_ts"):
+        legacy_bucket["daily_ts"] = data["daily_ts"]
+    if isinstance(data.get("llm"), dict):
+        legacy_bucket["llm"] = data["llm"]
+    if not legacy_bucket:
+        return {"locations": {}}
+    return {"locations": {"郑州|34.750|113.650": legacy_bucket}}
 
 
 def _write_cache(data: dict) -> None:
@@ -92,29 +220,53 @@ def _write_cache(data: dict) -> None:
         logger.warning("[SunMoon] 写缓存失败", exc_info=True)
 
 
+def _bucket(cache: dict, key: str) -> dict:
+    """取某个地点的缓存桶，没有就建一个。"""
+    locations = cache.get("locations")
+    if not isinstance(locations, dict):
+        locations = {}
+        cache["locations"] = locations
+    bucket = locations.get(key)
+    if not isinstance(bucket, dict):
+        bucket = {}
+        locations[key] = bucket
+    return bucket
+
+
 # --------------------------------------------------------------------------
 # Open-Meteo：日出 / 日落 / 白昼时长
 # --------------------------------------------------------------------------
 
 
-async def _fetch_daily() -> dict:
-    """取当天与前一天的日出日落白昼时长。返回 {"rows": [...]}。"""
+async def _fetch_daily(location: dict) -> dict:
+    """取昨天/今天/明天的日出日落白昼时长（按地点缓存）。
+
+    用 timezone=auto：接口按地点自己的时区给当地日期和当地时刻，
+    并回传 utc_offset_seconds，本地昼夜判定直接用它。
+    """
+    latitude = location.get("latitude")
+    longitude = location.get("longitude")
+    if latitude is None or longitude is None:
+        raise ValueError(f"缺少坐标，无法取日出日落: {location.get('city')}")
+
+    key = _location_key(location)
     cache = _read_cache()
-    cached = cache.get("daily")
+    bucket = _bucket(cache, key)
+    cached = bucket.get("daily")
     if (
         isinstance(cached, dict)
         and cached.get("rows")
-        and (time.time() - float(cache.get("daily_ts") or 0)) < WEATHER_TTL
+        and (time.time() - float(bucket.get("daily_ts") or 0)) < WEATHER_TTL
     ):
         return cached
 
     import httpx
 
     params = {
-        "latitude": LAT,
-        "longitude": LON,
+        "latitude": latitude,
+        "longitude": longitude,
         "daily": "sunrise,sunset,daylight_duration",
-        "timezone": TZ_NAME,
+        "timezone": "auto",
         "past_days": 1,
         "forecast_days": 2,
     }
@@ -142,20 +294,38 @@ async def _fetch_daily() -> dict:
                 "daylight": _at(durations, i),
             }
         )
-    daily = {"rows": rows}
-    cache["daily"] = daily
-    cache["daily_ts"] = time.time()
+    daily = {
+        "rows": rows,
+        "timezone": str(payload.get("timezone") or ""),
+        "utc_offset_seconds": payload.get("utc_offset_seconds"),
+    }
+    bucket["daily"] = daily
+    bucket["daily_ts"] = time.time()
     _write_cache(cache)
     return daily
 
 
-def _parse_local(ts: str | None) -> datetime | None:
+def _local_now(now_utc: datetime, offset_seconds, tz_name: str) -> datetime:
+    """地点当地时间（naive）。优先用接口回的 utc_offset，退回时区换算。"""
+    if offset_seconds is not None:
+        try:
+            return (now_utc + timedelta(seconds=float(offset_seconds))).replace(tzinfo=None)
+        except (TypeError, ValueError):
+            pass
+    return now_utc.astimezone(_tz(tz_name)).replace(tzinfo=None)
+
+
+def _parse_naive(ts: str | None) -> datetime | None:
+    """解析接口给的当地时刻字符串（接口已按地点当地时区给，这里只做本地时刻）。"""
     if not ts:
         return None
     try:
-        return datetime.fromisoformat(str(ts)).replace(tzinfo=_tz())
+        parsed = datetime.fromisoformat(str(ts))
     except ValueError:
         return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(parsed.tzinfo).replace(tzinfo=None)
+    return parsed
 
 
 def _hhmm(ts: str | None) -> str:
@@ -268,9 +438,13 @@ def _prune_moon_images(keep: str, max_age_days: int = 5) -> None:
         pass
 
 
-def _moon_image_url(date_key: str, phase: dict) -> str:
-    """生成（或复用）当天的月相图，返回可直接给 image 块用的本地 URL。"""
-    filename = f"moon_{date_key.replace('-', '')}_{phase['index']}_{MOON_ART_VERSION}.png"
+def _moon_image_url(location_key: str, date_key: str, phase: dict) -> str:
+    """生成（或复用）当天的月相图，返回可直接给 image 块用的本地 URL。
+
+    文件名带地点指纹：不同城市的当地日期可能不同，月相图不能跨城市复用。
+    """
+    slug = hashlib.md5(location_key.encode("utf-8")).hexdigest()[:8]
+    filename = f"moon_{slug}_{date_key.replace('-', '')}_{phase['index']}_{MOON_ART_VERSION}.png"
     path = MOON_DIR / filename
     if not path.exists():
         if not render_moon_png(phase["frac"], path):
@@ -324,13 +498,14 @@ def _night_prompt(info: dict) -> str:
     )
 
 
-async def _llm_line(kind: str, date_key: str, prompt: str, **kwargs) -> str:
-    """按「日期 + 昼夜」缓存的一句 LLM 文案。失败时退回备选句。"""
+async def _llm_line(kind: str, date_key: str, prompt: str, location_key: str, **kwargs) -> str:
+    """按「城市 + 日期 + 昼夜」缓存的一句 LLM 文案。失败时退回备选句。"""
     cache = _read_cache()
-    llm_cache = cache.get("llm")
+    bucket = _bucket(cache, location_key)
+    llm_cache = bucket.get("llm")
     if not isinstance(llm_cache, dict):
         llm_cache = {}
-        cache["llm"] = llm_cache
+        bucket["llm"] = llm_cache
     key = f"{date_key}_{kind}"
     cached = llm_cache.get(key)
     if isinstance(cached, str) and cached.strip():
@@ -371,17 +546,24 @@ async def _llm_line(kind: str, date_key: str, prompt: str, **kwargs) -> str:
 
 async def build_sun_moon_content(fallback: dict | None = None, **kwargs) -> dict:
     """生成日昼与月相内容。"""
-    now_local = datetime.now(_tz())
-    now_utc = now_local.astimezone(timezone.utc)
+    config = kwargs.get("config")
+    location = _resolve_location(config if isinstance(config, dict) else {})
+    location_key = _location_key(location)
+    city = location["city"]
+
+    now_utc = datetime.now(timezone.utc)
+
+    try:
+        daily = await _fetch_daily(location)
+    except Exception as exc:
+        logger.warning("[SunMoon] 取日出日落失败(%s): %s", city, exc)
+        daily = {"rows": []}
+
+    tz_name = _clean_str(daily.get("timezone")) or _clean_str(location.get("timezone")) or DEFAULT_TZ_NAME
+    now_local = _local_now(now_utc, daily.get("utc_offset_seconds"), tz_name)
     date_key = now_local.strftime("%Y-%m-%d")
     week_cn = "一二三四五六日"[now_local.weekday()]
     date_cn = f"{now_local.month}月{now_local.day}日 周{week_cn}"
-
-    try:
-        daily = await _fetch_daily()
-    except Exception as exc:
-        logger.warning("[SunMoon] 取日出日落失败: %s", exc)
-        daily = {"rows": []}
 
     rows = [r for r in (daily.get("rows") or []) if isinstance(r, dict)]
     today = next((r for r in rows if r.get("date") == date_key), None)
@@ -395,9 +577,9 @@ async def build_sun_moon_content(fallback: dict | None = None, **kwargs) -> dict
     daylight = _format_duration(daylight_sec)
     delta = _delta_text(daylight_sec, prev_sec)
 
-    # 昼夜判定：以郑州本地时间与当天日出日落比较
-    sunrise_dt = _parse_local(today.get("sunrise") if today else None)
-    sunset_dt = _parse_local(today.get("sunset") if today else None)
+    # 昼夜判定：地点当地时间与当天日出日落比较
+    sunrise_dt = _parse_naive(today.get("sunrise") if today else None)
+    sunset_dt = _parse_naive(today.get("sunset") if today else None)
     if sunrise_dt and sunset_dt and sunrise_dt <= now_local <= sunset_dt:
         period = "day"
     elif sunrise_dt and sunset_dt:
@@ -411,10 +593,10 @@ async def build_sun_moon_content(fallback: dict | None = None, **kwargs) -> dict
     to_full = f"{phase['days_to_full']:.1f}"
     to_new = f"{phase['days_to_new']:.1f}"
 
-    moon_image = _moon_image_url(date_key, phase)
+    moon_image = _moon_image_url(location_key, date_key, phase)
 
     info = {
-        "city": CITY,
+        "city": city,
         "date_cn": date_cn,
         "sunrise": sunrise,
         "sunset": sunset,
@@ -427,13 +609,13 @@ async def build_sun_moon_content(fallback: dict | None = None, **kwargs) -> dict
         "to_full": to_full,
     }
     if period == "day":
-        line = await _llm_line("day", date_key, _day_prompt(info), **kwargs)
+        line = await _llm_line("day", date_key, _day_prompt(info), location_key, **kwargs)
     else:
-        line = await _llm_line("night", date_key, _night_prompt(info), **kwargs)
+        line = await _llm_line("night", date_key, _night_prompt(info), location_key, **kwargs)
 
     content = {
         "period": period,
-        "city": CITY,
+        "city": city,
         "date_cn": date_cn,
         "sunrise": sunrise,
         "sunset": sunset,
