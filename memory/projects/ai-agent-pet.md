@@ -1018,3 +1018,12 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - **可行路径**：curl api.github.com 的资产接口（带 token，走代理）拿 302 的 Location，再用 `curl --noproxy '*'` **直连**那个签名 URL 下载。<!-- project: path:/home/open/.openclaw/workspace -->
 - 校验三件套：size ≤ 2MB、head[0]==0xe9、仓库 `ota._check_app_image()` 返回空串。<!-- project: path:/home/open/.openclaw/workspace -->
 - **OTA 登记接口必须带 `action` 字段**：`{"action":"upload","version":"0.5.8","data":"<base64>"}`。漏了会返回 `未知动作`（400）。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 纯 OTA 第一次真机就断了 —— 根因是服务端没有流控（11-11，提交 `3b3e7f6` + `ac7ecb3`）
+- **症状**：后台点「升级」→ 下到一半断，「OTA 下发中断在第 16 片」，**每次断的片数都不一样**（实测 16/20/26/29）。重连后进度从 41% 接着走（不是 0%）—— 设备没重启，是 **WS 连接断了**。<!-- project: path:/home/open/.openclaw/workspace -->
+- **三处叠加**：① 服务端 3.2 秒把 1MB 全灌完（65 片，片间 sleep 50ms），设备 OTA 队列只有 4 深且写 flash 慢 → `xQueueSend` 在 **WS 收包任务里**等 2 秒 → 收包任务停摆 → 连接断；② 设备 WS 回调里做 flash 操作（`esp_ota_begin`/`esp_ota_abort`，后者会擦 flash）；③ 失败重试时 `ota_handle_start` 看到「已在下载」就 return，新片接在**旧片偏移**上 → 镜像静默损坏。<!-- project: path:/home/open/.openclaw/workspace -->
+- **还有一条更狠的**：0.5.7 的 `ota_fail()` 只把 `s_handle` 清零，**没调 `esp_ota_abort`** → 分区还开着 → 下次 `esp_ota_begin` 返回 `ESP_ERR_INVALID_STATE` → **设备从此再也装不了固件，只能断电重启**。<!-- project: path:/home/open/.openclaw/workspace -->
+- **修法**：服务端改成**确认驱动**（等设备回 `otaStatus` 的 seq 才发下一片，超时 30s）；确认必须 **0..N 连续**（只看最大 seq 会被上一轮迟到的确认填掉空缺）；加轮次号 `round`（`otaStart` 下发、设备在 `otaStatus` 回）隔离上一轮；设备报 `ok:false` 立刻停手；OTA 期间不推帧。设备端把 flash 操作全挪出 WS 回调（`ota_handle_start` 改成只排队，写盘交给 `ota_task`），断线只**请求** abort（置标志）由 ota_task 做，队列满直接丢不在回调里等，`esp_ota_end` 后先存返回值再清 handle。<!-- project: path:/home/open/.openclaw/workspace -->
+- **版本**：0.5.8 是纯版本号 bump（OTA 验证载体），**0.5.9** 才是修复版（`MIN_OTA_RESTART_FW=(0,5,9)` —— 0.5.9 起的设备才能中途作废上一轮 OTA 从头来，更老的只能断电重启）。<!-- project: path:/home/open/.openclaw/workspace -->
+- **服务端这半边和设备 0.5.7 就能配合**：`otaStatus` 的 `seq` 字段 0.5.7 已经有了，`round` 缺省即没有。所以设备断电重启后直接点升级到 0.5.9 就能成。<!-- project: path:/home/open/.openclaw/workspace -->
+- **踩过的坑**：`xQueueSend` 带超时等在 WS 回调里 = 慢性自杀；flash 操作（哪怕是 `esp_ota_begin`）绝不能跑在 WS 收包任务里。<!-- project: path:/home/open/.openclaw/workspace -->
