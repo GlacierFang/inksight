@@ -991,3 +991,6 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - **教训**：固件里凡是「跑在 esp_websocket_client 回调栈上」的代码，栈预算 = 4KB。本地大数组/大缓冲一律走堆或静态区；复杂逻辑一律挪到自己的任务。<!-- project: path:/home/open/.openclaw/workspace -->
 - **排查方法论**：早期「设备只发空帧」的判断是错的 —— 混合方向 + 未解掩码的解析产物。必须**方向分离**抓包并解掩码后再下结论。<!-- project: path:/home/open/.openclaw/workspace -->
 - **状态**：主机侧 `491 passed`；真机未验（刷机、握手、旋钮输入都要人在设备旁边）。0.5.4/0.5.5/0.5.6 都带同一缺陷，**别直接刷**。<!-- project: path:/home/open/.openclaw/workspace -->
+- **0.5.7 落地**（11-11）：提交 `e87d548`、tag `fw-v0.5.7`、Release `https://github.com/GlacierFang/ai-agent-pet/releases/tag/fw-v0.5.7`；CI 三个 job 全 success；`petd.bin` 资产 `1062352` 字节、首字节 `0xe9`、`_check_app_image` 通过（小于 2MB app 分区上限）；已登记到后台 OTA registry（`sha256=08fe9ee3973d8c5a2eb4b35af419ab846826f9a380bc5d5125da67c77653868e`，`latest=0.5.7`）。<!-- project: path:/home/open/.openclaw/workspace -->
+- **私有 Release 资产下载的老办法（这次又踩了）**：`gh release download` / `gh api` 跟 `curl -L` 全都 403 —— 代理拦 CDN 域名 `release-assets.githubusercontent.com`，且直连 `api.github.com` 又 401（token 走代理才认）。**能用的姿势是两步**：先走代理 `curl -D hdr` 向 `api.github.com` 取 302 的签名 `Location`，再 `curl --noproxy '*'` 直连该 CDN URL。<!-- project: path:/home/open/.openclaw/workspace -->
+- **0.5.5/0.5.6 仍留在 registry 里**，两者带同一个握手缺陷（连不上）。设备当前是 0.5.4，**OTA 走不通**（连不上就收不到推送），必须 USB 整片刷 0.5.7。<!-- project: path:/home/open/.openclaw/workspace -->
