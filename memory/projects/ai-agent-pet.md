@@ -982,3 +982,12 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - 撤回后 `ui.games` 恢复 `["brickout","dice","snake"]`，后台接口确认。<!-- project: path:/home/open/.openclaw/workspace -->
 - 判定依据（先查源码再动手）：`git show fw-v0.5.2:firmware/main/game/game_pack.c` 里 `game_cap_supported` 存在（命中 1 处），且 0.5.2 的 `s_caps[]` 里 `move_cell`/`intent_overlap` 命中 0 次 —— 确认会被 `ESP_ERR_NOT_SUPPORTED` 拒，才敢在真机上试。<!-- project: path:/home/open/.openclaw/workspace -->
 - **方法论**：拿真机试之前先用 `git show <tag>:<file>` 确认那一版固件**自己会怎么拒**，否则风险不可控。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 根因：0.5.4 起的 CONNECTING 死循环 = WS 回调任务栈溢出（11-11 定位并修复）
+- **症状**：刷上 0.5.4 后设备永远 CONNECTING。抓包（方向分离，`/tmp/ws_dir.py`）：设备->服务端 TEXT 帧 **0** 个，服务端->设备 CLOSE **1002**，服务端「设备接入」记录 **0** 次。设备完成了 TCP + HTTP 升级（`101 Switching Protocols`、`Sec-WebSocket-Protocol: petd.v1`），但**一个 hello 帧都发不出**。<!-- project: path:/home/open/.openclaw/workspace -->
+- **根因**：`esp_websocket_client` 1.8.0 的事件回调跑在**它自己的任务**上，那个任务栈默认只有 4KB（组件源码 `#define WEBSOCKET_TASK_STACK (4*1024)`，可用 `.task_stack` 覆盖）。0.5.4 的 `627d989` 把 hello 缓冲 768 -> 1280，`send_hello()` 局部变量从约 1.6KB 涨到约 2.2KB，回调栈溢了 —— **溢在发帧之前**，所以表现为「握手成功但一句话都不说」。<!-- project: path:/home/open/.openclaw/workspace -->
+- **这是同一类问题的第三次**：`a8278f5`（装游戏包挪出 WS 回调栈）、`5e45ec2`（游戏 pack 改走堆）。凡是 WS 回调里的局部变量，栈预算只有 4KB。<!-- project: path:/home/open/.openclaw/workspace -->
+- **修法**（提交 `e87d548`，tag `fw-v0.5.7`）：`send_hello()` -> 独立 `hello_task`（CONNECTED 回调只入队）；hello 的 buf/packs/ids 全走 malloc；`.task_stack` 显式设 8192；`ota_mark_valid()` 延后到收到 **welcome** 之后（服务端认了 hello 才算新固件跑得起来，收不到就留待验证让 bootloader 回滚）；welcome 里 games 中转数组改静态区。<!-- project: path:/home/open/.openclaw/workspace -->
+- **教训**：固件里凡是「跑在 esp_websocket_client 回调栈上」的代码，栈预算 = 4KB。本地大数组/大缓冲一律走堆或静态区；复杂逻辑一律挪到自己的任务。<!-- project: path:/home/open/.openclaw/workspace -->
+- **排查方法论**：早期「设备只发空帧」的判断是错的 —— 混合方向 + 未解掩码的解析产物。必须**方向分离**抓包并解掩码后再下结论。<!-- project: path:/home/open/.openclaw/workspace -->
+- **状态**：主机侧 `491 passed`；真机未验（刷机、握手、旋钮输入都要人在设备旁边）。0.5.4/0.5.5/0.5.6 都带同一缺陷，**别直接刷**。<!-- project: path:/home/open/.openclaw/workspace -->
