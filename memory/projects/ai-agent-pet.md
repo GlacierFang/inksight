@@ -1006,3 +1006,15 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - 0.5.4 / 0.5.5 / 0.5.6 的 Release 正文原本还是原始说明 —— 谁点进去就下载一个连不上的固件。三个 Release 顶部已加横幅（「已作废、别刷」+ 指向 fw-v0.5.7）。<!-- project: path:/home/open/.openclaw/workspace -->
 - **仓库里的 `docs/releases/*.md` 必须同步改** —— Release body 就是从这个文件生成的（CI 的 `body_path`），只改线上正文的话，下次重建 Release 会退回旧说法。<!-- project: path:/home/open/.openclaw/workspace -->
 - 脚本姿势：`gh release view <tag> --json body` 读，`gh release edit <tag> --notes <body>` 写；正文里的反引号用 `chr(96)` 拼，别在多层引号里硬写转义。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 0.5.7 真机验证通过 + 0.5.8 当作纯 OTA 验证载体（11-11）
+- **0.5.7 真机握手成功**：后台显示 `online=true fw=0.5.7`，CONNECTING 死循环在真机上确认修好。4 个游戏包 `packAck` 全成功（brickout/dice/snake/**whack**），旋钮 `input` 事件正常流入 —— 之前 0.5.4 时代「61 条日志零 input」的问题在 0.5.7 上没复现。<!-- project: path:/home/open/.openclaw/workspace -->
+- **0.5.8 是纯版本号 bump**（固件逻辑零改动），当纯 OTA 的验证载体 —— 0.5.5 当初也是这么用的。已发 Release、已登记后台，`available=0.5.8`。<!-- project: path:/home/open/.openclaw/workspace -->
+- **OTA 升级必须由用户在后台点「升级」** —— 不要用 API 自己触发，那是项目的硬规则（升级只由人点）。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 下载 Release 资产的可用路径（踩过坑）
+- `gh auth token` 拿到的是 **OpenClaw 作用域 token**（`oc-sent-v2…`），直接拿去打 GitHub API 会 `401 Bad credentials`；但 `gh api` 本身能用（凭据走的是另一条路）。<!-- project: path:/home/open/.openclaw/workspace -->
+- 出口代理能通 `api.github.com`，但通不了 `release-assets.githubusercontent.com`（签名 URL 返回 `Forbidden`，`gh release download` 和 `gh api` 下载都会挂在那一步）。<!-- project: path:/home/open/.openclaw/workspace -->
+- **可行路径**：curl api.github.com 的资产接口（带 token，走代理）拿 302 的 Location，再用 `curl --noproxy '*'` **直连**那个签名 URL 下载。<!-- project: path:/home/open/.openclaw/workspace -->
+- 校验三件套：size ≤ 2MB、head[0]==0xe9、仓库 `ota._check_app_image()` 返回空串。<!-- project: path:/home/open/.openclaw/workspace -->
+- **OTA 登记接口必须带 `action` 字段**：`{"action":"upload","version":"0.5.8","data":"<base64>"}`。漏了会返回 `未知动作`（400）。<!-- project: path:/home/open/.openclaw/workspace -->
