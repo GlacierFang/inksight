@@ -975,3 +975,10 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - **教训**：写 release doc 说「失败要可读」之前必须 grep 固件源码确认那句文案真的存在。文档里的「屏上提示」这类描述最容易变成想象出来的功能。<!-- project: path:/home/open/.openclaw/workspace -->
 - 后台已能列出打地鼠（`/admin/api/games` 里 whack enabled=false，builtin=true），设备在线 `fw=0.5.2`、`192.168.31.105`、`esp32s3-02349c`。`petd/data/config.json` 的 `ui.games` 当前是 `["brickout","dice","snake"]`。<!-- project: path:/home/open/.openclaw/workspace -->
 - **打地鼠尚未在真机验**：设备固件 0.5.2 不含 `move_cell`/`intent_overlap`，勾选后会被拒收（这是预期行为）。要真玩必须先刷到 0.5.6。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 真机实测：0.5.2 拒收打地鼠（11-11 现场跑过）
+- 勾选打地鼠 -> 后台日志依次出现「游戏包已下发: whack」->「**游戏包安装失败: whack**」；同时 brickout/dice/snake 三个照常「已安装」。<!-- project: path:/home/open/.openclaw/workspace -->
+- **设备没崩**：撤回后 `online=True fw=0.5.2 mode=idle`，frames 持续增长（32536），没有任何重启迹象。拒收确实只发生在解析阶段。<!-- project: path:/home/open/.openclaw/workspace -->
+- 撤回后 `ui.games` 恢复 `["brickout","dice","snake"]`，后台接口确认。<!-- project: path:/home/open/.openclaw/workspace -->
+- 判定依据（先查源码再动手）：`git show fw-v0.5.2:firmware/main/game/game_pack.c` 里 `game_cap_supported` 存在（命中 1 处），且 0.5.2 的 `s_caps[]` 里 `move_cell`/`intent_overlap` 命中 0 次 —— 确认会被 `ESP_ERR_NOT_SUPPORTED` 拒，才敢在真机上试。<!-- project: path:/home/open/.openclaw/workspace -->
+- **方法论**：拿真机试之前先用 `git show <tag>:<file>` 确认那一版固件**自己会怎么拒**，否则风险不可控。<!-- project: path:/home/open/.openclaw/workspace -->
