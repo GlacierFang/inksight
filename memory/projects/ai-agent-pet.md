@@ -1001,3 +1001,8 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - **后台 registry 里带缺陷的 0.5.5/0.5.6 已删除**（`action=delete`），现在只剩 0.5.7 —— 免得有人在固件页点到那两版。<!-- project: path:/home/open/.openclaw/workspace -->
 - **petd 是 user systemd 服务**（`systemctl --user restart petd`），改完后台代码要重启才生效；重启约 1 秒恢复。<!-- project: path:/home/open/.openclaw/workspace -->
 - 验证：全量 `491 passed`；`python3 tools/check_docs.py` 通过（扫 27 个文件）；重启后 `/admin/api/ota` 返回 `minFw=0.5.7 latest=0.5.7 versions=['0.5.7']`。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 作废版本的 Release 页面也加了警告（11-11 提交 `50f0a90`）
+- 0.5.4 / 0.5.5 / 0.5.6 的 Release 正文原本还是原始说明 —— 谁点进去就下载一个连不上的固件。三个 Release 顶部已加横幅（「已作废、别刷」+ 指向 fw-v0.5.7）。<!-- project: path:/home/open/.openclaw/workspace -->
+- **仓库里的 `docs/releases/*.md` 必须同步改** —— Release body 就是从这个文件生成的（CI 的 `body_path`），只改线上正文的话，下次重建 Release 会退回旧说法。<!-- project: path:/home/open/.openclaw/workspace -->
+- 脚本姿势：`gh release view <tag> --json body` 读，`gh release edit <tag> --notes <body>` 写；正文里的反引号用 `chr(96)` 拼，别在多层引号里硬写转义。<!-- project: path:/home/open/.openclaw/workspace -->
