@@ -994,3 +994,10 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - **0.5.7 落地**（11-11）：提交 `e87d548`、tag `fw-v0.5.7`、Release `https://github.com/GlacierFang/ai-agent-pet/releases/tag/fw-v0.5.7`；CI 三个 job 全 success；`petd.bin` 资产 `1062352` 字节、首字节 `0xe9`、`_check_app_image` 通过（小于 2MB app 分区上限）；已登记到后台 OTA registry（`sha256=08fe9ee3973d8c5a2eb4b35af419ab846826f9a380bc5d5125da67c77653868e`，`latest=0.5.7`）。<!-- project: path:/home/open/.openclaw/workspace -->
 - **私有 Release 资产下载的老办法（这次又踩了）**：`gh release download` / `gh api` 跟 `curl -L` 全都 403 —— 代理拦 CDN 域名 `release-assets.githubusercontent.com`，且直连 `api.github.com` 又 401（token 走代理才认）。**能用的姿势是两步**：先走代理 `curl -D hdr` 向 `api.github.com` 取 302 的签名 `Location`，再 `curl --noproxy '*'` 直连该 CDN URL。<!-- project: path:/home/open/.openclaw/workspace -->
 - **0.5.5/0.5.6 仍留在 registry 里**，两者带同一个握手缺陷（连不上）。设备当前是 0.5.4，**OTA 走不通**（连不上就收不到推送），必须 USB 整片刷 0.5.7。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### OTA 门槛提到 0.5.7（11-11 提交 `dd9722b`）
+- **问题**：`MIN_OTA_FW` 还停在 `(0,5,4)`，而 0.5.4~0.5.6 连不上 —— 后台「可用版本」显示 0.5.7，设备是 0.5.4 时看着能升，实际永远推不到；文档「≥ 0.5.4 就能 OTA」更是把人选向那三版。<!-- project: path:/home/open/.openclaw/workspace -->
+- **改法**：`MIN_OTA_FW = (0,5,7)`（协议从 0.5.4 就有，但**能走通的**从 0.5.7 起）；`tools/check_docs.py` 把「≥ 0.5.4」钉成过期说法防回潮；6 篇文档同步；部署手册加「fw-v0.5.4/0.5.5/0.5.6 已作废」。<!-- project: path:/home/open/.openclaw/workspace -->
+- **后台 registry 里带缺陷的 0.5.5/0.5.6 已删除**（`action=delete`），现在只剩 0.5.7 —— 免得有人在固件页点到那两版。<!-- project: path:/home/open/.openclaw/workspace -->
+- **petd 是 user systemd 服务**（`systemctl --user restart petd`），改完后台代码要重启才生效；重启约 1 秒恢复。<!-- project: path:/home/open/.openclaw/workspace -->
+- 验证：全量 `491 passed`；`python3 tools/check_docs.py` 通过（扫 27 个文件）；重启后 `/admin/api/ota` 返回 `minFw=0.5.7 latest=0.5.7 versions=['0.5.7']`。<!-- project: path:/home/open/.openclaw/workspace -->
