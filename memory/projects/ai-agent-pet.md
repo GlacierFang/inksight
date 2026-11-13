@@ -1098,3 +1098,14 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - **仍然有效的历史警告**：0.5.4/0.5.5/0.5.6 带同一握手缺陷，**别直接刷**；OTA 只能推 `petd.bin`，`merged-binary.bin` 登记一次就是砖。<!-- project: path:/home/open/.openclaw/workspace -->
 - **没有「回滚待验证」这回事** —— 用户明确说过不做回滚，也从没要求过。之前把「断电回滚路径实测」当待办列出来，是我自己臆造的需求。
 - **教训（重要）**：我把 IDF 的 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`（bootloader 防砖：新固件跑不起来自动退回旧分区）当成了产品功能「回滚」，写进 CHANGELOG 和 release notes，还反复把「回滚路径实测」当待决策项推给用户。**用户从头到尾就没要过回滚。** 以后不许再把 IDF 的默认安全机制当成产品需求自造。<!-- project: path:/home/open/.openclaw/workspace -->
+
+
+### 确认卡回程重构 + 判据修正（11-13，提交 8716863）
+- **回程文案改版**：标题带卡 id —— 格式改成 [确认卡 <卡id>] <问题>，选项后不再带「（第 N 项）」（选项文本已唯一，带 id 后索引没用）。四种结束态在 agent 眼里必须分开：选了某项 / 用户主动取消了这个问题，不必重复询问 / 这个问题已被另一个新问题取代 / 无人应答，这张卡已超时，按默认选项继续。<!-- project: path:/home/open/.openclaw/workspace -->
+- **为什么重要**：原来四种结束态在 agent 眼里长得一模一样（_notify 只传空串），agent 只能瞎猜，最可能的行为是**再问一遍** —— 变成骚扰。<!-- project: path:/home/open/.openclaw/workspace -->
+- **判据改了**（我原来的 skill 判据是错的，被当天一个开发决策案例打脸）：不该用确认卡的理由不是「技术问题」，而是三条 —— 装不装得下（2~4 个短选项）、是不是必须回答才能往下走（阻塞点）、人此刻在不在设备旁边。**主题不是判据**：开发决策照样能推。<!-- project: path:/home/open/.openclaw/workspace -->
+- **挂起方案**：不用 sessions_yield 挂起等待（卡会超时、会被顶掉、会没人答，挂起就没下文）。改成**回注即唤醒** —— 推完卡就结束本轮，收到 [确认卡] 消息后从断点接着干。已核实 gateway chat.send 走 user turn 注入路径（源码里全是 userTurnRecorder / direct-injection user prompt），会触发新一轮 agent run。**petd 服务端一行都不用改**，agent 生命周期不归宠物后台管。<!-- project: path:/home/open/.openclaw/workspace -->
+- **source 字段进渲染**：屏上顶栏画「待确认 · <来源>」—— 多会话时用户得知道是谁在问他（之前 source 字段存了但没画）。<!-- project: path:/home/open/.openclaw/workspace -->
+- 改动：petd/app.py（回程文案）、petd/render.py（来源）、tests/test_confirm.py（+3 项断言）、docs/确认卡.md、skills/pet-confirm/SKILL.md（判据 + 推完卡就结束本轮）。全量 **538 passed**。<!-- project: path:/home/open/.openclaw/workspace -->
+- **踩坑**：并发跑多轮 pytest 会互相打架（抢端口、抢 DATA_DIR），表现是「跑到一半卡住不动」。我一度以为是改动的问题，实际是自己开了好几轮。清理残留进程后单跑 104 秒 538 全绿。**测试卡住先怀疑自己有僵尸 pytest 进程，别急着改代码。**<!-- project: path:/home/open/.openclaw/workspace -->
+- **踩坑（重复犯）**：pkill -f 匹配 pytest 会把执行清理的 shell 本身一起杀掉 —— skill 里明明写着这个坑，还是又踩了。清理要用 pgrep -f 加方括号模式排除自身。<!-- project: path:/home/open/.openclaw/workspace -->
