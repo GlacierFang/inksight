@@ -808,7 +808,7 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - **升级只能由后台的人点** —— 设备连上来不会自己升级，petd 只显示「当前版本 / 可用版本」。<!-- project: path:/home/open/.openclaw/workspace -->
 - 支持两种固件来源：上传 bin（私有化部署连不上 GitHub Release）、填 URL（内网 NAS）。petd 自动算 sha256。<!-- project: path:/home/open/.openclaw/workspace -->
 - 协议新增 otaStart / otaChunk / otaFinish / otaStatus；分片 16KB，**文本预告 + WebSocket binary 本体**。<!-- project: path:/home/open/.openclaw/workspace -->
-- 写入非当前运行的 ota_0 / ota_1 分区，校验成功后切启动分区重启；CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y，新固件连上 petd 才确认有效，否则 bootloader 自动回滚。<!-- project: path:/home/open/.openclaw/workspace -->
+- 写入非当前运行的 ota_0 / ota_1 分区，校验成功后切启动分区重启；CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y，新固件连上 petd 才确认有效，连不上 bootloader 自动退回旧分区（防砖机制，不是回滚功能）。<!-- project: path:/home/open/.openclaw/workspace -->
 - 最低支持版本 0.5.4 —— 更低固件连 otaStart 都不认识。<!-- project: path:/home/open/.openclaw/workspace -->
 - **0.5.4 改了 bootloader，所以第一次仍要整片刷 merged-binary.bin；之后才能纯 OTA petd.bin。全量镜像绝不能作为 OTA app 镜像登记。**<!-- project: path:/home/open/.openclaw/workspace -->
 - Release：https://github.com/GlacierFang/ai-agent-pet/releases/tag/fw-v0.5.4（merged-binary.bin / petd.bin / uf2.bin / flash_args / flasher_args.json）。<!-- project: path:/home/open/.openclaw/workspace -->
@@ -867,7 +867,7 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - CI：`python-ci` 与 `firmware-build` 均 success（固件在真实 ESP-IDF v5.5 构建里编过，含新增 addr.c）。<!-- project: path:/home/open/.openclaw/workspace -->
 - **首次访问流程已实测走通**：未设口令 → `setup/public` 返回 `servers` → 设口令 → 登录 → 虚拟屏 preview.jpg 200（10KB 且帧在变）→ 后台填 token 落盘。不造虚拟设备，`device.online=false`。<!-- project: path:/home/open/.openclaw/workspace -->
 - **Release 已核对**：`fw-v0.5.4` / `fw-v0.5.5` 的标题都是干净的 tag，正文完整。<!-- project: path:/home/open/.openclaw/workspace -->
-- 仍待真机：USB 整片刷 `fw-v0.5.4` → 登记 `fw-v0.5.5` 的 `petd.bin` → 纯 OTA → 失败回滚；确认卡整屏/旋钮/短按长按；贪吃蛇真机手感；固件新端口解析的真机验证。<!-- project: path:/home/open/.openclaw/workspace -->
+- （11-13 已全部真机验证通过）此前记的待验项：USB 整片刷 `fw-v0.5.4` → 登记 `fw-v0.5.5` 的 `petd.bin` → 纯 OTA；确认卡整屏/旋钮/短按长按；贪吃蛇真机手感；固件新端口解析的真机验证。<!-- project: path:/home/open/.openclaw/workspace -->
 
 ### 确认卡真机验收（11-11 已通过）
 设备 `esp32s3-02349c` fw=0.5.2 在线，petd 侧三种手势全链路跑通：
@@ -987,7 +987,7 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - **症状**：刷上 0.5.4 后设备永远 CONNECTING。抓包（方向分离，`/tmp/ws_dir.py`）：设备->服务端 TEXT 帧 **0** 个，服务端->设备 CLOSE **1002**，服务端「设备接入」记录 **0** 次。设备完成了 TCP + HTTP 升级（`101 Switching Protocols`、`Sec-WebSocket-Protocol: petd.v1`），但**一个 hello 帧都发不出**。<!-- project: path:/home/open/.openclaw/workspace -->
 - **根因**：`esp_websocket_client` 1.8.0 的事件回调跑在**它自己的任务**上，那个任务栈默认只有 4KB（组件源码 `#define WEBSOCKET_TASK_STACK (4*1024)`，可用 `.task_stack` 覆盖）。0.5.4 的 `627d989` 把 hello 缓冲 768 -> 1280，`send_hello()` 局部变量从约 1.6KB 涨到约 2.2KB，回调栈溢了 —— **溢在发帧之前**，所以表现为「握手成功但一句话都不说」。<!-- project: path:/home/open/.openclaw/workspace -->
 - **这是同一类问题的第三次**：`a8278f5`（装游戏包挪出 WS 回调栈）、`5e45ec2`（游戏 pack 改走堆）。凡是 WS 回调里的局部变量，栈预算只有 4KB。<!-- project: path:/home/open/.openclaw/workspace -->
-- **修法**（提交 `e87d548`，tag `fw-v0.5.7`）：`send_hello()` -> 独立 `hello_task`（CONNECTED 回调只入队）；hello 的 buf/packs/ids 全走 malloc；`.task_stack` 显式设 8192；`ota_mark_valid()` 延后到收到 **welcome** 之后（服务端认了 hello 才算新固件跑得起来，收不到就留待验证让 bootloader 回滚）；welcome 里 games 中转数组改静态区。<!-- project: path:/home/open/.openclaw/workspace -->
+- **修法**（提交 `e87d548`，tag `fw-v0.5.7`）：`send_hello()` -> 独立 `hello_task`（CONNECTED 回调只入队）；hello 的 buf/packs/ids 全走 malloc；`.task_stack` 显式设 8192；`ota_mark_valid()` 延后到收到 **welcome** 之后（服务端认了 hello 才算新固件跑得起来，收不到就留待验证，bootloader 会退回旧分区）；welcome 里 games 中转数组改静态区。<!-- project: path:/home/open/.openclaw/workspace -->
 - **教训**：固件里凡是「跑在 esp_websocket_client 回调栈上」的代码，栈预算 = 4KB。本地大数组/大缓冲一律走堆或静态区；复杂逻辑一律挪到自己的任务。<!-- project: path:/home/open/.openclaw/workspace -->
 - **排查方法论**：早期「设备只发空帧」的判断是错的 —— 混合方向 + 未解掩码的解析产物。必须**方向分离**抓包并解掩码后再下结论。<!-- project: path:/home/open/.openclaw/workspace -->
 - **状态**：主机侧 `491 passed`；真机验证已于 11-13 完成（0.5.7 握手通过、0.5.9→0.5.10 OTA 闭环跑通、11-13 全部改动真机验证通过）。0.5.4/0.5.5/0.5.6 都带同一握手缺陷，**别直接刷**。<!-- project: path:/home/open/.openclaw/workspace -->
@@ -1096,4 +1096,5 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - 结清范围：打地鼠（0.5.10 OTA 后新包装上、旋钮六格循环选格、短按敲击命中、空敲不加分、「你赢了」遮罩）、贪吃蛇、屏幕亮度新档位、固件页「上传固件 + 升级固件」、钓鱼（`petd/packs/fishing.json`）。<!-- project: path:/home/open/.openclaw/workspace -->
 - `fw-v0.5.10` 的 Release 正文已从「还没在真机上验证」改成「已在真机上验证通过」，**仓库文件与线上 Release 两边同步**（提交 `449fd01`）。<!-- project: path:/home/open/.openclaw/workspace -->
 - **仍然有效的历史警告**：0.5.4/0.5.5/0.5.6 带同一握手缺陷，**别直接刷**；OTA 只能推 `petd.bin`，`merged-binary.bin` 登记一次就是砖。<!-- project: path:/home/open/.openclaw/workspace -->
-- 仍未做的：断电回滚路径的实测（0.5.5 那条「没有真机证据」的警告依然成立 —— 用户这轮验的是功能，不是 bootloader 回滚）。<!-- project: path:/home/open/.openclaw/workspace -->
+- **没有「回滚待验证」这回事** —— 用户明确说过不做回滚，也从没要求过。之前把「断电回滚路径实测」当待办列出来，是我自己臆造的需求。
+- **教训（重要）**：我把 IDF 的 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`（bootloader 防砖：新固件跑不起来自动退回旧分区）当成了产品功能「回滚」，写进 CHANGELOG 和 release notes，还反复把「回滚路径实测」当待决策项推给用户。**用户从头到尾就没要过回滚。** 以后不许再把 IDF 的默认安全机制当成产品需求自造。<!-- project: path:/home/open/.openclaw/workspace -->
