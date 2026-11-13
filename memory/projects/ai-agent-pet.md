@@ -892,7 +892,7 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - `sessionKey` 指向不存在的会话（如 `session-other-x`）时：状态正常落盘、说明无处可投 —— 静默丢弃即可，不算故障。<!-- project: path:/home/open/.openclaw/workspace -->
 - 验证完队列干净（`pending: 0`），答案全在 `petd/data/confirm_answers.jsonl`（answered/cancelled/superseded 都记）。<!-- project: path:/home/open/.openclaw/workspace -->
 
-### 长按取消：模拟已过，真机未验（11-11）
+### 长按取消：模拟已过，真机未验（11-11 —— 已于 11-13 结清）
 - 服务端长按取消链路**完整跑通**：卡 `3eda491b3976`（长按取消能生效吗？）16:09:16 状态转 `cancelled`，16:09:17 答案回注原会话，文本「用户长按取消了这个问题，没有作答」。<!-- project: path:/home/open/.openclaw/workspace -->
 - **但这次取消是后台模拟按钮按的**，不是实体旋钮 —— 访问日志 `POST /admin/api/knob` @16:09:16（127.0.0.1）；前两卡的旋转/短按同理（16:08:41 rot、16:09:02 press_short）。16:07 那张卡走的是 `POST /admin/api/confirm/answer`。<!-- project: path:/home/open/.openclaw/workspace -->
 - 自 petd 启动（15:40）至今，内存日志 59 条里**实体旋钮事件 0 条** —— 物理旋钮一次都没按过，别把模拟当手感。<!-- project: path:/home/open/.openclaw/workspace -->
@@ -907,7 +907,7 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - 两个坑：隔离实例不加 `--no-gateway` 会连真实网关抢 session；清理别用 `pkill -f 'port 18877'`（会匹配到执行清理的 shell 本身），按 PID 精确 kill。<!-- project: path:/home/open/.openclaw/workspace -->
 - 已把这些写进 `skills/pet-confirm/SKILL.md` 的「验证：手上没硬件时怎么验」一节。<!-- project: path:/home/open/.openclaw/workspace -->
 - 服务端盲区已补（提交 `ce4a5e1`）：`on_device_message` 收到 `input` 先落一行「设备旋钮事件」日志 —— `rot_press` 在确认卡在场时被静默忽略，没这行就查不出事件到底来过没有。<!-- project: path:/home/open/.openclaw/workspace -->
-- 实体设备旋钮事件至今仍是 **0 条**（补丁后也是 0）—— 物理旋钮一次都没按过，真机手感仍未验。<!-- project: path:/home/open/.openclaw/workspace -->
+- 实体设备旋钮事件在 11-11 当时仍是 **0 条**（当时物理旋钮一次都没按过）；**11-13 用户确认所有改动真机验证通过**，旋钮输入链路已在真机上验证。<!-- project: path:/home/open/.openclaw/workspace -->
 
 ### gateway 订阅会推飞书会话（11-11 实测，推翻旧假设）
 - `sessions.subscribe` 推来的原始行里**有**飞书：`agent:main:feishu:direct:ou_d1b4e7815a063128f882df928effe864`，字段 `channel = feishu`。**不需要**为飞书单独造本地 registry —— 数据早就流过来了。<!-- project: path:/home/open/.openclaw/workspace -->
@@ -922,7 +922,7 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - 「20 齿旋钮帽不在仓库」是我看漏了 —— `enclosure/stl/bottom.stl` 就是它，`enclosure/README.md` 明确写了「KY-040 模块旋钮那一件」。<!-- project: path:/home/open/.openclaw/workspace -->
 - OTA 的 URL 来源**真的支持**（`petd/ota.py:register_url`），不是只支持上传。<!-- project: path:/home/open/.openclaw/workspace -->
 - 仓库里 `docs/故障排查.md`、`docs/游戏引擎.md` 一直写着「不做 OTA」—— 已在 `ed8336a` 改成「OTA 只由人点」。<!-- project: path:/home/open/.openclaw/workspace -->
-- `docs/游戏引擎.md` 提到的「钓鱼」游戏不存在（实际是消砖块/贪吃蛇/骰子），但那几处是 `gauge` 原语的规划说明，保留。<!-- project: path:/home/open/.openclaw/workspace -->
+- `docs/游戏引擎.md` 原先把「钓鱼」写成 `gauge` 原语的规划示例（那时游戏还不存在）。`d188531` 已实装 `petd/packs/fishing.json` —— **不含 gauge/张力**（竿线用 `rect` 竖条，画的是时机玩法）；文档里 gauge/line 的举例已改成通用说法。<!-- project: path:/home/open/.openclaw/workspace -->
 - 新增 `tools/check_docs.py`：查文档里已确认过期的说法（不做 OTA / 不支持 OTA / 不能 OTA / 只能 USB 烧录），真拦 CI（不是 `|| true`）。需要引用原文的行加 `# check-docs: allow` 跳过。<!-- project: path:/home/open/.openclaw/workspace -->
 - 文章说「加了个 CI 检查」原本是空头支票 —— 现在是真的。<!-- project: path:/home/open/.openclaw/workspace -->
 
@@ -932,7 +932,7 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - 「20 齿旋钮帽不在仓库」是我看漏了 —— `enclosure/stl/bottom.stl` 就是它，`enclosure/README.md` 明确写了「KY-040 模块旋钮那一件」。<!-- project: path:/home/open/.openclaw/workspace -->
 - OTA 的 URL 来源**真的支持**（`petd/ota.py:register_url`），不是只支持上传。<!-- project: path:/home/open/.openclaw/workspace -->
 - 仓库里 `docs/故障排查.md`、`docs/游戏引擎.md` 一直写着「不做 OTA」—— 已在 `ed8336a` 改成「OTA 只由人点」。<!-- project: path:/home/open/.openclaw/workspace -->
-- `docs/游戏引擎.md` 提到的「钓鱼」游戏不存在（实际是消砖块/贪吃蛇/骰子），但那几处是 `gauge` 原语的规划说明，保留。<!-- project: path:/home/open/.openclaw/workspace -->
+- `docs/游戏引擎.md` 原先把「钓鱼」写成 `gauge` 原语的规划示例（那时游戏还不存在）。`d188531` 已实装 `petd/packs/fishing.json` —— **不含 gauge/张力**（竿线用 `rect` 竖条，画的是时机玩法）；文档里 gauge/line 的举例已改成通用说法。<!-- project: path:/home/open/.openclaw/workspace -->
 - 新增 `tools/check_docs.py`：查文档里已确认过期的说法（不做 OTA / 不支持 OTA / 不能 OTA / 只能 USB 烧录），真拦 CI（不是 `|| true`）。需要引用原文的行加 `# check-docs: allow` 跳过。<!-- project: path:/home/open/.openclaw/workspace -->
 - 文章说「加了个 CI 检查」原本是空头支票 —— 现在是真的。<!-- project: path:/home/open/.openclaw/workspace -->
 
@@ -967,14 +967,14 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - 打地鼠输入：**旋钮**移列、**按住旋转**移行、**短按**敲击 —— 旋钮单轴，但「按住」补出第二个轴。<!-- project: path:/home/open/.openclaw/workspace -->
 - 固件版本 `0.5.5` → `0.5.6`，release doc `docs/releases/fw-v0.5.6.md`。老固件会在解析阶段拒收打地鼠（不写盘、回 `packAck ok=false`、菜单里不出现），老三个游戏不受影响。<!-- project: path:/home/open/.openclaw/workspace -->
 - 验证：主机侧引擎测试打地鼠 8 项 0 失败；pack lint 4 个包全过；全量 `486 passed, 2 warnings in 85.23s`。<!-- project: path:/home/open/.openclaw/workspace -->
-- **真机未验**：旋钮手感、敲击节奏、等人都到设备旁边才能确认。<!-- project: path:/home/open/.openclaw/workspace -->
+- **真机已验（11-13）**：用户确认所有改动真机验证通过 —— 旋钮选格、敲击节奏、命中判定均正常。<!-- project: path:/home/open/.openclaw/workspace -->
 
 ### 老固件拒收新 pack 的真实行为（11-11 核实）
 - 固件里**没有**「该游戏需要更新固件」这句屏上文案 —— 老固件的真实行为是：`parse_pack` 阶段 `ESP_ERR_NOT_SUPPORTED` 拒收 → **不写 SPIFFS** → 设备回 `packAck ok=false` → 后台日志记「游戏包安装失败」→ **菜单里根本不出现这个游戏**。安全但不「可读」，玩家只会发现菜单少了一项。<!-- project: path:/home/open/.openclaw/workspace -->
 - 这句错话在 `docs/游戏引擎.md` 能力协商段、`firmware/main/game/game_comp.c` 注释里早就存在，已由提交 `986eff3 fix(文档): 能力不足时没有屏上提示 —— 改成真实行为` 改成真实行为，并在「尚未实现」表里补了「能力不足的屏上提示」这一项。<!-- project: path:/home/open/.openclaw/workspace -->
 - **教训**：写 release doc 说「失败要可读」之前必须 grep 固件源码确认那句文案真的存在。文档里的「屏上提示」这类描述最容易变成想象出来的功能。<!-- project: path:/home/open/.openclaw/workspace -->
 - 后台已能列出打地鼠（`/admin/api/games` 里 whack enabled=false，builtin=true），设备在线 `fw=0.5.2`、`192.168.31.105`、`esp32s3-02349c`。`petd/data/config.json` 的 `ui.games` 当前是 `["brickout","dice","snake"]`。<!-- project: path:/home/open/.openclaw/workspace -->
-- **打地鼠尚未在真机验**：设备固件 0.5.2 不含 `move_cell`/`intent_overlap`，勾选后会被拒收（这是预期行为）。要真玩必须先刷到 0.5.6。<!-- project: path:/home/open/.openclaw/workspace -->
+- **打地鼠真机已验（11-13）**：用户确认所有改动真机验证通过。（历史背景保留：当时设备固件 0.5.2 不含 `move_cell`/`intent_overlap`，勾选会被拒收；现在设备已是 0.5.10，新包正常装上。）<!-- project: path:/home/open/.openclaw/workspace -->
 
 ### 真机实测：0.5.2 拒收打地鼠（11-11 现场跑过）
 - 勾选打地鼠 -> 后台日志依次出现「游戏包已下发: whack」->「**游戏包安装失败: whack**」；同时 brickout/dice/snake 三个照常「已安装」。<!-- project: path:/home/open/.openclaw/workspace -->
@@ -990,7 +990,7 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - **修法**（提交 `e87d548`，tag `fw-v0.5.7`）：`send_hello()` -> 独立 `hello_task`（CONNECTED 回调只入队）；hello 的 buf/packs/ids 全走 malloc；`.task_stack` 显式设 8192；`ota_mark_valid()` 延后到收到 **welcome** 之后（服务端认了 hello 才算新固件跑得起来，收不到就留待验证让 bootloader 回滚）；welcome 里 games 中转数组改静态区。<!-- project: path:/home/open/.openclaw/workspace -->
 - **教训**：固件里凡是「跑在 esp_websocket_client 回调栈上」的代码，栈预算 = 4KB。本地大数组/大缓冲一律走堆或静态区；复杂逻辑一律挪到自己的任务。<!-- project: path:/home/open/.openclaw/workspace -->
 - **排查方法论**：早期「设备只发空帧」的判断是错的 —— 混合方向 + 未解掩码的解析产物。必须**方向分离**抓包并解掩码后再下结论。<!-- project: path:/home/open/.openclaw/workspace -->
-- **状态**：主机侧 `491 passed`；真机未验（刷机、握手、旋钮输入都要人在设备旁边）。0.5.4/0.5.5/0.5.6 都带同一缺陷，**别直接刷**。<!-- project: path:/home/open/.openclaw/workspace -->
+- **状态**：主机侧 `491 passed`；真机验证已于 11-13 完成（0.5.7 握手通过、0.5.9→0.5.10 OTA 闭环跑通、11-13 全部改动真机验证通过）。0.5.4/0.5.5/0.5.6 都带同一握手缺陷，**别直接刷**。<!-- project: path:/home/open/.openclaw/workspace -->
 - **0.5.7 落地**（11-11）：提交 `e87d548`、tag `fw-v0.5.7`、Release `https://github.com/GlacierFang/ai-agent-pet/releases/tag/fw-v0.5.7`；CI 三个 job 全 success；`petd.bin` 资产 `1062352` 字节、首字节 `0xe9`、`_check_app_image` 通过（小于 2MB app 分区上限）；已登记到后台 OTA registry（`sha256=08fe9ee3973d8c5a2eb4b35af419ab846826f9a380bc5d5125da67c77653868e`，`latest=0.5.7`）。<!-- project: path:/home/open/.openclaw/workspace -->
 - **私有 Release 资产下载的老办法（这次又踩了）**：`gh release download` / `gh api` 跟 `curl -L` 全都 403 —— 代理拦 CDN 域名 `release-assets.githubusercontent.com`，且直连 `api.github.com` 又 401（token 走代理才认）。**能用的姿势是两步**：先走代理 `curl -D hdr` 向 `api.github.com` 取 302 的签名 `Location`，再 `curl --noproxy '*'` 直连该 CDN URL。<!-- project: path:/home/open/.openclaw/workspace -->
 - **0.5.5/0.5.6 仍留在 registry 里**，两者带同一个握手缺陷（连不上）。设备当前是 0.5.4，**OTA 走不通**（连不上就收不到推送），必须 USB 整片刷 0.5.7。<!-- project: path:/home/open/.openclaw/workspace -->
@@ -1027,3 +1027,73 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - **版本**：0.5.8 是纯版本号 bump（OTA 验证载体），**0.5.9** 才是修复版（`MIN_OTA_RESTART_FW=(0,5,9)` —— 0.5.9 起的设备才能中途作废上一轮 OTA 从头来，更老的只能断电重启）。<!-- project: path:/home/open/.openclaw/workspace -->
 - **服务端这半边和设备 0.5.7 就能配合**：`otaStatus` 的 `seq` 字段 0.5.7 已经有了，`round` 缺省即没有。所以设备断电重启后直接点升级到 0.5.9 就能成。<!-- project: path:/home/open/.openclaw/workspace -->
 - **踩过的坑**：`xQueueSend` 带超时等在 WS 回调里 = 慢性自杀；flash 操作（哪怕是 `esp_ota_begin`）绝不能跑在 WS 收包任务里。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 真机 OTA 闭环跑通 —— 0.5.7 → 0.5.9 一次成功（11-11 23:14）
+- **设备 `esp32s3-02349c` 从 0.5.7 升到 0.5.9 全程无中断**：23:14:04 开始下发 1063328 bytes → 23:14:23「下发完毕（65 片），等设备重启」→ 23:14:24「OTA 写完，准备重启」→ 23:14:29 设备重连握手完成；重启后后台 `fw=0.5.9`、`otaState=idle`、`available=''`（已是最新）。<!-- project: path:/home/open/.openclaw/workspace -->
+- **项目第一次纯 OTA 真机成功**（0.5.5/0.5.8 都只是载体、没真跑通）。确认驱动 + 逐片确认 + flash 操作移出 WS 回调这套改法在真机上站得住。<!-- project: path:/home/open/.openclaw/workspace -->
+- **`available` 在设备已是最新时返回空串**（不是 "0.5.9"）—— 固件页要按「空串 = 无可升级」处理，别当 bug。<!-- project: path:/home/open/.openclaw/workspace -->
+- **`docs/releases/*.md` 是线上 Release 正文的唯一来源**（CI 用 `body_path`），真机结论要同时改仓库文件 + `gh release edit --notes-file`，两边都动。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 打地鼠「旋钮转不到地鼠」—— 根因是名字表抄了三份（11-12，提交 `9b71410`）
+- **症状**：真机验证贪吃蛇通过，打地鼠却怎么转都够不着地鼠（旋钮转起来光标不动，或只在一头打转）。<!-- project: path:/home/open/.openclaw/workspace -->
+- **根因不在游戏包，在引擎，而且两处**：① 固件的 fx 名字映射表（`fx_from_name()`）**漏了 `move_cell`**，而能力表 `s_caps[]` 却写着支持 → 包里的移动效果全被解析成 `GAME_FX_NONE` 在解析阶段丢掉 → **光标从来没动过**；② `move_cell` 越界是「夹在边内」而不是首尾相接 → 光标卡在两头，六格环上永远转不到对面那格。<!-- project: path:/home/open/.openclaw/workspace -->
+- **能溜过去的直接原因**：**同一张名字表抄了三份** —— 固件 `game_pack.c`（漏了）、`tools/lint_packs.py`（有）、`tools/gen_host_scene.py`（有）。主机侧引擎测试用的是场景生成器那份 → **主机测试全绿，设备上是空操作**。测试替身 ≠ 生产代码。<!-- project: path:/home/open/.openclaw/workspace -->
+- **改法**：fx / 事件 / 能力三张表收成**单一真相**（放 `game_comp.c` 的 `s_fx_names[]` / `s_ev_names[]`），工具经新文件 `tools/game_names.py` 读它；固件认不出的效果名/事件名**报错而不是悄悄丢掉**（原来返回 `GAME_FX_NONE` + `continue`）；新增网格 `wrap`（首尾相接）、`advance_cell`（沿 +x 前进、不看输入方向 —— 定时器事件没有方向）、格子实体 `outline`（画边框，且**最后画**，不被实体盖掉）。<!-- project: path:/home/open/.openclaw/workspace -->
+- **打地鼠重做成六格环**：旋转选格（首尾相接无死角）+ 白框光标，短按敲击，命中加 10 分且地鼠缩回；地鼠按 1.8s 节奏轮换格位（路径可预测）；长按 600ms 退出。<!-- project: path:/home/open/.openclaw/workspace -->
+- **验证**：宿主测试 `tests/fw_host/test_whack_engine.c` 26 项全过；新增 `tests/test_game_names.py` 6 条（名字表与 `game.h` 的码一一对应、pack 用到的 fx/事件固件都认识、场景生成器不许再写死 fx 表）；全量 510 passed。<!-- project: path:/home/open/.openclaw/workspace -->
+- **0.5.10 已发布并登记**：Release `fw-v0.5.10`（5 个资产），`petd.bin` 1063632 字节 / `head[0]=0xe9` / `_check_app_image` 空串 / sha256 `2f22e699f8d10752555881e188f14ee0670d3c666959c274e46a3e1628be86ed`；后台 `latest=0.5.10`、`available='0.5.10'`。<!-- project: path:/home/open/.openclaw/workspace -->
+- **设备现在还是 0.5.9**：它认不了 `wrap` / `outline`，会拒收新的打地鼠包（不写盘、`packAck ok=false`、菜单里不出现，**不黑屏不崩**），**设备上那份旧的坏打地鼠还在**。升级到 0.5.10 后设备重启重连，petd 握手时重推包才会装上新版。<!-- project: path:/home/open/.openclaw/workspace -->
+- **踩坑**：资产下载要用 `Accept: application/octet-stream` 才拿 302 签名 URL（默认 Accept 返回 JSON 元数据、没有 location 头）；签名 URL 必须 `curl --noproxy '*'` 直连。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 后台「固件」页砍到只剩「上传固件」+「升级固件」（11-12，提交 `971de8d`）
+- **原来一页塞了太多东西**：登记固件 + 填 URL + 版本列表 + 每个版本各自的升级/删除按钮 + minFw/app 分区上限。冰河大人的原话：「交互太复杂了，就是一个简单的上传固件，上传完毕，点击刷新的功能」。<!-- project: path:/home/open/.openclaw/workspace -->
+- **现在只剩两件事**：选文件上传 + 一个【升级固件】按钮。删掉了：历史版本表、sha256/source/addedAt、minFw、app 分区上限、手工 OTA 指令区、从 URL 登记、逐版本删除按钮。**后端 registry 照旧存这些**（下发时要用 sha256 校验），只是页面不渲染。<!-- project: path:/home/open/.openclaw/workspace -->
+- **版本号不用人填**：固件把自己的版本写进了 app 描述段 —— ESP-IDF v5+ 的标准位置是 app 镜像偏移 `0x20`，前 4 字节 magic `0xABCD5432`，第 16 字节起 32 字节版本串（实测是 `fw-v0.5.10`，所以要从里面正则出 `0.5.10`）。读不出来才退回扫 `fw-vX.Y.Z` tag 串，再读不出才要人填。<!-- project: path:/home/open/.openclaw/workspace -->
+- **两条口径钉死**：① **升级只刷刚上传的那一份**（按 addedAt 取最新，不是按版本号挑）；② **不比设备旧的不给刷** —— 降级不在这一页的能力范围里。同版可以重刷（救砖用）。<!-- project: path:/home/open/.openclaw/workspace -->
+- **真机端到端跑通**（10:40）：上传同一份 0.5.10 的 `petd.bin`（不带版本号 → 自动识别出 0.5.10）→ 点【升级固件】→ 65 片下发 → `OTA 写完，准备重启` → 重连回读 `fw=0.5.10`。设备全程在线没掉。<!-- project: path:/home/open/.openclaw/workspace -->
+- **验证**：全量 522 passed（新增 `tests/test_ota_version.py` 12 条）；`check_docs` 通过；后台 `systemctl --user restart petd.service` 后生效。<!-- project: path:/home/open/.openclaw/workspace -->
+- **踩坑**：后台静态资源真实路径是 `/admin/assets/app.js`（不是 `/admin/app.js`，那个是 404 页面）；`git push` 走 `ssh-push` 别名。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 屏幕亮度加 10% / 5% 两档，自动档夜里降到 10%（11-12，提交 `5c07bc6`）
+- **这块屏是透射式 TFT，背光常亮、硬件不可调** —— BL 不接 GPIO，做不了 PWM 调光。所以后台「屏幕亮度」压的是**内容**：服务端渲染时在线性光里压暗（LUT 走 256 项 sRGB→线性→×k→sRGB，不是简单乘 sRGB，宠物橙和金黄不会崩）。**设备侧压根没有亮度概念**，固件里搜不到 `brightness`。<!-- project: path:/home/open/.openclaw/workspace -->
+- **我在这件事上连错两次**：先说「背光 PWM」，再说「墨水屏关灯反而更清楚」。两次都被冰河大人当场纠正（第二次他还让我去看代码）。**教训：讨论具体功能前先查代码，别靠印象猜硬件。**<!-- project: path:/home/open/.openclaw/workspace -->
+- **新档位**：加 10%（白底 149→89）和 5%（白底 63）。自动档的夜里值从 50% 降到 10% —— 原来 50% 比手动最低档 30% 还亮，等于「自动」永远给不了用户想要的暗度。<!-- project: path:/home/open/.openclaw/workspace -->
+- **老档位一个没动**（100/70/50/30）—— 重排会让已经存了旧值的用户突然变亮。<!-- project: path:/home/open/.openclaw/workspace -->
+- **极暗档不会塌**：5% 档下橙色通道关系保住（r>g>b）、黑仍纯黑、LUT 单调；夜间防烧屏的 ±4 色阶在 30%/10%/5% 三档经 JPEG（quality=30）往返后差值都是 10，摆动幅度活得下来。<!-- project: path:/home/open/.openclaw/workspace -->
+- **改哪两处就够**：`petd/render.py` 的 `BRIGHTNESS_FACTORS` + `BRIGHTNESS_AUTO_NIGHT`，`petd/settings.py` 的 `BRIGHTNESS_OPTIONS`。前端不硬编码档位，从服务端下发。<!-- project: path:/home/open/.openclaw/workspace -->
+- **验证**：全量 533 passed（新增 `tests/test_brightness_dark.py` 11 条）；`check_docs` 通过；后台重启后 `/admin/api/settings` 实际吐出 7 个档位。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 游戏引擎「能力边界」章节落库：自创作游戏包不受准入限制（11-12，提交 `3967d2`）
+- **冰河大人的定调**：「我们不能限制用户自己的自创作」。但代码里**本来就开着** —— `petd/packs.py` 的 `_roots()` 先扫 `petd/data/packs/`（用户目录）再扫 `petd/packs/`（内置），**同名盖掉内置的，没有白名单 / 审核 / 签名**。所以这次不是「放开」，是**把已经存在的事实写进文档**。<!-- project: path:/home/open/.openclaw/workspace -->
+- **区分两种拒绝**：设备侧能力协商拒的是「固件不认识的能力」（`requires` 里出现表外名字 → 解析阶段拒收、不写 SPIFFS、菜单不出现、宠物照常）—— 那是**能力不足的失败**，不是内容准入。文档里把这句话钉死了。<!-- project: path:/home/open/.openclaw/workspace -->
+- **新章节 `docs/游戏引擎.md`「自创作游戏包：能力边界」**：用户目录优先说明 / 能力清单（caps 21、fx 21 含 none、事件 11、形状 6）/ 12 项配额常量表 / 三条结构性约束 / 能做与做不了的游戏类型清单 / 扩展引擎的代价排序。<!-- project: path:/home/open/.openclaw/workspace -->
+- **三条结构性约束（都有代码依据）**：① **实体必须预置** —— `nents` 只在 `game_pack.c` 解析时增长，引擎无 spawn 路径，12 个是硬预算；② **规则首个命中即返回** —— `match_rule` 按顺序扫 `rules[]`，只比事件类型 + intent / timer / target / other，**没有条件表达式**，规则书写顺序就是优先级；③ **网格与像素两套坐标系互不碰撞** —— `cell` 实体只跟 `cell` 比格子，`rect` / `circle` 只跟像素实体比。<!-- project: path:/home/open/.openclaw/workspace -->
+- **顺手改掉的旧口径**：「我们只维护自己那几个」在硬约束表和「边界」清单里都补了「不限制用户自创作」—— 那是维护承诺，不是准入限制。<!-- project: path:/home/open/.openclaw/workspace -->
+- **验证**：`python3 tools/check_docs.py` 扫 30 个文件通过；`python3 tools/lint_packs.py` 四个包全过；文档里的数字全部由脚本从 `game_comp.c` 的三张名字表 + `game.h` / `game_runtime.c` 的常量核对得出（caps 21 / fx 21 / ev 11 / 12 个上限常量逐一对上）。<!-- project: path:/home/open/.openclaw/workspace -->
+- **踩坑**：写文档时用 `write` 整篇覆盖了 `docs/游戏引擎.md`（381 行原内容被冲掉），靠 `git checkout --` 还原 —— **改文档要先读原文再追加，别整篇 write**。另外 exec 里内联多行 JS 字符串和 heredoc 都会踩转义坑，改用文件传脚本 / 提交信息。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 后台「游戏」页加上传入口 —— 已决定不做（11-12）
+- **讨论结论**：不上传 UI。冰河大人的原话：「算了，不做这个，意义不大，懂 AI 的用户自然会自己搞定这些」。<!-- project: path:/home/open/.openclaw/workspace -->
+- **底层其实早就通了**：后台只有 `GET/POST /admin/api/games`（列清单 + 勾选启用），**没有上传接口**；但 `petd/data/packs/`（用户目录）已被 `_roots()` 优先扫描，设备端 `fopen(path,"wb")` **同名直接覆盖**，`game_prune_packs()` 取消勾选即真删，`push_games()` 每次**重推全部启用包**（所以改包不重推的话设备会一直玩旧的）。**缺的只是「放文件进去」这个动作。**<!-- project: path:/home/open/.openclaw/workspace -->
+- **不做的主要理由不是「用户会搞定」**：上传 UI 唯一真正解决的是「不知道怎么把包放进去」，而这个问题**已经被上一轮那 116 行文档解决了**（用户目录在哪 / 格式长什么样 / 能力边界 / 撞到硬限制怎么办）。私有化自用场景下放一次文件的成本，远低于长期维护一条上传链路（校验 + 错误回显 + 删除 + 覆盖提示 + 前端）。<!-- project: path:/home/open/.openclaw/workspace -->
+- **唯一的技术顾虑（已由文档覆盖）**：用户包标题带中文，不跑 `tools/gen_pack_glyphs.py` 就显示成方块，而且**是静默失败**（不报错）。这个坑文档「Pack 格式 → 中文怎么办」已写。<!-- project: path:/home/open/.openclaw/workspace -->
+- **若将来仍要自助支持**：性价比最高的后手不是上传 UI，而是让 `tools/lint_packs.py` 能对**单个用户包**跑一遍（校验用了固件不认识的能力）—— 零后端改动，`tools/game_names.py` 已是单一真相。<!-- project: path:/home/open/.openclaw/workspace -->
+- **顺带补了一个洞（提交 `59e506a`）**：`.gitignore` 里 `petd/data/packs/` **一直没被忽略** —— 其他用户资产（`skins/` `ota/` `album/` `backgrounds/` `card_backgrounds/`）全都忽略了，只有 packs 漏了。既然文档让用户把自创作包放那儿，用户 `git add .` 就会把自己的包提交进仓库。已加 `petd/data/packs/` 到 `.gitignore`，并在 `tests/test_packs.py` 加两条测试（`test_user_pack_dir_is_not_tracked` + `test_all_user_asset_dirs_are_ignored`，后者遍历全部用户资产目录防再漏）。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 引擎能力边界重新审视 + 钓鱼游戏（11-12）
+- **最重要的一条限制（以前一直漏了）**：**引擎没有状态机，也没有条件判断**。`match_rule` 只比「事件类型 + intent + timer + target + other」，命中第一条就 return；没有 else、没有 fallthrough、没有数值比较、没有布尔标志位。状态载体也读不了 —— `value` 只能被 `randomize` 改（随机数），没有「设为 X」的效果；`visible` 能当布尔位但规则匹配读不到它；`score` 可读可写但没有规则去读它。**所以游戏只能是「事件 → 固定反应」的直线流程。**<!-- project: path:/home/open/.openclaw/workspace -->
+- **连带结论**：扫雷、翻牌记忆、猜大猜小**都做不了**（都要比较数值）；「连错三次就输」「血条见底就结束」也做不了。上一轮文档里那张「能做」表把这三条列为能做，是错的，已改（提交 `d188531`）。<!-- project: path:/home/open/.openclaw/workspace -->
+- **绕过状态判断的两个手法**：① **事件互斥代替条件** —— 玩家先按 → `win`，定时器先到 → `lose`，「谁先发生」本身就是判断；② **多定时器切阶段** —— `start_timer`/`stop_timer` 让不同规则只在不同阶段生效。<!-- project: path:/home/open/.openclaw/workspace -->
+- **引擎硬上限（复核确认）**：实体 12、规则 24、意图 8、定时器 2、输入映射 4、菜单项 12（`GAME_MAX_MENU_ITEMS`）、每规则效果 8（`GAME_MAX_EFFECTS`）、精灵 4 个 × 8 帧 × 16×16 × 4 色、包 24KB（`GAME_MAX_PACK_BYTES`）、图样 32×16、画布 240×320。<!-- project: path:/home/open/.openclaw/workspace -->
+- **精灵的硬限制**：一个实体只有一种形状，`cell`（格子）和 `sprite`（像素精灵）**不能同时用**；`sprite` **不参与碰撞判定**（碰撞只认 rect/circle 和 cell/trail）。所以精灵只能做装饰/闪光，不能当可碰撞的鱼。<!-- project: path:/home/open/.openclaw/workspace -->
+- **钓鱼游戏（提交 `d188531`）**：`petd/packs/fishing.json`，10×14 网格，两阶段时机玩法 —— 第一条鱼 340ms 一格绕圈，命中 +10 分并切到第二条鱼（260ms，更快），第二条命中 → `win`（引擎自带的「你赢了」遮罩）。空竿不扣分（`intent` 事件在命中时也会先触发，引擎无状态判断，分不清空竿还是命中）。**零固件改动**，设备不用升级。<!-- project: path:/home/open/.openclaw/workspace -->
+- **钓鱼配套改动**：`tools/gen_host_scene.py` 补了 `timer` 字段和 `SCENE_TIMERS` 数组（原来不支持多定时器场景）；`tests/fw_host/test_fishing_engine.c` 31 项断言全绿；`tests/fw_host/run.sh` 加了钓鱼场景编译。<!-- project: path:/home/open/.openclaw/workspace -->
+- **踩坑（重要）**：在 `exec` 的 JS 里内联写含 `"` 的多行 C 源码，**引号会截断 JS 字符串**（连续两次 `SyntaxError: Unterminated string constant`，文件一个都没写）。**写 C/JSON 这类带引号的内容要用 `String.raw` 或模板字面量 + 转义，不能直接贴。**<!-- project: path:/home/open/.openclaw/workspace -->
+- **另一个坑**：`edit` 工具的 `oldText` 锚点必须唯一 —— 用 `"$OUT4/test_whack_engine"` 匹配到 2 处直接失败，要用带换行的上下文。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 真机验证全部通过 —— 状态结清（11-13）
+- **用户明确确认：「目前所有改动全部真机验证通过」。** 这一轮只做状态结清，**没有改任何代码**。
+- 结清范围：打地鼠（0.5.10 OTA 后新包装上、旋钮六格循环选格、短按敲击命中、空敲不加分、「你赢了」遮罩）、贪吃蛇、屏幕亮度新档位、固件页「上传固件 + 升级固件」、钓鱼（`petd/packs/fishing.json`）。<!-- project: path:/home/open/.openclaw/workspace -->
+- `fw-v0.5.10` 的 Release 正文已从「还没在真机上验证」改成「已在真机上验证通过」，**仓库文件与线上 Release 两边同步**（提交 `449fd01`）。<!-- project: path:/home/open/.openclaw/workspace -->
+- **仍然有效的历史警告**：0.5.4/0.5.5/0.5.6 带同一握手缺陷，**别直接刷**；OTA 只能推 `petd.bin`，`merged-binary.bin` 登记一次就是砖。<!-- project: path:/home/open/.openclaw/workspace -->
+- 仍未做的：断电回滚路径的实测（0.5.5 那条「没有真机证据」的警告依然成立 —— 用户这轮验的是功能，不是 bootloader 回滚）。<!-- project: path:/home/open/.openclaw/workspace -->
