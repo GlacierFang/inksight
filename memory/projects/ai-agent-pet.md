@@ -1121,3 +1121,5 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - 测试：新增 `tests/test_local_only.py`（16 项）；`tests/test_session_channel.py` 改成关掉 localOnly 后测通道名显示（那组测的是「一旦放开，通道名标得对不对」）。全量 **552 passed**。<!-- project: path:/home/open/.openclaw/workspace -->
 - **实测**：petd 重启后 `/admin/api/sessions` 从 4 条变 3 条，飞书那条消失，剩下全是本机（channel 为空）。<!-- project: path:/home/open/.openclaw/workspace -->
 - **教训**：我第一版只改了 `_visible()`，以为够用 —— 其实 `select()` 和 `_sync_confirm_focus()` 是两个独立的漏洞。**屏蔽类需求要顺着「这个被排除的东西还会从哪些路径流出去」逐条追**，光看主要路径会漏。<!-- project: path:/home/open/.openclaw/workspace -->
+
+- **用户已确认「验证通过」（11-13）** —— 三方通道屏蔽这一项经用户实际验证，不是只有主机测试。<!-- project: path:/home/open/.openclaw/workspace -->
