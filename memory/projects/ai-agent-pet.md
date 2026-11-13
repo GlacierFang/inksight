@@ -1109,3 +1109,15 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - 改动：petd/app.py（回程文案）、petd/render.py（来源）、tests/test_confirm.py（+3 项断言）、docs/确认卡.md、skills/pet-confirm/SKILL.md（判据 + 推完卡就结束本轮）。全量 **538 passed**。<!-- project: path:/home/open/.openclaw/workspace -->
 - **踩坑**：并发跑多轮 pytest 会互相打架（抢端口、抢 DATA_DIR），表现是「跑到一半卡住不动」。我一度以为是改动的问题，实际是自己开了好几轮。清理残留进程后单跑 104 秒 538 全绿。**测试卡住先怀疑自己有僵尸 pytest 进程，别急着改代码。**<!-- project: path:/home/open/.openclaw/workspace -->
 - **踩坑（重复犯）**：pkill -f 匹配 pytest 会把执行清理的 shell 本身一起杀掉 —— skill 里明明写着这个坑，还是又踩了。清理要用 pgrep -f 加方括号模式排除自身。<!-- project: path:/home/open/.openclaw/workspace -->
+
+
+### 三方通道屏蔽 —— 桌宠只反应本机会话（11-13，提交 c3841d4）
+- **用户要求**：所有三方通道（飞书、微信、Telegram……）的会话都要被屏蔽掉，petd 不消费。定位是「桌宠 = 这台机器上的我」，别的通道上的对话不归它演。<!-- project: path:/home/open/.openclaw/workspace -->
+- **判据现成**：gateway 会话行有 `channel` 字段 —— 空 = 本机会话，非空 = 三方通道。petd 的 `app.py` 早就在用（`_channel_of()` 读 `row.get("channel")`，`CHANNEL_LABELS` 里已登记 feishu）。**不用猜 session key 前缀。**<!-- project: path:/home/open/.openclaw/workspace -->
+- **筛选点在 `state.py` 的 `StateEngine._visible()`** —— 在 `update()` 最开头调用，**先于**分类、选焦点、算归因。在这儿筛是一刀切：状态不参与、焦点不参与、后台列表不显示、确认卡焦点不跟过去。**渲染层筛是假屏蔽**，底下照样抢。<!-- project: path:/home/open/.openclaw/workspace -->
+- **规则放在 `petd/data/state_rules.json`**：`"localOnly": true`（version 2 → 3），跟现有 `exclude` 并列。**不做成排除清单** —— 用户要的是全屏蔽，清单得一个个加、漏一个就漏一个。关掉它三方会话就重新参与。<!-- project: path:/home/open/.openclaw/workspace -->
+- **两个必须一起补的洞**（漏了就是假屏蔽）：① `engine.select()` 不校验通道 —— 后台点过飞书那条，焦点就指着飞书，确认卡答案会投过去；② `_sync_confirm_focus()` 直接读 `selected_key`，不验证它在可见集合里 —— **这个是测试抓出来的**，我第一版漏了。<!-- project: path:/home/open/.openclaw/workspace -->
+- 改动：`petd/state.py`（`channel_of()` 辅助函数、`_visible()` 通道关、`update()` 清过期焦点、`select()` 拒收）、`petd/app.py`（`_channel_of` 复用、`set_session` 只存生效 key、`_sync_confirm_focus` 校验可见性）、`petd/data/state_rules.json`、`docs/状态语义.md`（新增「三方通道不参与」章）、`CHANGELOG.md`。<!-- project: path:/home/open/.openclaw/workspace -->
+- 测试：新增 `tests/test_local_only.py`（16 项）；`tests/test_session_channel.py` 改成关掉 localOnly 后测通道名显示（那组测的是「一旦放开，通道名标得对不对」）。全量 **552 passed**。<!-- project: path:/home/open/.openclaw/workspace -->
+- **实测**：petd 重启后 `/admin/api/sessions` 从 4 条变 3 条，飞书那条消失，剩下全是本机（channel 为空）。<!-- project: path:/home/open/.openclaw/workspace -->
+- **教训**：我第一版只改了 `_visible()`，以为够用 —— 其实 `select()` 和 `_sync_confirm_focus()` 是两个独立的漏洞。**屏蔽类需求要顺着「这个被排除的东西还会从哪些路径流出去」逐条追**，光看主要路径会漏。<!-- project: path:/home/open/.openclaw/workspace -->
