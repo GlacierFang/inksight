@@ -1,270 +1,65 @@
-# eink-mini — 2.9 寸独立墨水屏小终端
-
-> 状态：🟡 定稿（2026-11-17 12:01）。硬件已到位；固件、后台、Web UI 均未动手。
-> **开源小项目，允许用户自部署**。与 InkSight 项目无关，不共用代码/后端/固件。
-<!-- project: path:/home/open/.openclaw/workspace -->
-
----
-
-## 一句话
-
-一台独立的 2.9 寸黑白墨水屏小终端：翻页时钟 / 天气 / 月历 / 消息 四页，双键多手势操作，配网在初始化时完成。后台是带 Web UI 的能力平台：内容由后台出图，但时钟页设备本地渲染。代码开源，允许自行部署。
-
----
-
-## 开源姿态（决定一切取舍）
-
-- **MIT 许可**，仓库公开 `GlacierFang/eink-mini`。
-- **每台设备背后是自己的后台实例** → 没有共享用户系统，**不做登录/账号/多租户**。
-- **配置全部外置**（config.json 或环境变量）：服务器地址、端口、地理位置、可选 token。
-  - 不把 ruohan.site 写成唯一真相；它只是默认示例值。
-- **不强依赖 OpenClaw 私有服务**：天气用公开的 open-meteo；todo/news/poetry 等本机服务属于**可选接入**，缺依赖时该页自动隐藏，其余照常工作。
-## 语言与触发约定
-
-- **仓库面向冰河大人本人，一律中文**：README、路线图、烧录步骤、固件注释、commit message、Issue/PR 描述全中文；仓库描述也中文。参照同门项目 GlacierFang/ai-agent-pet（公开开源、README 全中文）
-- 只有设备**屏幕显示内容**用英文——零中文字库是硬约束
-- 变量名 / 函数名保持英文（代码惯例，不动）
-- **GitHub Actions 改为 workflow_dispatch 手动触发**：push 不再自动编译，编译与否由冰河大人决定
-
-- README 写清自部署步骤：装依赖 → 起服务 → 配 nginx 路径 → 编译固件 → 烧录。
-
----
-
-## 硬件清单（2026-11-17 冰河大人告知）
-
-| 件 | 规格 | 备注 |
-|---|---|---|
-| 屏 | 大连佳显 **GDEH029A1**，2.9 寸，296×128，**SSD1680** 驱动 | 黑白两级，**无红无黄**；丝印 B029401WG6C43 / V14B7LYC13H085；GooDisplay 标 **EOL** |
-| 主控 | **ESP32-C3 Pro mini**（备用那套） | USB 供电，常电，不做深睡省电 |
-| 驱屏板 | **墨水屏驱动板 v1.4**（通用板） | 排针 GND/3V3/SCK/SDA/RST/DC/CS1/BUSY/CS2；FPC 座支持 24/26/34P；压条式插排线 |
-| 排线 | **24P** | 与屏的 24Pin FPC 对应 |
-| 按钮 | 微动/轻触开关 **12×12×12mm，4 脚立式** | 4 脚内部两对并联 = 单极常开；有母对母杜邦线；**买了很多个，但只用 2 个（A/B），其余只买不焊留储备**；外壳固定安装按键 |
-
-### 硬件硬事实
-
-- **SSD1680 硬件自带局刷**（fast refresh）：全刷 3s，局刷 0.3s
-- 屏参数：24Pin FPC / 0.5mm 间距，SPI（只写不读），2.2~3.7V，MAX GRAYSCALE 2
-- 屏外形 79×36.7×1.18mm，有效显示区 66.9×29.1mm
-- 局刷累积残影 → 需定期全刷
-- 驱动板 **CS1 / CS2 是双芯片 CS，单芯片屏必须短接 CS1↔CS2**
-- 驱动板驱动电阻两组可切换（4.7Ω / 0.47Ω），**默认 0.47Ω**（冰河大人确认）
-- 通用板 BUSY 极性可能反相 → 固件不能假设高低，用「等非忙状态 + 超时兜底」
-- 驱动板无 MISO，SPI 单写
-
-### 接线表（ESP32-C3 Pro mini，避开 0/2/8/9/18/19/20/21）
-
-| 驱动板 | C3 | 说明 |
-|---|---|---|
-| GND | GND | |
-| 3V3 | 3V3 | 从板载稳压取，别灌 5V |
-| SCK | GPIO6 | FSPI CLK |
-| SDA | GPIO7 | FSPI MOSI |
-| CS1 | GPIO1 | **CS2 短接到 CS1** |
-| DC | GPIO4 | |
-| RST | GPIO10 | |
-| BUSY | GPIO3 | 极性不假设 |
-| 按钮 A（主键） | GPIO5 | 一脚 GPIO5，一脚 GND，固件开内部上拉 |
-| 按钮 B（副键） | 待定（候选 GPIO0 / 16 / 17） | 接线时对实物丝印定；固件键位表改一行即可 |
-
-按钮：多余的微动开关**只买不焊**，留作储备。外壳固定安装按键 → 走线短 → 内部上拉（45k）够用，不必每键加 10k 外部上拉；万一最后还是飞线出来再加，不费事。
-
----
-
-## 已确认的设计决策（2026-11-17）
-
-### 屏幕内容四页
-
-1. **翻页钟**（native）— 24 小时制、无秒、无日期行、冒号常亮。设备本地渲染（几何字形，零字体）。
-2. **天气**（bitmap）— 天气图标 + 当前温度 + 最高/最低 + 未来 3 天。
-3. **月历**（bitmap）— 年月 + MON~SNU + 日期矩阵，今天反白。**只显示当月**，不显示日程/待办。
-4. **消息**（bitmap）— **固定页位**，不插队、不挤走时钟。后台推的消息延迟投递（设备不轮询，翻到这页才拉）。
-
-### 交互（2026-11-17 拍板：双键 × 三手势）
-
-**硬件：2 个键**（A 主键 / B 副键）。多余微动开关不焊。剩余 GPIO（0/16/17/18/19/20/21）留着不占用。
-
-| 键 | 短按 | 双击 | 长按（≥600ms） |
-|---|---|---|---|
-| **A** | 下一页 | 上一页 | 立即全刷清残影 |
-| **B** | 立即刷新当前页 | 回到第一页（时钟） | 进入配置模式 |
-
-- **长按不占用翻页动作**：翻页是高频（秒级），长按是低频（年级）。上一页用双击而不是长按。
-- **手势判定三条规则**：① 长按优先——按住 ≥600ms 立即判长按，双击只在两次都快速抬手时成立；② 单击延迟 250ms 确认（被翻页时的网络耗时掩盖，全局统一，本地页不开特例）；③ 不支持三击 / 四击 / 双击+长按。
-- **机械去抖 20ms** 保留（物理弹跳去不掉，与误触无关）。
-- **不设计防误触**：外壳固定安装按键，冰河大人确认不存在误触可能。
-- **按键按物理位置命名（A/B），不按功能**——换功能不改键位。
-- **点击轮询**：切到哪页就拉那页一次；停在某页不刷新。
-- **不后台轮询**：设备没有任何定时拉取。
-- **无页码指示**。
-
-页面归属（本地渲染 / 服务端出图）见下文「页面归属」段。
-
-### 配网 = 上电初始化
-
-- 上电 → 有 NVS 里的 WiFi？ 有则连（超时 15s），成功进时钟页；失败自动回 SoftAP 配网。
-- 无 NVS → 开 SoftAP「eink-mini-setup」，手机填 SSID/密码 + 服务器地址（预填 http://ruohan.site/eink-mini/ ，可改）。
-- 服务器连不上 → 显示离线画面，**不进配网**。
-- 配置存 NVS，掉电不丢。
-- **B 长按 = 进入配置模式**（SoftAP 网页或 USB 串口填），**不做屏幕内设置菜单**——零中文字库 + 小屏输入太蠢。
-
-### 配置边界（设备只存 4 项）
-
-设备 NVS 只存：**WiFi SSID/密码、服务器地址、设备 ID**。
-**时区偏移、页面清单、全部内容都从服务端下发**，设备缓存。这样设备端不需要任何可显示可输入的设置项。
-
-### 字体
-
-- **固件零中文字库**，纯英文/ASCII。配网页提示也用英文。
-
-### 构建与烧录（已定）
-
-- **代码进 GitHub → GitHub Actions 手动触发编译 → 产出 merged .bin → 冰河大人在自己电脑上刷机**（workflow 触发条件改为 workflow_dispatch，push 不再自动编译）。
-- **刷机工具：Flash Download Tools**（乐鑫官方图形界面）——不需要本地装 Python 工具链，点几下选文件即可。
-- Actions 产出物按 Flash Download Tools 的口味准备：
-  - **merged bin**（bootloader + partitions + app 合并，地址 **0x0**）→ 在 FDT 里 ChipType 选 ESP32-C3、LoadFile 选 merged bin、勾选 DoNotChgBin，勾 SPI speed 40MHz、Flash size 4MB（按 C3 Pro mini 实际 flash 定）、勾选 DoNotChgBin。
-  - 另外单独产出 **bootloader.bin（0x0）/ partitions.bin（0x8000）/ boot_app0.bin（0xE000）/ app.bin（0x10000）** 四件套，供习惯分别填地址的用户。
-  - SPI mode 需 **DIO**（C3 Pro mini 无 PSRAM，用 DIO 更稳）；flash size 按板子实际（常见 4MB）。
-- 不在 Pi 上装 ESP32 工具链（Pi 出网受出口代理白名单限制，pypi / espressif 源不通，已实测）。
-- 同时保留 PlatformIO 工程，供想用 Arduino IDE 的用户走备选路线。
-
----
-
-## 固件职责边界（本地渲染 + 显示 + 输入，无业务）
-
-1. **翻页时钟本地渲染**：七段几何自绘数字（不依赖字库文件），自己算时间与翻页动画，不依赖网络
-2. **双帧缓存**：当前帧 + 上一帧，用于算脏矩形（各 4736 B）
-3. **按键手势**：双键 × 短按/双击/长按，输出「动作」，不认物理键
-4. **HTTP 拉 1bpp 位图**（296 宽 = 37 字节 stride = 4736 字节）
-5. **XOR 算脏矩形** → 脏区小走局刷、脏区大走全刷
-
-翻页钟的「上半先翻、下半后落」= 局刷引擎特例：脏区 = 单个数字框上半区（46×74，约 12% 屏面）。
-残影对策：整点 4 个数字全变时，数字翻完紧跟一次全刷（3s 黑白闪，此时屏本在剧变，闪被掩盖）；局刷/全刷比约 128:1。
-时间同步：SNTP（ntp.aliyun.com + pool.ntp.org 双源）失败则用 HTTP 响应头 Date 校时。**断网静默续走**（用 NVS 里上次同步时间继续走，联网后自动校正，屏幕不显示任何离线提示）。**时区偏移从 manifest 下发**，不写死 UTC+8。
-
----
-
-## 页面归属：本地渲染 vs 服务端出图（2026-11-17 拍板）
-
-原则：**能从设备自己的钟算出来的 → 设备本地画；需要外部数据的 → 服务端出图。**
-
-| 页面 | 归属 | 理由 |
-|---|---|---|
-| 翻页时钟 | **设备本地** | 动画要精确控制，断网也继续走；局刷才有意义 |
-| 月历 | 服务端 | 变化频率低、服务端画省事；将来想离线再挪回设备也不难 |
-| 天气 | 服务端 | 外部 API（open-meteo） |
-| 消息 | 服务端 | 人写的内容 |
-
-**这意味着设备不再是纯哑终端**：它是「带自己时钟的小终端」——时钟页本地画，内容页仍由服务端出图。
-
----
-
-## 插入式开发 vs 发版（2026-11-17 拍板）
-
-**结论：插入式为主，发版只兜底。插入式不放在固件里，放在协议和服务端。**
-
-| 新增的东西 | 放哪 | 要刷机吗 |
-|---|---|---|
-| 新页面 / 新内容源（天气、月历、待办、诗、RSS…） | 服务端渲染器 + manifest 一行 | **否** |
-| 新显示样式（排版、图标） | 服务端渲染器 | **否** |
-| 新本地页类型（第二个月历、第二个时钟…） | 固件加一个 renderer 文件 + 注册表一行 | 是（改动隔离） |
-| 新交互 / 新手势 | 固件键位映射表（数据驱动） | 是 |
-| 设备本地逻辑（离线时钟、翻页动画） | 固件 | 是 |
-
-- **manifest 的 page type 就是契约**：设备请求时带自己的 fw 版本与支持的 types，服务端只发设备认得的页 → 老固件接新服务端不炸，新固件加新类型不影响旧页。
-- **固件内部按页面驱动表组织**：每种页面类型一个文件一份接口（拉帧 / 绘制 / 输入处理），新增 = 加文件 + 注册一行，不在别人逻辑里插针。
-- **运行时动态插件不做**：ESP32-C3 的 Arduino 框架不支持动态链接，真要插件得上解释器（Lua / MicroPython），flash 与维护成本不划算；且单用户自部署，「省一次刷机」的价值本就不高。
-- **发版成本其实很低**：CI 编一次 + 冰河大人电脑刷一次，几分钟。真正该避免的不是发版，是「为了加内容而发版」。
-
----
-
-## 驱动侧定案（GxEPD2 核实于 2026-11-17）
-
-**库的真实身份**：`olikraus/GxEPD2` 的 GitHub 仓库实际是 `ZinggJM/GxEPD2`（`olikraus/GxEPD2` 这个 GitHub 地址 404，代码已搬到 ZinggJM 名下）。**这是 CI 编译失败的头号嫌疑**——registry 条目可能还指向旧地址。稳妥做法：`lib_deps` 改用 GitHub 直链，库版本自己钉死。
-
-**面板类名（已核对头文件，不凭记忆）**：`GxEPD2_290`（`src/epd/GxEPD2_290.h`），头里 `panel = GxEPD2::GDEH029A1`——这就是本屏的类。该头文件注释写的是 Controller: IL3820，**注释是错的**，别照它选类。
-
-**面板是竖向 128×296**
-- `WIDTH = 128`、`HEIGHT = 296`，每行 128px = 16 字节，共 296 行 = 4736 字节
-- 物理屏面 79×36.7mm、有效区 66.9×29.1mm → **物理只能横放**，位图须在设备端**旋转 90°**：服务端出横屏 296×128（37B/行），设备转成竖向 128×296（16B/行）再 writeImage
-- 旋转是纯 CPU 约 80 行、4736 字节，无额外依赖
-
-**局刷：有，而且机制天然要求双帧缓存**
-- `hasPartialUpdate = true`、`hasFastPartialUpdate = true`
-- 库内时值：`partial_refresh_time = 420ms`、`full_refresh_time = 1600ms`（比通用 SSD1680 的 0.3s / 3s 更快）
-- **快速局刷关键 API 是 `writeImageToPrevious()` / `writeImagePartToPrevious()`**：GxEPD2 的 fast partial update 要把当前帧写进 previous buffer，再由 refresh(partial) 做新旧差分 → **双帧缓存不是额外造的，是局刷机制的固有要求**，与设计天然吻合
-
-**硬约束：x 与 w 必须是 8 的倍数**
-- 库注释明写 x and w should be multiple of 8
-- 旋转后脏区映射：横图 (x,y,w,h) → 竖向 (x2=y, y2=x, w2=h, h2=w)，所以**横图四条边都要 8 对齐**
-- 数字格 46×74 → 脏区取整到 48×80
-- 屏宽 296 = 37×8 正好整除，横向网格无残余
-
-**其它库侧事实**
-- 硬依赖 **Adafruit_GFX**（GxEPD2_EPD.h 里 include 了），不用也必须加进 lib_deps
-- 库不管 CS2（双 CS 是驱动板的事）→ 硬件短接 CS1↔CS2，固件只接 CS1
-- BUSY 极性可能反相 → 封装层做「上电探测空闲电平存 NVS + 每次等待加超时兜底」，不假设固定电平
-- 库要求 3.3V 供电与 3.3V 信号线，C3 侧满足
-
-**驱动侧模块工作量**：封装 GxEPD2 + 90° 旋转 + 脏区 8 对齐 + BUSY 极性自适应 ≈ 300~400 行。
-
----
-
-## 后台 = 带 Web UI 的能力平台
-
-**定位**：设备是 dumb display，所有能力长在后台。后台加页 → 设备不用重烧。
-
-**页类型**（manifest 里每页带 type）：
-- type: native → 设备本地渲染（目前只有翻页钟）
-- type: bitmap → 后台出 1bpp 位图，设备拉下来刷
-
-**API**（全部在 http://ruohan.site/eink-mini/ 下，明文 HTTP，不带端口）：
-
-| 路径 | 作用 |
-|---|---|
-| GET /api/manifest.json | 页清单：id、title、type、order、version、device_id |
-| GET /api/page/{id}.bin | 1bpp 位图，4736 字节 |
-| GET /preview/{id}.png | 人看的灰度预览 |
-| GET /api/message | **写入口**：往屏上推消息 |
-| GET / | **Web UI**（手机可用）：页管理、预览、发消息、设备状态 |
-
-**无登录**（自部署场景每台实例独立，无共享用户）。写接口留一个**可选 token**（默认关闭）：自部署到公网时可开，防别人乱推消息。这是配置项，不是登录系统。
-
-**能力注册表**：每页 = 一个模块文件（自带取数 + 排版）。放一个文件进去就多一页。取数可复用本机已跑的服务（todo-list 18808、news 18804、poetry 18816、stamp 18800、library 18792、gallery 18790 等）。
-
-**容错**：数据源挂了就用该页最后一次成功的缓存出图，画面完整，不画错误占位。
-
----
-
-## 定稿默认值（已拍板）
-
-| 项 | 决定 | 理由 |
-|---|---|---|
-| manifest 拉取 | **每次切页拉一次** | 加页当场生效，几十字节成本 |
-| 页数上限 | **不设硬上限**，manifest 最多 12 页 | 短按循环，多了累但不会坏 |
-| Web UI 登录 | **无** | 自部署场景每台实例独立，无共享用户 |
-| 写接口 | **可选 token，默认关** | 公网部署时防乱推 |
-| device_id | **带** | 以后加第二台不改协议，成本近零 |
-| 消息页内容 | **最新一条大字 + 下面两条小字**，超长截断 | 296px 宽，一行约 20 英文母 |
-| 月历 | **只显示当月** | 按钮已被切页占用，无翻月能力 |
-| 整点全刷 | **做**（翻完跟一次全刷清残影） | 局刷/全刷 128:1，不清会累积 |
-| OTA | **第一版不做** | 奥卡姆：不是必需项；以后加页/改固件走 GitHub 重新刷 |
-| 仓库 | **公开 GlacierFang/eink-mini** | Actions 免密，开源可自部署 |
-| 刷机工具 | **Flash Download Tools** | 图形界面，无需本地工具链 |
-
----
-
-## 仍需确认（4 件）
-
-1. **消息页文案语言**：设备零中文字库，中文消息显示不了。要么消息限英文/数字，要么给消息页预烧几十个字模。
-2. **副键 B 的接线脚**：候选 GPIO0 / 16 / 17，接线时对实物丝印定。
-3. **屏横放还是竖放**：物理只能横放 → 设备端做 90° 旋转。等冰河大人点头后按此执行。
-4. **lib_deps 形式**：`olikraus/GxEPD2`（registry）还是 GitHub 直链 `ZinggJM/GxEPD2`——CI 至今 0 次成功，需实测选一种。
-
-
-## 经验
-
-- **越界写代码是最常见的错误（栽了两次）**：第一次被喊停「谁让你开始写固件了？现在还是对齐阶段」；第二次把服务端原型、版面、假数据一起写了，被判「根本没有对齐，就写了一堆无效的东西」。**对齐阶段只读不写、不产出成品，除非明确说「写」。** **第三次**：把「第一步」自行解释成「仓库 + 构建流水线」，并自行认定 CI 必须绿灯，于是在冰河大人没要求编译固件的情况下追 CI 编译错误，被喊停「谁让你去编译固件了」——**任务边界由冰河大人划，不由我画路线图**。
-- **别把简单项目想复杂**：登录/多租户/复杂鉴权在「自部署小开源」场景下是纯负担。奥卡姆剃刀：能不做就不做。
-- 硬件没到齐/没拍照确认前，别急着写固件。
-- 用户说「不着急，继续对齐」时，交付物是对齐结论本身，不是代码。
-<!-- project: path:/home/open/.openclaw/workspace -->
+# eink-mini
+
+2.9 寸黑白墨水屏桌面终端（ESP32-C3 Pro mini + GDEH029A1 / SSD1680 / 296x128）。
+仓库：`git@github.com:GlacierFang/eink-mini.git`（GlacierFang/eink-mini），本地 `/home/open/.openclaw/workspace/eink-mini`。
+<!-- project: path:/home/open/.openclaw/workspace/eink-mini -->
+
+## 状态（2026-11-17）
+
+- 固件：全部写完，CI 首次全绿（run 44103056290）。产物在 `fw-bin` 分支。
+- 服务端：已上线 `http://ruohan.site/eink-mini/`（Flask + gunicorn，端口 18842，user scope systemd
+  `openclaw-eink-mini.service`，nginx 路由 `/eink-mini/`）。<!-- project: path:/home/open/.openclaw/workspace -->
+- 位序：服务端发 1=黑（4736 字节，MSB first），固件按 INK_SERVER_BIT1_IS_BLACK 翻成面板 1=白。
+  自检工具 `server/tools/check_frame.py` 把 .bin 解回图验证。<!-- project: path:/home/open/.openclaw/workspace -->
+- **留言功能整套已删**（提交 `660cf01`）：服务端 `GET/POST /api/message(s)`、`store.py`、
+  `pages.render_message`、固件 `fetchMessage` / `collectStrings` / `inkRenderMessagePage` /
+  `INK_PAGE_MESSAGE`、manifest 的 message 页、`write_token` 与写入鉴权，全部移除。
+  设备回到三页：clock（native）、weather、calendar。<!-- project: path:/home/open/.openclaw/workspace -->
+- **控制台改成功能分区式**（参考 ai-agent-pet 的 petd 后台范式）：设备状态（在线/最后活动/来源 IP/UA/
+  拉取计数）、各功能页面预览、功能配置（天气城市 + 时钟屏标题）。<!-- project: path:/home/open/.openclaw/workspace -->
+- **设备状态**：`server/device_state.py` 落盘记录（gunicorn 2 worker，内存态跨 worker 不可见），
+  `GET /api/device` 暴露，3 分钟内有拉取算在线。<!-- project: path:/home/open/.openclaw/workspace -->
+- RAM 30.2%、Flash 51.3%。提交 `660cf01` 的 CI run 44118223158 全绿。<!-- project: path:/home/open/.openclaw/workspace -->
+- **未上真机**：B 键 GPIO（当前 16，候选 0/16/17）、旋转方向、BUSY 极性要实物核对。<!-- project: path:/home/open/.openclaw/workspace -->
+- **天气上游 open-meteo 当前直连和代理都超时**（2026-11-17 23:40 观测，geocode 通、forecast 不通），
+  天气页会退化成占位内容。<!-- project: path:/home/open/.openclaw/workspace -->
+
+## CI 在国内网络的三个坑（都踩过）
+
+1. **Actions 日志/artifact 下载主机被挡** → 真实错误走 `::error::` annotation（走 api.github.com，通的）；
+   整份日志用 git plumbing 推到 `ci-logs` 分支读，别用 Contents API（有 1MB 限制）。
+2. **缓存整个 `~/.platformio` 会带进 penv** → penv 的 shebang 写死 Python 路径，补丁号一变就 126 bad interpreter。
+   只缓存 `packages` 和 `platforms`。
+3. **PlatformIO Core 必须钉 6.1.18**：6.2.0 带 SCons 4.11+，SCons 4.11 起 `${func(args)}` 要求被调函数接受
+   `target/source/env/for_signature` 关键字参数，espressif32 的 `__get_board_flash_mode(env)` 不匹配 →
+   替换返回 SCons `_Null` 哨兵 → elf2image 那步 `print_cmd_line` 里 `_Null + str` 抛 TypeError。
+
+## 环境坑
+
+- Debian 的 gunicorn 只有 python 模块，没有 `/usr/bin/gunicorn` 脚本 → systemd 要写 `python3 -m gunicorn`。
+- nginx 配置在 `/etc/nginx/sites-enabled/openclaw`，改动需要 sudo；改前先备份。
+- frpc 隧道偶发 503，重试即恢复 —— 遇到 503 先重试几次再判断。
+
+## 接线
+
+SCK=6, MOSI=7, MISO=8, CS=1（CS2 与 CS1 短接）, DC=4, RST=10, BUSY=3, KEY_A=5, KEY_B=16(待确认)。
+全部 3.3V。BUSY 极性上电探测 + 超时兜底，不写死。
+
+## 许可
+
+仓库 MIT；`firmware/lib/GxEPD2/` 是 vendored 的 GxEPD2 最小子集，沿用上游 GPL-3.0。
+
+
+## 踩过的坑
+
+- **manifest version 原本用时间戳**（`int(datetime.now().timestamp())`），每请求一次就变，设备会认为所有页面全变、
+  反复重下全部位图。已改为按页面内容指纹算（配置或日期变了才变），见 `server/app.py::_page_version`。
+  <!-- project: path:/home/open/.openclaw/workspace -->
+- **算 version 时绝不能渲染页面**：渲染天气页会触发实时天气请求，把清单接口阻塞住（设备 HTTP 超时 15 秒，
+  服务端一卡设备就拉不到）。指纹只用便宜的输入算（城市/坐标/标题/日期）。<!-- project: path:/home/open/.openclaw/workspace -->
+- **模板里必须用相对路径**（`preview/x.png`、`api/config`）。写绝对路径 `/preview/x.png` 在公网会掉到站点根 404。
+  <!-- project: path:/home/open/.openclaw/workspace -->
+- **服务端不留写接口时，令牌那套是纯负担**：写操作去掉后 `write_token` 和鉴权一并删掉。
+  <!-- project: path:/home/open/.openclaw/workspace -->
+- **控制台配置项必须真能上屏**：屏标题要写进 manifest 的 native 页标题，否则配置存了也不生效。
+  标题限 ASCII —— 设备屏没有中文字库。<!-- project: path:/home/open/.openclaw/workspace -->
