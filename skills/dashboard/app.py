@@ -716,6 +716,109 @@ def api_disk_space():
 
 
 
+def _get_openclaw_version():
+    """获取 OpenClaw 版本"""
+    try:
+        import subprocess
+        result = subprocess.run(['openclaw', '--version'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except:
+        pass
+    return "unknown"
+
+def _check_gateway_health():
+    """检查 Gateway 连接状态"""
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            "http://localhost:18789/healthz",
+            method="GET"
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read())
+            return {"connected": True, "data": data}
+    except Exception as e:
+        return {"connected": False, "error": str(e)}
+
+def _check_snapshot_freshness():
+    """
+    检查数据快照新鲜度
+    ok: < 12 * polling_interval
+    warn: < 48 * polling_interval
+    stale: >= 48 * polling_interval
+    polling_interval 约 30秒
+    """
+    POLLING_INTERVAL_MS = 30_000  # 30秒
+    OK_THRESHOLD_MS = POLLING_INTERVAL_MS * 12   # 6分钟
+    WARN_THRESHOLD_MS = POLLING_INTERVAL_MS * 48  # 24分钟
+
+    # 尝试从 gateway runtime 文件读取最新采集时间
+    snapshot_time = None
+    try:
+        runtime_file = Path.home() / ".openclaw" / "runtime" / "snapshot.json"
+        if runtime_file.exists():
+            with open(runtime_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            snapshot_time = data.get("generatedAt") or data.get("timestamp")
+    except:
+        pass
+
+    # 如果没有 snapshot 文件，检查 metrics.db 最后写入时间
+    if not snapshot_time:
+        try:
+            db = DASHBOARD_DB
+            if db.exists():
+                conn = sqlite3.connect(str(db))
+                cur = conn.cursor()
+                cur.execute("SELECT MAX(created_at) FROM cron_daily")
+                row = cur.fetchone()
+                if row and row[0]:
+                    snapshot_time = row[0]
+                conn.close()
+        except:
+            pass
+
+    # 计算 age
+    if snapshot_time:
+        try:
+            if isinstance(snapshot_time, str):
+                dt = datetime.fromisoformat(snapshot_time.replace("Z", "+00:00")).replace(tzinfo=TZ)
+            else:
+                dt = datetime.fromtimestamp(snapshot_time / 1000.0, tz=TZ) if snapshot_time > 1e12 else datetime.fromtimestamp(snapshot_time, tz=TZ)
+            age_ms = (datetime.now(TZ) - dt).total_seconds() * 1000
+            if age_ms > WARN_THRESHOLD_MS:
+                status = "stale"
+            elif age_ms > OK_THRESHOLD_MS:
+                status = "warn"
+            else:
+                status = "ok"
+            return {
+                "status": status,
+                "generated_at": snapshot_time,
+                "age_seconds": round(age_ms / 1000, 1),
+                "ok_threshold_seconds": OK_THRESHOLD_MS / 1000,
+                "warn_threshold_seconds": WARN_THRESHOLD_MS / 1000,
+            }
+        except:
+            pass
+
+    return {
+        "status": "unknown",
+        "generated_at": None,
+        "age_seconds": None,
+        "ok_threshold_seconds": OK_THRESHOLD_MS / 1000,
+        "warn_threshold_seconds": WARN_THRESHOLD_MS / 1000,
+    }
+
+
+
+
+# ============================================================
+# API: 磁盘空间细分
+# ============================================================
+
+
 @app.route("/api/healthz")
 def api_healthz():
     """
@@ -1359,10 +1462,6 @@ def api_projects():
         {"id": "shanhe-app", "name": "山河图记", "icon": "🗺️", "url": "/shanhe-app/"},
         {"id": "pet", "name": "桌面宠物", "icon": "🐾", "url": "/ai-agent-pet/"},
         {"id": "eink-mini", "name": "墨水屏留言板", "icon": "📟", "url": "/eink-mini/"},
-        {"id": "tangping-app", "name": "躺平巴拉 App", "icon": "🐢", "url": "/tangping/"},
-        {"id": "train-app-link", "name": "驿车志 App", "icon": "🚄", "url": "/train-app/"},
-        {"id": "plant", "name": "植愈志", "icon": "🌱", "url": "/plant-local/"},
-        {"id": "shanhe-web", "name": "山河图记 Web", "icon": "🗺️", "url": "/shanhe/"},
 
     ]
     return jsonify({"projects": projects})
