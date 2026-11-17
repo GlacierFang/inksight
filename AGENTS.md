@@ -154,12 +154,24 @@ Markdown
 
 ### GitHub 推送
 
-- github.com 的 git 端点被出口代理挡了：HTTPS push 挂住不返回（TCP 443 不通），设 HTTP_PROXY 也没用- 走 SSH 通：TCP 22 可达，仓库有 `id_ed25519` 密钥
-  ```bash  GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=8" \    git push git@github.com:<owner>/<repo>.git main:refs/heads/main
-```
+**结论：一律走 SSH，HTTPS push 在本机必挂。**
 
-- 备选：GitHub API（blob → tree → commit → update-ref），走 api.github.com 不受影响
-
+- github.com 的 git 端点被出口代理挡死：HTTPS push 返回 502 或挂住不返回，设 HTTP_PROXY 也没用
+- SSH(TCP 22) 通。**用封装脚本，别手敲命令**：
+  ```bash
+  scripts/gh-push.sh <repo-dir> [branch]     # 默认 main
+  ```
+  脚本按 remote URL 选密钥，推送失败自动换另一把重试一次
+- 密钥分工（2026-11-17 实测）：
+  - `~/.ssh/id_ed25519` —— 默认密钥，ai-agent-pet 等仓库可用
+  - `~/.ssh/id_ed25519_eink_mini` —— eink-mini 专用 deploy key（标题 `openclaw-pi-eink-mini`，可写）
+  - **新仓库用默认 key 会报 permission denied**，必须先加 deploy key：
+    ```bash
+    gh api --method POST repos/<owner>/<repo>/keys -f title="openclaw-pi-<repo>" -f key="$(cat ~/.ssh/id_ed25519.pub)" -F read_only=false
+    ```
+- **remote 必须显式设成 SSH URL**：`git remote set-url origin git@github.com:<owner>/<repo>.git`
+- 备选：GitHub API（blob → tree → commit → update-ref），走 api.github.com 不受影响；
+  但 Contents API 上传 `.github/**` 会 404，只能用 git tree API
 - 路径含中文时 git 默认八进制转义，必须 `git config core.quotepath false`，否则 tree 路径取不到（422）
 
 ### MiniMax 文本模型可用性
