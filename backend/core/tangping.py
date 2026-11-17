@@ -1,13 +1,15 @@
-"""躺平巴拉梦境卡 provider：每天一张「躺平巴拉在做梦」的四色套色版画。
+"""躺平巴拉梦境卡 provider：每天一张「躺平巴拉在做梦」的手绘插画卡（四色屏）。
 
 产出三块：
-- 地点 + 短句：LLM 当日现写（自由发挥，不走种子池，只防近期重复）。
-- 图：MiniMax image-01 出图 → 后端备成显示尺寸的真彩图 → 按显示尺寸 1:1 存本地。
-- 画面本身不受主题限制：古今中外、哪个时代都能梦；限四色，允许同一色系内的深浅层次，无图内文字。
+- 地点 + 短句 + 画面提示词：LLM 当日现写（自由发挥，不走种子池，程序校验不撞近期）。
+- 图：MiniMax H3 生图 → 后端备成显示尺寸的真彩图 → 按显示尺寸 1:1 存本地。
 
 原则：
 - 图是锦上添花，文字保底。生图真出错 → 退成纯文字卡，当天不空。
-- LLM 整个失败 → 复用昨天的图，日期由 InkSight 顶栏体现。
+- LLM 整个失败 → 用保底文案（轮换池），照样出当天的图；不复用昨天的图
+  （复用会让昨天的地点、句子、图原样再上一次屏，2026-11-10 就是这样重复了 11-09）。
+- 题材不限：古今中外、现代都市都梦（2026-11-14 冰河大人定）。
+- 画风参照小王子日记：水彩，平涂，吉卜力风格（2026-11-17 冰河大人定，见 PALETTE_SPEC）。
 - **不设质量门槛**（2026-10-26 冰河大人定）：生成了就上屏，只认真出错。
 - 存的是真彩图，不做预四色化：颜色归类交给渲染器的 Atkinson 抖动，输出精确四色（2026-10-28 起与天工阁统一）。
 - 不留历史：状态里只留今天、昨天（仅供失败兜底）和最近 7 条防重复记录。
@@ -41,24 +43,31 @@ except Exception:  # pragma: no cover - dotenv 缺失不影响主流程
     pass
 
 MINIMAX_BASE_URL = "https://api.minimaxi.com/v1"
-MINIMAX_IMAGE_API_URL = f"{MINIMAX_BASE_URL}/image_generation"
-IMAGE_MODEL = "image-01"
+MINIMAX_IMAGE_API_URL = f"{MINIMAX_BASE_URL}/images/generations"
+IMAGE_MODEL = "MiniMax-H3-Image"
 IMAGE_ASPECT = "16:9"
 
 # 卡片在屏上的显示尺寸，必须与模式 JSON 里 image 块的 width/height 一致（400×300 基准）。
 # 一致才能 1:1 落屏：渲染器不再二次缩放，细节不会被平均掉。
-CARD_DISPLAY = (400, 234)
+CARD_DISPLAY = (400, 230)
 
 # 屏上四色名，与 core/config.py 的 EINK_4COLOR_PALETTE 顺序一致。
 PAL_NAMES = ("黑", "白", "金黄", "朱红")
 
 LOCK_STALE_SEC = 900
-RECENT_KEEP = 7
+# 防重复窗口：喂给 prompt 的往期条数（往期记录本身全留，画廊要回看）。
+RECENT_KEEP = 14
 
 DREAM_KEYS = ("地点", "短句", "画面")
 
 # 展签用的 LLM：按可靠性排序。第一个空输出/解析失败就换下一个。
-LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M2.7")
+LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M3")
+
+# 生图重试：429/5xx 是限流不是真出错，退避后重试同一个提示词。
+# 不重试就直接交无图卡 —— 11-16、11-17 连着两天「生图 HTTP 429」，画面连丢两天。
+IMAGE_RETRIES = 3
+RETRY_BACKOFF = 20
+RETRY_STATUS = (429, 500, 502, 503, 504)
 
 # 四色盘说明：直接告诉生图模型要什么颜色，别让它自己发挥。
 #
@@ -80,31 +89,61 @@ PALETTE_SPEC_RETRY = (
     "不要任何文字、印章、标签、水印、边框。"
 )
 
-SUBJECT = "画面主体是一只圆滚滚的棕色水豚，摊着身子趴着打盹，神态松弛安详，短耳朵、毛茸茸"
+# 2026-11-17 10:55 冰河大人定：画风回到旧版的细致版画风 ——
+#   「水彩，平涂，吉卜力风格」那版扁平，细节全丢，跟旧版差很远。
+#   旧版的细节就来自这几行：墨黑勾线与暗部、深金黄到淡金黄的色阶、
+#   用明暗表现体积与柔和光影、线条清晰。它们是画风本身，不是可砍的多余约束。
+#   主体仍按 09:30 的决定保持全正向白描（去色相与毛发质感），细节交给版画画风。
+SUBJECT = "画面主体是一只圆滚滚的水豚，摊着身子趴着打盹，神态松弛安详，短短的耳朵，圆圆的鼻头，眼睛眯着"
 
+# 梦话：地点 + 短句 + 画面提示词。
+# 「画面」这一项要留着 —— 场景、视角、光线写足了，模型才画得出有景深的画面；
+# 只给「地点 + 短句」两个短语会画成图标（11-15 的「云朵被窝」就成了一张卡通贴纸）。
+# 题材仍然放开（2026-11-14 冰河大人定）：现代的、旧的、野的都行。
 DREAM_PROMPT = """你在替一只叫「躺平巴拉」的水豚写它今晚的梦。
-这只水豚圆滚滚、爱躺平、怕麻烦，但心里柔软。它今天做了一个梦，梦里有地方、有光、有一点点甜。
+这只水豚圆滚滚、爱躺平、怕麻烦，但心里柔软。它今天做了一个梦。
 
 最近几天写过的梦（不要重复地点，也不要重复句子）：
 {recent}
+{avoid}
 
 请输出，严格按下面格式，每行一条，不要任何多余的话，全文不超过 120 字：
-地点：<梦中地点，2-5 个字，如「汴京」「琉璃厂」「云上」「海边旧船」>
-短句：<一句梦话，8-14 个字，有画面、有一点暖意，像梦呓，不要格言、不要问句>
-画面：<给画师的中文提示词，30-60 字，写清场景、视角、光线与梦里那点甜>
+地点：<梦中地点，2-6 个字>
+短句：<一句梦话，8-16 个字>
+画面：<给画师的中文提示词，30-60 字，写清场景、视角、光线与周围的东西>
 
 要求：
-- 地点可以是古今中外的任何地方，也可以是很具体的角落；不要现代都市、科幻、恐怖、战争。
-- 短句只写梦，不写道理。
+- 地点可以是古今中外任何地方，也可以是很具体的角落；现代的、旧的、野的都行。
+- 短句只写梦，不写道理，不要格言、不要问句。
 - 画面里要能看出水豚在打盹；写清它趴着的位置和周围的东西。
-- 不要出现任何现代物品（汽车、手机、屏幕、玻璃幕墙、路灯），不要出现文字或招牌。
+- 主语和落点跟前几天不一样：换个说法，别再写「把…落在我…」。
 """
 
-FALLBACK_DREAM = {
-    "地点": "云上",
-    "短句": "梦里有条不赶时间的河",
-    "画面": "",
-}
+# 撞词时补的一句：点名要避开的地点和句子（只在重试时插进 prompt）。
+AVOID_HINT = """
+刚才那几条已经用过了，换个全新的地点和说法：
+{avoid_txt}
+"""
+
+# 保底文案池：LLM 整个失败时用。轮换着取，别让保底卡自己天天撞车
+# （11-16、11-17 连着两天都是「云上」）。
+FALLBACK_DREAMS = (
+    {"地点": "云上", "短句": "梦里有条不赶时间的河"},
+    {"地点": "旧屋顶", "短句": "风把睡意铺了满满一层"},
+    {"地点": "苔石阶", "短句": "水声在石头上睡了一觉"},
+    {"地点": "晾衣绳下", "短句": "阳光把布单晒得打盹"},
+    {"地点": "末班电车", "短句": "车轮替我数着到站"},
+)
+FALLBACK_DREAM = dict(FALLBACK_DREAMS[0])
+
+
+def _pick_fallback(recent: list) -> dict:
+    """从保底池里挑一条最近没用过的。"""
+    used = {str(r.get("place") or "") for r in recent if isinstance(r, dict)}
+    for item in FALLBACK_DREAMS:
+        if item["地点"] not in used:
+            return dict(item)
+    return dict(FALLBACK_DREAMS[0])
 
 
 # --------------------------------------------------------------------------
@@ -133,7 +172,7 @@ def _write_state(data: dict) -> None:
 
 
 def _roll_state(state: dict, date_key: str) -> dict:
-    """跨日轮换：昨天的卡挪到 prev（仅供失败兜底），今天清空。历史不留。"""
+    """跨日轮换：昨天的卡挪到 prev（只留档，不再用于兜底出图），今天清空。"""
     if state.get("date") == date_key:
         return state
     today = state.get("today")
@@ -211,8 +250,22 @@ def _parse_dream(raw: str) -> dict:
     return out
 
 
+def _is_duplicate(dream: dict, recent: list) -> str:
+    """梦和最近几条撞了没。撞了返回撞上的字段名（地点/短句），没撞返回空串。"""
+    place = str(dream.get("地点") or "")
+    line = str(dream.get("短句") or "")
+    for item in recent:
+        if not isinstance(item, dict):
+            continue
+        if place and place == str(item.get("place") or ""):
+            return "地点"
+        if line and line == str(item.get("line") or ""):
+            return "短句"
+    return ""
+
+
 async def _llm_dream(recent: list, **kwargs) -> dict:
-    """向 LLM 要今晚的梦。空输出/解析失败就换模型。"""
+    """向 LLM 要今晚的梦。空输出/解析失败/和前几天撞词，就换模型重来。"""
     from .content import _call_llm
 
     provider = str(kwargs.get("llm_provider") or "").strip() or "minimax"
@@ -221,10 +274,11 @@ async def _llm_dream(recent: list, **kwargs) -> dict:
     recent_txt = "、".join(
         f"{r.get('place', '')}「{r.get('line', '')}」" for r in recent if r.get("place")
     ) or "（暂无）"
-    prompt = DREAM_PROMPT.format(recent=recent_txt)
+    avoid_txt = ""
 
     for model_name in models:
         for attempt in range(2):
+            prompt = DREAM_PROMPT.format(recent=recent_txt, avoid=avoid_txt)
             raw = ""
             try:
                 raw = await _call_llm(
@@ -232,7 +286,7 @@ async def _llm_dream(recent: list, **kwargs) -> dict:
                     model_name,
                     prompt,
                     temperature=0.95,
-                    max_tokens=12000,
+                    max_tokens=2000,
                     api_key=kwargs.get("api_key"),
                     base_url=kwargs.get("llm_base_url"),
                 )
@@ -247,8 +301,17 @@ async def _llm_dream(recent: list, **kwargs) -> dict:
 
         dream = _parse_dream(raw)
         if dream.get("地点") and dream.get("短句"):
-            dream.setdefault("画面", "")
-            return dream
+            dup = _is_duplicate(dream, recent)
+            if not dup:
+                return dream
+            # 撞词：点名避开，换模型再来一次
+            logger.warning(
+                "[Tangping] 梦境撞词(%s): %s「%s」", model_name, dup, dream.get(dup)
+            )
+            avoid_txt = AVOID_HINT.format(
+                avoid_txt=f"「{dream.get('地点')}」「{dream.get('短句')}」"
+            )
+            continue
         logger.warning("[Tangping] 梦境解析失败(%s): %r", model_name, (raw or "")[:200])
 
     return {}
@@ -308,6 +371,10 @@ def _prepare_card(src: Path, dest: Path) -> tuple[bool, str]:
 
 
 def _image_prompt(scene: str, retry: bool = False) -> str:
+    """场景 → 主体 → 画风与用色（顺序照小王子日记，画风在最后）。
+
+    场景优先用 LLM 写的「画面」；没有就退回地点 + 短句。
+    """
     scene = (scene or "").strip()
     parts = []
     if scene:
@@ -332,19 +399,34 @@ async def _generate_image(scene: str, dest: Path, **kwargs) -> tuple[bool, str]:
             "model": IMAGE_MODEL,
             "prompt": prompt,
             "aspect_ratio": IMAGE_ASPECT,
+            "area": "1K",
             "n": 1,
             "response_format": "url",
-            "prompt_optimizer": False,
-            "aigc_watermark": False,
+            # 新端点没有 prompt_optimizer/aigc_watermark；disable_prompt_enhanced 反向映射旧开关
+            "disable_prompt_enhanced": False,  # 与小王子一致：开增强
         }
-        try:
-            async with httpx.AsyncClient(timeout=180.0) as client:
-                resp = await client.post(MINIMAX_IMAGE_API_URL, json=payload, headers=headers)
-        except httpx.HTTPError as exc:
-            reasons.append(f"生图请求失败: {exc}")
-            break
-        if resp.status_code != 200:
+        resp = None
+        for attempt in range(IMAGE_RETRIES):
+            try:
+                async with httpx.AsyncClient(timeout=180.0) as client:
+                    resp = await client.post(MINIMAX_IMAGE_API_URL, json=payload, headers=headers)
+            except httpx.HTTPError as exc:
+                reasons.append(f"生图请求失败: {exc}")
+                break
+            if resp.status_code == 200:
+                break
+            if resp.status_code in RETRY_STATUS and attempt < IMAGE_RETRIES - 1:
+                # 限流/服务端抖动：退避后重试同一个提示词，别直接交无图卡
+                logger.warning(
+                    "[Tangping] 生图 HTTP %s，%s 秒后重试",
+                    resp.status_code,
+                    RETRY_BACKOFF * (attempt + 1),
+                )
+                await asyncio.sleep(RETRY_BACKOFF * (attempt + 1))
+                continue
             reasons.append(f"生图 HTTP {resp.status_code}")
+            break
+        if resp is None or resp.status_code != 200:
             break
         try:
             data = resp.json()
@@ -352,12 +434,26 @@ async def _generate_image(scene: str, dest: Path, **kwargs) -> tuple[bool, str]:
             reasons.append("生图返回不是 JSON")
             break
         base_resp = data.get("base_resp") or {}
-        if base_resp.get("status_code") != 0:
+        # 新端点成功时响应里没有 base_resp 字段：只有存在且非 0 才是失败
+        if base_resp.get("status_code") not in (0, None):
             reasons.append(f"生图失败: {base_resp.get('status_msg')}")
             break
-        urls = (data.get("data") or {}).get("image_urls") or []
+        # 新端点 data 是数组：业务失败是 HTTP 200 + item.error，图片在 item.url
+        items = data.get("data") or []
+        if not isinstance(items, list):
+            items = []
+        urls = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("error"):
+                reasons.append("生图失败: " + str(item["error"].get("message") or item["error"].get("code")))
+                break
+            if item.get("url"):
+                urls.append(item["url"])
         if not urls:
-            reasons.append("生图没给图")
+            if not reasons:
+                reasons.append("生图没给图")
             break
 
         tmp = ART_DIR / (dest.stem + "_raw.png")
@@ -383,42 +479,13 @@ async def _generate_image(scene: str, dest: Path, **kwargs) -> tuple[bool, str]:
 
 
 # --------------------------------------------------------------------------
-# 图文件清理：只留今天与昨天，不留历史
+# 图文件：往期永久保留，不再按天清理
 # --------------------------------------------------------------------------
 
 
 def _cleanup_art(date_key: str) -> None:
-    try:
-        today = datetime.strptime(date_key, "%Y-%m-%d")
-    except ValueError:
-        return
-    keep = {
-        today.strftime("dream_%Y%m%d.png"),
-        (today - timedelta(days=1)).strftime("dream_%Y%m%d.png"),
-    }
-    try:
-        for path in ART_DIR.glob("dream_*.png"):
-            if path.name in keep:
-                continue
-            try:
-                path.unlink()
-            except OSError:
-                continue
-    except OSError:
-        pass
-
-
-def _local_art_exists(url: str) -> bool:
-    if not url.startswith("/static/"):
-        return False
-    rel = url[len("/static/"):]
-    if not rel.startswith("tangping/"):
-        return False
-    path = ART_DIR / rel[len("tangping/"):]
-    try:
-        return path.is_file()
-    except OSError:
-        return False
+    """不清理了：往期梦境永久保留（2026-10-29 起），理由同天工阁。"""
+    return
 
 
 # --------------------------------------------------------------------------
@@ -451,7 +518,6 @@ async def _generate_once(date_key: str, force: bool, **kwargs) -> dict | None:
         if isinstance(today, dict) and today.get("date") == date_key and not force:
             return today
 
-        prev = state.get("prev") if isinstance(state.get("prev"), dict) else {}
         recent = _recent(state)
 
         dream = await _llm_dream(recent[-RECENT_KEEP:], **kwargs)
@@ -459,42 +525,52 @@ async def _generate_once(date_key: str, force: bool, **kwargs) -> dict | None:
         art_url = ""
         has_image = "no"
         note = ""
+        fallback_used = False
         if not dream:
-            # LLM 整体失败 → 复用昨天的图，日期由顶栏体现
-            prev_art = str(prev.get("art_url") or "")
-            if prev_art and _local_art_exists(prev_art):
-                dream = {"地点": prev.get("place", ""), "短句": prev.get("line", ""), "画面": ""}
-                art_url = prev_art
-                has_image = "yes"
-                note = "复用昨日的图"
-            else:
-                dream = dict(FALLBACK_DREAM)
-                note = "文字保底"
+            # LLM 整体失败 → 文字保底，照样按当天的地点生图。
+            # 不再复用昨天的图：复用会让昨天的地点、句子、图原样再上一次屏。
+            dream = _pick_fallback(recent)
+            fallback_used = True
+
+        place = str(dream.get("地点") or "")
+        line = str(dream.get("短句") or "")
+        # 场景优先用 LLM 写的「画面」；没有就退回地点 + 短句。
+        scene = str(dream.get("画面") or "") or "，".join(p for p in (place, line) if p)
+        art_name = f"dream_{date_key.replace('-', '')}.png"
+        art_path = ART_DIR / art_name
+        image_prompt = _image_prompt(scene)
+        ok, reason = await _generate_image(scene, art_path, **kwargs)
+        if ok:
+            art_url = f"/static/tangping/{art_name}"
+            has_image = "yes"
+            note = f"文字保底；{reason}" if fallback_used else reason
         else:
-            art_name = f"dream_{date_key.replace('-', '')}.png"
-            art_path = ART_DIR / art_name
-            ok, reason = await _generate_image(str(dream.get("画面") or ""), art_path, **kwargs)
-            if ok:
-                art_url = f"/static/tangping/{art_name}"
-                has_image = "yes"
-                note = reason
-            else:
-                note = f"无图：{reason}"
-                logger.warning("[Tangping] %s 没出图: %s", date_key, reason)
+            note = f"无图：{reason}"
+            logger.warning("[Tangping] %s 没出图: %s", date_key, reason)
 
         card = {
             "date": date_key,
-            "place": str(dream.get("地点") or ""),
-            "line": str(dream.get("短句") or ""),
+            "place": place,
+            "line": line,
             "art_url": art_url,
             "has_image": has_image,
             "note": note,
+            # 实际发出去的画面提示词，落盘备查（以后调画风不用再靠猜）
+            "image_prompt": image_prompt,
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
         state["today"] = card
         state["date"] = date_key
-        recent.append({"date": date_key, "place": card["place"], "line": card["line"]})
-        state["recent"] = recent[-RECENT_KEEP:]
+        recent = [r for r in recent if r.get("date") != date_key]
+        recent.append({
+            "date": date_key,
+            "place": card["place"],
+            "line": card["line"],
+            "art_url": art_url,
+            "has_image": has_image,
+            "image_prompt": image_prompt,
+        })
+        state["recent"] = recent  # 全留：画廊要回看往期（prompt 只取最近 RECENT_KEEP 条）
         _write_state(state)
         _cleanup_art(date_key)
         return card
@@ -512,14 +588,52 @@ async def generate_today_card(force: bool = False, **kwargs) -> dict | None:
     return None
 
 
+
+def _art_url(record: dict, date_key: str) -> str:
+    """那天那张素材图：优先用记下的 art_url，旧记录按命名规则找回。"""
+    from .history_day import art_url_or_pattern
+
+    return art_url_or_pattern(record, date_key, "tangping", "dream_{date}.png")
+
+
+def _history_card(state: dict, date_key: str) -> dict:
+    """往期记录里那一天的那张卡；没有就标「历史缺失」。"""
+    from .history_day import MISSING
+
+    for item in reversed(state.get("recent") or []):
+        if isinstance(item, dict) and str(item.get("date")) == date_key:
+            art_url = _art_url(item, date_key)
+            return {
+                "date": date_key,
+                "place": str(item.get("place") or MISSING),
+                "line": str(item.get("line") or MISSING),
+                "art_url": art_url,
+                "has_image": "yes" if art_url else "no",
+            }
+    return {
+        "date": date_key,
+        "place": MISSING,
+        "line": MISSING,
+        "art_url": "",
+        "has_image": "no",
+    }
+
+
 async def build_tangping_content(fallback: dict | None = None, **kwargs) -> dict:
-    date_key = datetime.now().strftime("%Y-%m-%d")
+    from .history_day import resolve_day
+
+    date_key = resolve_day(kwargs)
     state = _read_state()
-    _roll_state(state, date_key)
     today = state.get("today")
     card = today if isinstance(today, dict) and today.get("date") == date_key else None
+
+    # 历史日：从往期记录里找那一天。找不到就如实标「历史缺失」，不补生成。
     if card is None:
-        card = await generate_today_card(**kwargs)
+        if date_key != datetime.now().strftime("%Y-%m-%d"):
+            card = _history_card(state, date_key)
+        else:
+            _roll_state(state, date_key)
+            card = await generate_today_card(**kwargs)
 
     card = card or {}
     place = str(card.get("place") or "")
