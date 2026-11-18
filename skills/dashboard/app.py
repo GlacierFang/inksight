@@ -1461,7 +1461,7 @@ def api_projects():
         {"id": "bala", "name": "躺平巴拉", "icon": "🐐", "url": "/bala/"},
         {"id": "shanhe-app", "name": "山河图记", "icon": "🗺️", "url": "/shanhe-app/"},
         {"id": "pet", "name": "桌面宠物", "icon": "🐾", "url": "/ai-agent-pet/"},
-        {"id": "eink-mini", "name": "墨水屏留言板", "icon": "📟", "url": "/eink-mini/"},
+        {"id": "eink-mini", "name": "墨水屏控制台", "icon": "📟", "url": "/eink-mini/"},
 
     ]
     return jsonify({"projects": projects})
