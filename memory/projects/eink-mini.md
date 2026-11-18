@@ -15,13 +15,14 @@
   `pages.render_message`、固件 `fetchMessage` / `collectStrings` / `inkRenderMessagePage` /
   `INK_PAGE_MESSAGE`、manifest 的 message 页、`write_token` 与写入鉴权，全部移除。
   <!-- project: path:/home/open/.openclaw/workspace -->
-- **设备现在四页**：clock（native）、timer（native 子类型）、weather、calendar。<!-- project: path:/home/open/.openclaw/workspace -->
+- **设备现在六页**：clock（native）、timer（native 子类型）、weather、hourly、calendar、almanac。
+  `hourly` 是逐小时预报页（服务端位图），城市独立于天气页。<!-- project: path:/home/open/.openclaw/workspace -->
 - **控制台改成功能分区式**（参考 ai-agent-pet 的 petd 后台范式）：设备状态（在线/最后活动/来源 IP/UA/
   拉取计数）、各功能页面预览、功能配置（天气城市 + 时钟屏标题）。<!-- project: path:/home/open/.openclaw/workspace -->
 - **设备状态**：`server/device_state.py` 落盘记录（gunicorn 2 worker，内存态跨 worker 不可见），
   `GET /api/device` 暴露，3 分钟内有拉取算在线。<!-- project: path:/home/open/.openclaw/workspace -->
 - RAM 30.2%、Flash 51.3%。<!-- project: path:/home/open/.openclaw/workspace -->
-- **未上真机**：旋转方向、BUSY 极性、局刷残影、B 键实际脚位要实物核对。<!-- project: path:/home/open/.openclaw/workspace -->
+- **真机实测通过**（2026-11-18，冰河大人确认）：烧录 v0.1.0 后实机运行正常。接线、按键、旋转方向、BUSY 极性、局刷残影、5x7 字库、Unifont 中文、天气图标、计时器状态词、单日黄历页全部核对无误。<!-- project: path:/home/open/.openclaw/workspace -->
 - **天气上游 open-meteo 已通**（2026-11-18 实测：geocode + forecast 都能取到）。
   取数走后台线程 + 文件锁 + 落盘缓存，改城市后立即返回、后台强制刷新。<!-- project: path:/home/open/.openclaw/workspace -->
 
@@ -240,3 +241,320 @@ label= 解析后紧接着 state= 解析，label 会被 state 的值顶掉。
 
 改成 4 个轮换缓冲区。**这类「多个参数同时要活着」的坑只在多参数调用时才暴露**，
 单参数测试永远测不出来。<!-- project: path:/home/open/.openclaw/workspace -->
+
+## currentEpoch() 自调用无限递归（2026-11-18 修）
+
+`static uint32_t currentEpoch()` 的函数体里写的是 `uint32_t ep = currentEpoch();` —— 自己调自己，
+无限递归。提交 c92f154 引入。正确写法是 `g_net.epoch()`（InkNet::epoch 没校时时返回 0，
+正好符合 currentEpoch 的 "> 1700000000 才认" 逻辑）。<!-- project: path:/home/open/.openclaw/workspace -->
+
+**这类 bug 服务端预览永远看不见**：server/native_render.py 只编译 ink_canvas.cpp + ink_pages.cpp，
+不走 main.cpp。preview/clock.png 一直 200、图一直好看，但真机一进时钟页就爆栈。
+编译期/预览期绿灯不等于固件能跑 —— main.cpp 这类固件主干代码必须靠 CI 编真固件验证。<!-- project: path:/home/open/.openclaw/workspace -->
+
+## 翻页钟上线与 currentEpoch 修复（2026-11-18）
+
+时钟页/计时器页从七段数码管改成翻页钟：两个面板、每面板两位数字、翻页缝横穿面板、面板间用间距代替冒号。
+字模由 firmware/tools/gen_fonts.py 从 LiberationSans-Bold 离线生成（字高 84、宽高比 0.543），
+产出 firmware/src/ink_font_big.{h,cpp}。INK_FLIP_INVERTED 控制极性：1=黑卡片白数字（默认，同参考图），
+0=白卡片黑数字。<!-- project: path:/home/open/.openclaw/workspace -->
+
+时钟页改按分钟重画（屏上只有 HH:MM，按秒重画画面不变却持续局刷累积残影），计时器仍按秒。
+设备标题 device_title 整个配置项已删除（服务端/控制台/manifest/模板全清），时钟页右上角留空。<!-- project: path:/home/open/.openclaw/workspace -->
+
+提交 9f11f54 修了 currentEpoch() 自调用无限递归，CI run 44257596967 success（head 9f11f54）。
+上一版翻页钟提交 ab05c77，CI run 44256112274。<!-- project: path:/home/open/.openclaw/workspace -->
+
+## 屏上只留主体（2026-11-18）
+
+冰河大人定：屏小，主体之外的内容全删 —— 丢了西瓜捡芝麻。删掉：页脚横线 + 页码小方块、
+时钟页日期行、计时器页「15 MIN」、计时器页顶部进度条。<!-- project: path:/home/open/.openclaw/workspace -->
+
+时钟页现在只有 HH:MM；计时器页只有状态词 + MM:SS。**唯一保留的是状态词**
+（READY/RUN/PAUSE/DONE）—— RUN 和 PAUSE 的数字画面完全一样，删了分不清在跑还是停着。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+inkRenderPageFooter() 整个函数删掉，inkRenderClockPage / inkRenderTimerPage 的
+pageIndex/pageCount/preset 参数全部从签名里去掉。native_render.py 的 PAGE_COUNT /
+CLOCK_INDEX / TIMER_INDEX / TIMER_PRESET_* 常量一并清掉。<!-- project: path:/home/open/.openclaw/workspace -->
+
+提交 c7ed02c，CI run 44259640527。<!-- project: path:/home/open/.openclaw/workspace -->
+
+## Gemini 反馈核实结果（2026-11-18）
+
+### 采纳的
+
+1. **未校时显示假时间**（真 bug）：renderCurrentPage() 末尾用 g_net.epoch()，
+   未校时 lwIP time() 返回开机秒数（约 120），加东八区渲染成 08:01 而非 --:--。
+   改用 currentEpoch()（把 < 1700000000 过滤成 0）。<!-- project: path:/home/open/.openclaw/workspace -->
+
+2. **5x7 字库 A 字形糊掉 + 基线不齐**（比 Gemini 说的「底部略不齐」严重）：
+   解码原表发现 'A' 字形是 ..#../.##../.#.#./.#.#./.###./#...# —— 顶部糊成一团，读起来像小写 a。
+   另有 'A B K M R T V W X Y Z' 末行是 5 而非 6，'a e o r' 是 4，'m v w x' 是 3。
+   重写生成器 firmware/tools/gen_font5x7.py：按字符类别定行区间（大写 row 0..5、
+   x 高度 row 2..5、下伸部 row 2..6），横竖同比例不压扁。<!-- project: path:/home/open/.openclaw/workspace -->
+
+3. **箭头断裂成噪点**（真问题）：字体自带 ↑↓ 在 12px 下竖线仅 1px 宽，
+   降采样后覆盖率不足阈值，出来是断线/黑点。换每行一个实心横条的像素三角
+   （宽度序列 2,4,6,7,7）。<!-- project: path:/home/open/.openclaw/workspace -->
+
+4. **中文字体换 unifont**：GNU Unifont 是 16px 点阵字，笔画横平竖直无断笔，
+   1bpp 上明显优于 wqy-zenhei。server/renderer.py 的 FONT_REGULAR 改为 unifont.otf。
+   <!-- project: path:/home/open/.openclaw/workspace -->
+
+### 否决的（Gemini 说的，实测更差）
+
+6. **1px 描边云**：实测 1x 下云变成断续虚影，比实心剪影更糟。已试已撤销。
+   <!-- project: path:/home/open/.openclaw/workspace -->
+
+### 重要更正：bayer4 抖动是对的（2026-11-18 16:2x）
+
+上面第 5 条「否决 bayer4」的结论**被推翻了**，原因是我把「小图标上抖动失败」
+当成了「抖动本身失败」。两者不是一回事。
+
+**原理**：SSD1608 是严格 1bpp，但油墨只有黑、纸只有白，报纸照样能印出明暗层次
+—— 靠的不是把油墨调淡，是**空间密度换灰阶**（半色调/网点纸原理）。人眼在正常
+视距下看不清孤立黑白点，会对局部区域做积分平均。
+
+**眼模型实测**（高斯模糊模拟视觉积分，296x128 = 111 PPI）：
+
+| 变体 | 感知黑度 | 纹理 sd |
+|---|---|---|
+| 实心 100% | 97.4% | 14.89 |
+| bayer4 50% | 50.5% | 3.01 |
+| bayer4 25% | 32.9% | 6.89 |
+| bayer4 75% | 73.8% | 8.31 |
+
+实心填充的纹理噪声是 50% 抖动的 5 倍 —— 这就是「大面积黑块视觉压迫感强」的
+量化版。**bayer4 的 50% 是最甜的一档**（4x4 矩阵正好半亮半暗、分布最均匀）。
+
+**三条硬边界**（实测，不是估计）：
+
+1. **面积下限 16x16 px**：8x8 读出的是「点」不是「调子」（sd 10.98），
+   16x16 才干净（sd 2.09）。
+2. **笔画下限 2px**：1px 横条在 bayer4 下有 50% 的列是断的。所以文字、
+   1px 箭头、细线必须硬边，绕开抖动。
+3. **bayer2 不够用**：只有 4 级灰，最小非零灰阶就是 50%，表达不出 25% 浅灰。
+   要 16 级就得 bayer4。
+
+**报纸 vs 屏幕的角尺寸**（30cm 视距）：报纸 85 lpi 网目格 3.42 角分；
+屏幕 1 像素 2.62 角分；但我们的抖动周期 bayer4 = 10.47 角分，比报纸粗 3 倍。
+报纸能躲过去是因为它不需要分辨格子（网点大小变化），我们躲不掉 —— 格子就是
+我们的信息载体。
+
+**最终实现**（server/icons.py）：
+
+- 轮廓留清晰层（硬边，2px 宽），内部厚块填灰走 bayer4 抖动。
+- 轮廓保持形状，内部才有灰阶层次 —— 正是报纸网点的做法。
+- 细笔画（雨丝/雪花十字/雾横条/太阳环）腐蚀 2px 后什么都不剩，自动整根留硬边。
+- 内块面积 < 64px 或包围盒 < 8px 退回硬边（sun 的 30px 环抖完 sd 40.55，
+  是 cloud 的两倍，就是散点噪）。
+- TONE_DITHER_MODE 从 bayer2 改成 bayer4。
+<!-- project: path:/home/open/.openclaw/workspace -->
+### Gemini 引用的文件不存在
+
+ink_font_2.h / ink_font_3.cpp / ink_pages_3.cpp —— 仓库里根本没有这些文件，
+只有 firmware/src/ink_font.h 和 ink_pages.cpp。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 踩过的坑
+
+- **像素三角的矩形高度不能写 0**：d.rectangle((x0, top+i, x0+w-1, top+i)) 高度为 0，
+  什么都不画，箭头直接消失。必须是 top+i+1。<!-- project: path:/home/open/.openclaw/workspace -->
+- **ScaledDraw.rectangle 的坐标是逻辑坐标**，会自动乘 SCALE=3。别再手动乘。
+  <!-- project: path:/home/open/.openclaw/workspace -->
+- 写补丁脚本时用 heredoc 会被 shell 吃掉引号，嵌套三引号直接 SyntaxError。
+  用 write 工具落 .py 文件最稳。<!-- project: path:/home/open/.openclaw/workspace -->
+
+提交 8c97e13，CI run 44264533730。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 灰阶改造上线（2026--11-18 16:4x）
+
+提交 fa80a99（灰阶改用空间密度）+ 0f25654（eval_quant 指标换感知黑度）。
+CI 只在 firmware/ 变动时触发 —— 这两个提交只动 server/ 和 tools/，所以没有新 run。
+当前固件是 3ebcfdd，fw-bin = e4fe47f（fw: 3ebcfdda...）。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 配网页 WiFi 扫描 + 开机首屏修复（2026-11-18 16:5x）
+
+提交 72ab84a，CI run 44270107836 success（head 72ab84a）。fw-bin = fcf4bb3（fw: 72ab84a...）。
+
+- 配网页加 2.4GHz WiFi 扫描下拉选择（WIFI_AP_STA 双模），手输框保留处理隐藏 SSID。
+- 回填 host/base（原来打开配网页域名和路径框是空的）。
+- refreshManifestIfDue：g_lastManifestMs==0 时放行，开机首次拉清单不再被跳过。
+- B 键短按补 g_dirtyPage=true。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+
+## 单日黄历页 + 计时器状态词字模（2026-11-18）
+
+冰河大人定的范围：**只看当天**，不做农历月历、不做宜忌；重点是干支和节气。
+服务端算服务端渲染，**不动固件**（设备没有中文字库，中文只能走服务端位图）。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+**数据源**：vendored `server/lunar_python/`（lunar-python，MIT，同目录 LICENSE）。
+pip 装不了 —— 出口代理白名单没有 pypi.org。<!-- project: path:/home/open/.openclaw/workspace -->
+
+**四条必须算对的规则**（都在 `server/almanac.py` 文件头）：
+
+1. **年干支按立春换年，立春当天就换** —— 用 `getYearInGanZhiByLiChun()`。
+   `getYearInGanZhiExact()` 在 2026-02-04 立春当天仍给「乙巳」，要等 02-05 才变，**差一整天**。
+   生肖同理用 `getYearShengXiaoByLiChun()`。<!-- project: path:/home/open/.openclaw/workspace -->
+2. **月干支按节气换月，节气当天就换** —— 用 `getMonthInGanZhi()`。
+   `getMonthInGanZhiExact()` 在立冬当天仍给「戊戌」，次日才变「己亥」。<!-- project: path:/home/open/.openclaw/workspace -->
+3. **「上个节气」= 今天 00:00 之前最后一个** —— 直接用 `lunar.getPrevJieQi()`。
+   从昨天查会把昨天的节气漏掉。<!-- project: path:/home/open/.openclaw/workspace -->
+4. **「下个节气」= 明天 00:00 之后的第一个** —— 用「明天」的 lunar 查 `getNextJieQi()`。
+   今天正好是节气时，今天这个不算「下个」。<!-- project: path:/home/open/.openclaw/workspace -->
+
+**踩坑**：`Exact` 后缀的 API 是按**时刻**切的，黄历按天显示，所以差一天。
+名字里的 Exact 指的是「精确到立春/节气的时刻」，不是「按天」。<!-- project: path:/home/open/.openclaw/workspace -->
+
+**版式**（`pages.render_almanac`）：顶部公历日期+星期 / 年干支+生肖；
+左侧大号农历月日 + 「农历」标签；右侧日·月·年三行干支；底部节气。
+「农历」标签必须让开大号字的墨迹带（26px 字体的墨迹从 y=35 到 y=61），
+画在 y=57 会和大号字压在一起。<!-- project: path:/home/open/.openclaw/workspace -->
+
+## 月历六周行溢出（2026-11-18 修，同日又重排）
+
+`render_calendar` 的 `cell_h` 原来写死 15、起始 y=52：六周月份的第六行落在 y=127，
+15px 高的字只露出 1px —— **整行被切光**。2026 年的 3 / 8 / 11 月都是六周，
+11 月丢的是 30 号。<!-- project: path:/home/open/.openclaw/workspace -->
+
+改成按可用高度均分，行高和字号随周数走（详见下面的「月历重排」段）。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+## 计时器状态词专用字模（2026-11-18）
+
+5x7 ASCII 画状态词太小：`PAUSE` 只有 29x7 px，在 296x128 屏上几乎看不见。
+而计时器在跑和暂停时数字画面完全一样，状态词是**唯一的区分手段**。<!-- project: path:/home/open/.openclaw/workspace -->
+
+新增 `firmware/src/ink_font_state.{h,cpp}`（13px 高、比例宽度）+ 生成器 `tools/gen_font_state.py`。
+实测 PAUSE 变成 **52x10**。字模在固件里 → **断网可用照旧**。<!-- project: path:/home/open/.openclaw/workspace -->
+
+**踩坑**：`native_render.py` 的 `build()` 里源码列表是**手抄的第二份**，
+只改 `SRC_FILES`（用于变更检测）不进链接行 → `undefined reference: inkStateGlyph`。
+已改成命令直接用 `SRC_FILES`，以后加文件不会再漏。<!-- project: path:/home/open/.openclaw/workspace -->
+
+**大号数字 `1` 的底衬不改**：Liberation Sans Bold 的 `1` 带底衬，这正是 Helvetica
+（参考图字体）的特征，而参考图里根本没有数字 1 可对照 —— 没有参照物，不算 bug。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+相关：[[eink-mini]] <!-- project: path:/home/open/.openclaw/workspace -->
+
+
+## CI 与产物（2026-11-18 单日黄历这轮）
+
+提交 `3ebcfdd`（单日黄历页 + 计时器状态词字模 + 修月历六周行溢出），
+CI run `44301927815` success（head 3ebcfdd）。<!-- project: path:/home/open/.openclaw/workspace -->
+
+- `fw-bin` = `e4fe47f`（提交说明 `fw: 3ebcfdda678ac81ecd10b58255e2087254592ad3`）。
+  产物：boot_app0.bin / bootloader.bin / eink-mini-merged.bin / firmware.bin / flash_args.txt / partitions.bin。
+  <!-- project: path:/home/open/.openclaw/workspace -->
+- 占用：**Flash 51.8%（985416 字节，比上版多 1076 —— 正好是新状态词字模）**，
+  **RAM 24.4%（80036 字节，与上版完全相同）** —— 字模是 const，进 flash 不占 RAM。
+  <!-- project: path:/home/open/.openclaw/workspace -->
+- `eink-mini-merged.bin` 1083664 字节（上版 1082448，+1216）。<!-- project: path:/home/open/.openclaw/workspace -->
+
+相关：[[eink-mini]] <!-- project: path:/home/open/.openclaw/workspace -->
+
+
+## GitHub Releases（2026-11-18 补上）
+
+**之前只推 `fw-bin` 分支，Release 和 tag 一次都没建过** —— 分发少了一条路。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+第一个 Release：**v0.1.0**，tag 指向 `2e36fef`，CI run `44303584354` success。
+7 个附件（6 个 .bin + `SHA256SUMS`），sha256 与 fw-bin 分支产物逐字节一致。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+**为什么不能在本机建 Release**：附件上传走 `uploads.github.com`，
+本机出口代理白名单里**没有**这个域名 → 403 Forbidden；
+而且 `gh release create` 上传失败会把整个 release 撤掉（tag 也一起没了，仓库看起来像没动过）。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+**正解：放进 CI。** runner 跑在 GitHub 上，不经过本机代理。
+新增「建 GitHub Release」步骤：同名 release 已存在就跳过（不覆盖历史发布）；
+标签由 `workflow_dispatch` 的 `release_tag` 输入指定，留空则用 `fw-<短SHA>`。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+**踩坑**：发布说明**不能写成 heredoc 内联在 YAML 块标量里** —— heredoc 内容会落到列 0，
+其中的 `---` 被 YAML 当成文档分隔符，整个 workflow 直接坏掉（报 "found another document"）。
+已改成独立文件 `firmware/tools/release_notes.md`。<!-- project: path:/home/open/.openclaw/workspace -->
+
+**本机仍下不动 Release 附件**：`release-assets.githubusercontent.com` 不在白名单里。
+GitHub 侧附件是好的（`state: uploaded`，digest 可用 api.github.com 查）；
+用户在浏览器里下不受影响。要在本机下，得往白名单加 `release-assets.githubusercontent.com`
+并重启 Gateway。<!-- project: path:/home/open/.openclaw/workspace -->
+
+相关：[[eink-mini]] <!-- project: path:/home/open/.openclaw/workspace -->
+
+## 真机实测通过（2026-11-18）
+
+烧录 v0.1.0（固件 `3ebcfdd`，产物在 `fw-bin` 分支和 Releases）后实机运行正常。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+这一关过了，之前挂着待核对的全部项：接线、按键、旋转方向、BUSY 极性、局刷残影、
+5x7 字库、Unifont 中文、天气箭头与图标、计时器状态词字模、单日黄历页。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+**意义**：之前所有的验证都是「服务端预览 + 主机端渲染」，只有这一轮是真屏幕上的像素。
+主机端渲染器保证逻辑一致，但它证明不了面板极性、旋转、残影这些物理行为 ——
+只能靠实物。<!-- project: path:/home/open/.openclaw/workspace -->
+
+**这一轮同时验证了之前几个真 bug 的修复**：
+
+- `fillRect` 循环轴反了 —— 时钟页不再是竖线条。<!-- project: path:/home/open/.openclaw/workspace -->
+- `currentEpoch()` 自调用无限递归 —— 真机进时钟页不爆栈了。<!-- project: path:/home/open/.openclaw/workspace -->
+- 计时器状态词 —— 52x10 的 PAUSE 实际在屏上清晰可读。<!-- project: path:/home/open/.openclaw/workspace -->
+- 月历六周行 —— 3/8/11 月的末行不再被切掉。<!-- project: path:/home/open/.openclaw/workspace -->
+- 单日黄历页 —— 立春/立冬当天切年切月正确。<!-- project: path:/home/open/.openclaw/workspace -->
+
+相关：[[eink-mini]] <!-- project: path:/home/open/.openclaw/workspace -->
+
+## 逐小时页 + 月历重排（2026-11-18）
+
+提交 `48e9e8e`（月历重排 + 逐小时页骨架）、`aced35a`（城市独立 + 图标 + 扩充数据）。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 月历重排
+
+原来顶部「2026年11月」占 26px，今天的 18 号被**反白填充**整个吞掉（变成一块黑方块），
+周末和工作日一模一样。<!-- project: path:/home/open/.openclaw/workspace -->
+
+现在三段式：顶栏（左「11月 2026年」右「今天 18 三」）/ 星期表头 / 网格。
+今天改用**描边框**不用反白填充 —— 反白就是原来那块黑方块。<!-- project: path:/home/open/.openclaw/workspace -->
+
+周末两列垫浅灰网点，走**页面级灰阶层**（renderer.page_mask 新增 tone 参数）。
+网点密度实测调过（网格区黑像素占比）：205 → 19%、222 → 12.5% 都太重，
+**235 → 6.25%** 才够淡（工作日列 2.9% 作基准）。<!-- project: path:/home/open/.openclaw/workspace -->
+
+行高改成按周数自适应，网格区 y=42..126，六周时字号降到 12。
+像素核对：11 月 30 号墨迹在 y=112..124（屏高 128），完整可见。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 逐小时页
+
+12 小时，独立页（不混进 weather 页）。上屏内容：体感温度 / 湿度 / 风速读数行 +
+温度折线 + 天气图标（每 2 小时一个，22x22）+ 降水概率柱（≥40% 标数字）。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+**城市独立**：`config_store` 加 `hourly_city / hourly_lat / hourly_lon`，
+留空 = 跟随天气页。缓存按槽位分开（`weather_cache.json` / `weather_hourly_cache.json`），
+各自 flock 和 TTL。<!-- project: path:/home/open/.openclaw/workspace -->
+
+**白名单没动**：所有 hourly 字段都出自 `api.open-meteo.com`（已放行）。
+PM2.5 不做，所以没有新域名要加。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 图标缩小的坑
+
+`icons.render(kind, size)` 现在支持小尺寸 —— 从超采样画布**直接**降采样到目标尺寸，
+不是把 28x28 缩一遍（后者会把 1px 雨丝糊成灰点）。<!-- project: path:/home/open/.openclaw/workspace -->
+
+**太阳例外**：`sun` 的 ☀ 字形是 28px 原生渲染的，缩到 22 后光芒和圆环粘连成实心黑块
+（实测整个外圈全黑）。晴天改画圆环 + 四道短光芒。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 三个自己踩的坑
+
+- 改模板时用 Python 按标记切片，切掉了 `{% endfor %}` → **控制台 500**。<!-- project: path:/home/open/.openclaw/workspace -->
+- 图标行和读数行挤在一起 → 改成三层垂直分区（读数 22..34 / 图标 36..58 / 曲线 60 起）。<!-- project: path:/home/open/.openclaw/workspace -->
+- 渲染时用**缓存里的**城市名当标题，用户刚改完配置那几十秒里标题和数据城市对不上。
+  改成以**配置**为准。<!-- project: path:/home/open/.openclaw/workspace -->
