@@ -1123,3 +1123,17 @@ v1 **不做**「回复输入」——那需要 `operator.write`（`sessions.send
 - **教训**：我第一版只改了 `_visible()`，以为够用 —— 其实 `select()` 和 `_sync_confirm_focus()` 是两个独立的漏洞。**屏蔽类需求要顺着「这个被排除的东西还会从哪些路径流出去」逐条追**，光看主要路径会漏。<!-- project: path:/home/open/.openclaw/workspace -->
 
 - **用户已确认「验证通过」（11-13）** —— 三方通道屏蔽这一项经用户实际验证，不是只有主机测试。<!-- project: path:/home/open/.openclaw/workspace -->
+
+
+### 状态推进改时钟驱动 —— 宠物不再卡在「工作中」（11-18，提交 7092d4b）
+- **用户报的现象**：没有任何活跃对话了，屏幕一直显示「工作中」，只有再打开一次 Openclaw webui 后台才会切状态。<!-- project: path:/home/open/.openclaw/workspace -->
+- **根因（已复现）**：稳态窗和 done 衰减都是「再看一次才生效」的判定 —— `state.py` 的 `update()` 里判定「连续 idleAfterMs 都判为非活跃」靠 `now - _idle_candidate_since >= grace`，而 `now` 只在 `update()` 被调用时才取。**「再看一次」的机会只来自 gateway 事件推送**（`gateway.py` 只在 `sessions.changed`/`session.message`/`session.tool`/`chat`/`socket.drain` 时 `refresh_sessions()`）。系统一安静就没有事件 → 宠物永远停在上一帧的 working。<!-- project: path:/home/open/.openclaw/workspace -->
+- **旁路全查过**：`_poll_loop` 是 feature 取数（900 秒）不碰会话；`_frame_loop` 只渲染不更新状态；固件里 `state.refresh` 出现 **0 次**（设备不会主动要刷新）；`app.py` 的 `refresh()` 只被后台 UI 的 `state.refresh` action 调 —— 所以打开后台才会动，完全对得上现象。<!-- project: path:/home/open/.openclaw/workspace -->
+- **改法**：① `StateEngine.tick()` —— 拿当前快照重新判一次，稳态窗到期就落回 idle；② `app.py` 加 `_advance_state()`，`_frame_loop` 每帧调一次，状态变了才 `push_state`；③ 另有每 15 秒一次 `_sync_loop()` 重取会话快照（`RESYNC_INTERVAL_SEC`），兜住漏广播的变更。<!-- project: path:/home/open/.openclaw/workspace -->
+- **顺手挖出的真 bug（测试污染）**：`StateEngine.__init__` 里 `self.rules = rules or DEFAULT_RULES` 是**同一个对象**，而 `tests/test_petd.py` 有 `eng.rules["stability"]["idleAfterMs"] = 0` —— 原地把全局 `DEFAULT_RULES` 改了，导致别的测试全被带偏（我新加的测试单跑通过、全量跑挂 2 个）。`app.py` 的 `_load_rules()` 用 `dict(DEFAULT_RULES)` **浅拷贝**同样有这问题。改成 `copy.deepcopy`。**教训：模块级默认配置必须深拷贝，否则谁改谁都中招。**<!-- project: path:/home/open/.openclaw/workspace -->
+- **清死配置**：`idleGraceMs`、`eventDebounceMs` **代码从不读取**（只在 `state_rules.json` 和 `DEFAULT_RULES` 里出现），但 `docs/状态语义.md` 把它们写成「三条对策」之一 —— 文档与实现不符，一并从代码、配置和文档里删掉。<!-- project: path:/home/open/.openclaw/workspace -->
+- 改动：`petd/state.py`、`petd/app.py`、`petd/data/state_rules.json`（version 3→4）、`docs/状态语义.md`、`CHANGELOG.md`、新增 `tests/test_state_tick.py`（8 项）。全量 **560 passed**。CI `44226312201`（python-ci）、`44226312227`（firmware-build）均 success。<!-- project: path:/home/open/.openclaw/workspace -->
+- **实测**：petd 重启后状态判定与网关 `sessions.list` 实时数据**逐行一致（MISMATCH-COUNT: 0）**。<!-- project: path:/home/open/.openclaw/workspace -->
+- **踩坑（又踩）**：`git push` 走 HTTPS 远端会挂住（本机 HTTPS push 必挂）。`origin` 原本是 HTTPS URL —— 要显式 `git remote set-url origin git@github.com:GlacierFang/ai-agent-pet.git` 再用 `scripts/gh-push.sh` 推。<!-- project: path:/home/open/.openclaw/workspace -->
+- **踩坑**：`pgrep -f "git push origin"` 会匹配到执行清理的 shell 本身，把自己也杀了 —— 要用 `git[-]push` 括号模式。**跟之前 pytest 那个坑是同一类：pkill/pgrep 的模式会自杀。**<!-- project: path:/home/open/.openclaw/workspace -->
+
