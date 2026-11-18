@@ -193,3 +193,50 @@ partitions.csv 要补全）—— GxEPD2 是 vendored 在 `firmware/lib/`，CI �
 核实结论存 `memory/projects/eink-mini-firmware-review.md`。**外部评审意见要逐条核实再采纳**，
 不能直接照抄 —— 尤其它没读仓库实际结构时。<!-- project: path:/home/open/.openclaw/workspace -->
 
+
+## native 页后台同步渲染（2026-11-18，用户授权后落地）
+
+控制台原来对 clock / timer 只写「设备本地渲染，这里看不到画面」的占位。现在有真画面了。
+
+技术底座是已有的主机端渲染器（编译固件那份 ink_canvas.cpp + ink_pages.cpp），
+所以像素和设备上的一致，不是「长得像」。<!-- project: path:/home/open/.openclaw/workspace -->
+
+新增 server/native_render.py：后台线程编译 + 渲染 + 落盘 PNG 缓存，请求只读缓存。
+编译靠 flock 去重（gunicorn 2 个 worker 都会来抢）。单次渲染 4.2ms，不构成负担。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+**预览代表什么状态，必须说清楚：**
+- 时钟页 = 服务端当前时间（时区同样 +8），与设备校时后一致。
+- 计时器页 = **代表性画面**（READY / 15 分钟档）。真实倒计时在设备 RAM 里，
+  服务端看不到也不假装看得到。/preview/timer.png?state=READY|RUN|PAUSE|DONE 按需渲染其它态。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+要显示真实剩余时间得扩展设备状态上报协议 —— 这是新功能，先问再动。
+
+## 按键全部映射到外接微动开关（2026-11-18）
+
+**两颗都是外接**，一脚接引脚一脚接 GND，固件用内部上拉：
+
+| 键 | 引脚 | 短按 | 双击 | 长按 |
+|---|---|---|---|---|
+| A | GPIO5 | 下一页 | 上一页 | 立即全刷清残影 |
+| B | GPIO2 | 刷新当前页 | 回第一页 | 进入配网 |
+
+计时器页上 B 键是计时器专用：短按 启停 · 双击 换预设 · 长按 重置。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+**B 键从板载 BOOT（GPIO9）挪到 GPIO2。** GPIO9 是启动采样脚，复位时按住进下载模式，
+留给下载，不当交互键。GPIO2 同样是启动采样脚 —— 固件开内部上拉，复位时保持高电平
+正常启动，但上电/复位那一瞬别按住 B。<!-- project: path:/home/open/.openclaw/workspace -->
+
+GPIO16 是确认错误的方向：C3 的 GPIO11~17 内部接 Flash，模块上根本没引出来。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+## 主机渲染器 getStr 的 static 缓冲区 bug（2026-11-18 修）
+
+getStr 用单个 static char buf[128]，多个字符串参数会互相覆盖 ——
+label= 解析后紧接着 state= 解析，label 会被 state 的值顶掉。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+改成 4 个轮换缓冲区。**这类「多个参数同时要活着」的坑只在多参数调用时才暴露**，
+单参数测试永远测不出来。<!-- project: path:/home/open/.openclaw/workspace -->
