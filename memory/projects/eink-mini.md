@@ -4,9 +4,9 @@
 仓库：`git@github.com:GlacierFang/eink-mini.git`（GlacierFang/eink-mini），本地 `/home/open/.openclaw/workspace/eink-mini`。
 <!-- project: path:/home/open/.openclaw/workspace/eink-mini -->
 
-## 状态（2026-11-17）
+## 状态（2026-11-18）
 
-- 固件：全部写完，CI 首次全绿（run 44103056290）。产物在 `fw-bin` 分支。
+- 固件：全部写完，CI 全绿。产物在 `fw-bin` 分支。<!-- project: path:/home/open/.openclaw/workspace -->
 - 服务端：已上线 `http://ruohan.site/eink-mini/`（Flask + gunicorn，端口 18842，user scope systemd
   `openclaw-eink-mini.service`，nginx 路由 `/eink-mini/`）。<!-- project: path:/home/open/.openclaw/workspace -->
 - 位序：服务端发 1=黑（4736 字节，MSB first），固件按 INK_SERVER_BIT1_IS_BLACK 翻成面板 1=白。
@@ -14,15 +14,16 @@
 - **留言功能整套已删**（提交 `660cf01`）：服务端 `GET/POST /api/message(s)`、`store.py`、
   `pages.render_message`、固件 `fetchMessage` / `collectStrings` / `inkRenderMessagePage` /
   `INK_PAGE_MESSAGE`、manifest 的 message 页、`write_token` 与写入鉴权，全部移除。
-  设备回到三页：clock（native）、weather、calendar。<!-- project: path:/home/open/.openclaw/workspace -->
+  <!-- project: path:/home/open/.openclaw/workspace -->
+- **设备现在四页**：clock（native）、timer（native 子类型）、weather、calendar。<!-- project: path:/home/open/.openclaw/workspace -->
 - **控制台改成功能分区式**（参考 ai-agent-pet 的 petd 后台范式）：设备状态（在线/最后活动/来源 IP/UA/
   拉取计数）、各功能页面预览、功能配置（天气城市 + 时钟屏标题）。<!-- project: path:/home/open/.openclaw/workspace -->
 - **设备状态**：`server/device_state.py` 落盘记录（gunicorn 2 worker，内存态跨 worker 不可见），
   `GET /api/device` 暴露，3 分钟内有拉取算在线。<!-- project: path:/home/open/.openclaw/workspace -->
-- RAM 30.2%、Flash 51.3%。提交 `660cf01` 的 CI run 44118223158 全绿。<!-- project: path:/home/open/.openclaw/workspace -->
-- **未上真机**：B 键 GPIO（当前 16，候选 0/16/17）、旋转方向、BUSY 极性要实物核对。<!-- project: path:/home/open/.openclaw/workspace -->
-- **天气上游 open-meteo 当前直连和代理都超时**（2026-11-17 23:40 观测，geocode 通、forecast 不通），
-  天气页会退化成占位内容。<!-- project: path:/home/open/.openclaw/workspace -->
+- RAM 30.2%、Flash 51.3%。<!-- project: path:/home/open/.openclaw/workspace -->
+- **未上真机**：旋转方向、BUSY 极性、局刷残影、B 键实际脚位要实物核对。<!-- project: path:/home/open/.openclaw/workspace -->
+- **天气上游 open-meteo 已通**（2026-11-18 实测：geocode + forecast 都能取到）。
+  取数走后台线程 + 文件锁 + 落盘缓存，改城市后立即返回、后台强制刷新。<!-- project: path:/home/open/.openclaw/workspace -->
 
 ## CI 在国内网络的三个坑（都踩过）
 
@@ -42,8 +43,12 @@
 
 ## 接线
 
-SCK=6, MOSI=7, MISO=8, CS=1（CS2 与 CS1 短接）, DC=4, RST=10, BUSY=3, KEY_A=5, KEY_B=16(待确认)。
+SCK=6, MOSI=7, MISO=8, CS=1（CS2 与 CS1 短接）, DC=4, RST=10, BUSY=3, KEY_A=5, KEY_B=9。
 全部 3.3V。BUSY 极性上电探测 + 超时兜底，不写死。
+
+**KEY_B 改成 GPIO9（板载 BOOT 键，零接线）**：GPIO11~17 在 ESP32-C3 上内部接 Flash，
+模块根本没引出来，配成 16 固件连烧都烧不进去。只焊了一颗外接微动开关（A 键 GPIO5），
+其余只买不焊留储备。想接第二颗外接开关用 GPIO2。<!-- project: path:/home/open/.openclaw/workspace -->
 
 ## 许可
 
@@ -109,3 +114,82 @@ dither 的 PSNR 最高但噪点打断 12px 小字笔画；页面没有连续色�
 负空间加的才是信息。
 
 相关：[[eink-mini]] <!-- project: path:/home/open/.openclaw/workspace -->
+
+## 计时器页（2026-11-18）
+
+设备本地倒计时，native 子类型。服务端只加一条 manifest 条目，**不渲染、不产生位图**。
+
+- **计时用 `millis()` 不用 epoch**：millis 单调递增，不依赖 SNTP 也不依赖 HTTP 校时，
+  所以没校过时计时器照样能跑，比时钟页还独立。<!-- project: path:/home/open/.openclaw/workspace -->
+- 状态只在 RAM，**不做持久化**（冰河大人 2026-11-18 定）。<!-- project: path:/home/open/.openclaw/workspace -->
+- 复用已有的 `drawSevenDigit` / `drawSevenColon`，没写新渲染器。<!-- project: path:/home/open/.openclaw/workspace -->
+- 预设固定在固件：1/3/5/10/15/25/30/45 分钟，默认 15。不接控制台 —— manifest 塞预设数组
+  要改固件解析，改完还得等设备重拉 manifest 才生效。<!-- project: path:/home/open/.openclaw/workspace -->
+- 按键：计时器页 B 短=启停/继续（DONE 后重开）、B 双=换预设（RUNNING 时忽略）、B 长=重置。
+  其它页 B 键行为不变。<!-- project: path:/home/open/.openclaw/workspace -->
+- 归零时一次全刷反色提醒（设备无蜂鸣器，视觉是唯一本地提醒）。<!-- project: path:/home/open/.openclaw/workspace -->
+
+**踩到的坑**：`type == "native"` 的判断会漏掉 timer → 被当成 bitmap 页，每 30 秒去拉
+`/api/page/timer.bin`（404）。控制台模板同样按 `f.type == 'native'` 分支，漏了 timer 会去请求
+`preview/timer.png`。manifest 里 native 页标题取 `device_title` 是时钟页专属，timer 页不能套。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+## 主机端渲染器（2026-11-18）
+
+`firmware/tools/render_host.sh` —— 在 PC / Pi 上直接编译固件的 `ink_canvas.cpp` +
+`ink_pages.cpp` 并出图。<!-- project: path:/home/open/.openclaw/workspace -->
+
+**这两份是纯逻辑，不依赖 Arduino API**（`ink_pages.cpp` 去掉了 `<Arduino.h>`，
+它只用到 snprintf / gmtime_r / memset / uint32_t，全在标准头里），所以能在主机上编译运行，
+画出来的就是设备上会显示的像素 —— **逐像素一致**，不是「长得像」。<!-- project: path:/home/open/.openclaw/workspace -->
+
+三个用途：
+
+1. **抓逻辑错** —— `fillRect` 那种语法没错、CI 编译通过、但画出来是竖线的 bug，
+   只有出图才看得见。<!-- project: path:/home/open/.openclaw/workspace -->
+2. **版式验证** —— 改完版式立刻出图，不用等硬件到货。<!-- project: path:/home/open/.openclaw/workspace -->
+3. **控制台预览的素材来源** —— 同一份渲染代码，不是另画一遍。<!-- project: path:/home/open/.openclaw/workspace -->
+
+输出 6 张：时钟（已校时 / 没校时）、计时器（READY / RUN / PAUSE / DONE）。
+自检画面在 `main.cpp` 里（依赖 `g_display` / `g_net` 全局状态），这个工具不渲染它。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+## 固件逻辑错：fillRect 循环轴反了（2026-11-18 修）
+
+```cpp
+for (int j = 0; j < h; j++) vLine(x, y + j, w, black);   // 错
+for (int j = 0; j < w; j++) vLine(x + j, y, h, black);   // 对
+```
+
+`vLine(x, y, h)` 是「第 x 列画 h 像素高」，所以原实现画出来是 1 像素宽的竖条，
+不是 w×h 的矩形。`drawRect` 用的是 `hLine`+`vLine`，语义是对的 —— 两个函数不一致，
+`fillRect` 这边是错的。<!-- project: path:/home/open/.openclaw/workspace -->
+
+后果：数码管 7 根段全成竖线 → 时钟页数字、冒号、页脚方块、计时器档位方块、进度条、
+自检 8×8 棋格全是竖条。**时钟页是第一页，真机首次点亮屏幕就是一堆竖线。**
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+**CI 编译查不出来** —— 语法没错，逻辑错。只有出图（主机渲染器）才看得见。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+## 天气页屏上用专用简称（2026-11-18）
+
+`WMO_CN` 是完整气象术语（给控制台和接口用），`WMO_SHORT` 是屏上用的短名。
+**不是把长描述截断**（那会切出「强毛毛」这种怪词），是每个码单独设计：
+55 强雨 / 56 冻雨 / 57 强冻雨 / 96 雷雹 / 99 雷暴。<!-- project: path:/home/open/.openclaw/workspace -->
+
+**右栏必须防撞大温度**：城市名用户可改、长度不设上限，「乌鲁木齐 + 雷暴」加上
+大温度后只剩 2 像素间隙（像素级实测）。现在先算温度块（含单位）右缘，
+右栏左缘必须留 8px；放不下让城市名先让位，再逐档缩字号 16→12，还不行才截断。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+## 外部评审的处理方式
+
+Gemini 两轮评审里，**两轮都重复提同一条误判**（platformio.ini 要补 lib_deps、
+partitions.csv 要补全）—— GxEPD2 是 vendored 在 `firmware/lib/`，CI 实测编译通过；
+照改反而会拉进第二份 GxEPD2 与 vendored 符号冲突，还破坏保留的上游 GPL-3.0 安排。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+核实结论存 `memory/projects/eink-mini-firmware-review.md`。**外部评审意见要逐条核实再采纳**，
+不能直接照抄 —— 尤其它没读仓库实际结构时。<!-- project: path:/home/open/.openclaw/workspace -->
+
