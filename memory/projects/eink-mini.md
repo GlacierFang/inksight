@@ -558,3 +558,66 @@ PM2.5 不做，所以没有新域名要加。<!-- project: path:/home/open/.open
 - 图标行和读数行挤在一起 → 改成三层垂直分区（读数 22..34 / 图标 36..58 / 曲线 60 起）。<!-- project: path:/home/open/.openclaw/workspace -->
 - 渲染时用**缓存里的**城市名当标题，用户刚改完配置那几十秒里标题和数据城市对不上。
   改成以**配置**为准。<!-- project: path:/home/open/.openclaw/workspace -->
+
+## GitHub 开源化清理（2026-11-19）
+
+仓库 `GlacierFang/eink-mini` 全面整理为对外开源形态。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 历史重写
+
+56 条提交里有 19 条 body 带内部讨论痕迹（外部评审代号、跨项目引用、
+本机网络细节、记忆文件路径、会话口吻）。用 `git commit-tree` 逐条重建：
+**tree、作者、时间戳全部保持不变，只改 message**，重建后核对 0 差异。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+重写后 SHA 全变，旧 SHA 一律失效：
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+| 原 | 新 |
+|---|---|
+| `3ebcfdd`（v0.1.0 固件源码） | `1f55750` |
+| `2e36fef`（Release 对应提交） | `379bdd3` |
+| `8a0ecb1`（旧 main tip） | `35a8715` |
+
+fw-bin 分支的 8 条 `fw: <sha>` 提交消息同步重指到新 SHA，**二进制逐字节未变**
+（6 个文件全部 IDENTICAL）。<!-- project: path:/home/open/.openclaw/workspace -->
+
+本地留了 `backup/pre-clean-main` 和 `backup/pre-clean-fwbin` 两个 tag 作回滚点，
+**没推到远端**。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 删掉的
+
+- 分支：`ci-logs` + 3 个 `ci-logs-*` 调试分支（31 条编译日志），全删。
+  同时从 build.yml 里去掉「把构建日志推到分支」这个步骤，否则下次编译又会长出来。
+  <!-- project: path:/home/open/.openclaw/workspace -->
+- 当前树里的本机绝对路径（service 文件的 WorkingDirectory）、
+  跨项目内部引用（petd / ai-agent-pet）、外部评审代号、本机代理白名单细节。
+  <!-- project: path:/home/open/.openclaw/workspace -->
+
+### 保留的
+
+- 「删留言整套」这类**已删除功能的真实历史**留在 commit message 里 ——
+  那是事实，不是内部讨论。<!-- project: path:/home/open/.openclaw/workspace -->
+- README 里的真机实测记录（接线、BUSY 极性、局刷残影、字库）——
+  别人复现硬件需要，属开源价值。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### GPL 合规
+
+GxEPD2 是 GPL-3.0 且被链接进 firmware.bin，所以**固件二进制作为合并作品按 GPL-3.0 分发**。
+仓库根是 MIT，但许可段已明确写出这个区别，Release 正文和 `firmware/tools/release_notes.md`
+也都写了「对应源码即本仓库 firmware/ 目录」。<!-- project: path:/home/open/.openclaw/workspace -->
+
+新建了 `docs/architecture.md`（公开版架构说明，只讲确定性事实）。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 遗留
+
+Release 的 `target_commitish` 仍指向已失效的旧 SHA `2e36fef`。
+PATCH `/releases/{id}` 一直返回 404（token 对该端点没有写权限），
+而正文更新是成功的。**实际影响小**：tag `v0.1.0` 已重指到 `379bdd3`，
+该提交在 main 历史上，附件逐字节未动。<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 工具改动
+
+`scripts/gh-push.sh` 加了 `FORCE=1` 支持 `--force-with-lease`（重写历史用）。
+<!-- project: path:/home/open/.openclaw/workspace -->
