@@ -8,6 +8,8 @@
 # 用法：
 #   scripts/gh-push.sh <repo-dir> [branch]
 #
+# 需要覆盖式推送时设 FORCE=1（重写历史用）。
+#
 # 行为：按 remote URL 选密钥，推送失败时自动换另一把重试一次。
 set -euo pipefail
 
@@ -29,8 +31,13 @@ fi
 for KEY in "${KEYS[@]}"; do
   [ -f "$KEY" ] || continue
   export GIT_SSH_COMMAND="ssh -i $KEY -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10"
+  PUSH_ARGS=(push origin "HEAD:refs/heads/$BRANCH")
+  if [ "${FORCE:-0}" = "1" ]; then
+    PUSH_ARGS=(--force-with-lease origin "HEAD:refs/heads/$BRANCH")
+    echo ">>> 强制推送（FORCE=1）"
+  fi
   echo ">>> 推送 $REPO_DIR ($BRANCH)，密钥 $(basename "$KEY")"
-  if git push origin "HEAD:refs/heads/$BRANCH"; then
+  if git "${PUSH_ARGS[@]}"; then
     echo ">>> 推送成功"
     exit 0
   fi
