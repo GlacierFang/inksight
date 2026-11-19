@@ -612,10 +612,10 @@ GxEPD2 是 GPL-3.0 且被链接进 firmware.bin，所以**固件二进制作为�
 
 ### 遗留
 
-Release 的 `target_commitish` 仍指向已失效的旧 SHA `2e36fef`。
-PATCH `/releases/{id}` 一直返回 404（token 对该端点没有写权限），
-而正文更新是成功的。**实际影响小**：tag `v0.1.0` 已重指到 `379bdd3`，
-该提交在 main 历史上，附件逐字节未动。<!-- project: path:/home/open/.openclaw/workspace -->
+Release 的 `target_commitish` 一度指向已失效的旧 SHA `2e36fef`。
+改法：`gh api --method PATCH .../releases/{id} -f target_commitish=main`。
+**踩坑**：传旧 SHA 会 404 —— 历史重写后那个 commit 已不在远端任何 ref 上，
+GitHub 直接拒绝，**不是 token 权限问题**。传分支名就正常。<!-- project: path:/home/open/.openclaw/workspace -->
 
 ### 工具改动
 
