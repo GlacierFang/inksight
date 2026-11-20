@@ -219,14 +219,15 @@ async def ensure_web_or_device_access(
 _preview_push_queue: dict[str, dict] = {}
 _preview_push_queue_lock = asyncio.Lock()
 
+# 2026-11-17：系统默认能力下线，智能时段改用保留的自研模式。
 _SMART_TIME_SLOTS = [
-    (6, 9, ["RECIPE", "DAILY"]),
-    (9, 12, ["BRIEFING", "STOIC"]),
-    (12, 14, ["ZEN", "POETRY"]),
-    (14, 18, ["STOIC", "ROAST"]),
-    (18, 21, ["FITNESS", "RECIPE"]),
-    (21, 24, ["ZEN", "POETRY"]),
-    (0, 6, ["ZEN", "POETRY"]),
+    (6, 9, ["CUSTOM_DAYOVERVIEW", "CUSTOM_ANT"]),
+    (9, 12, ["CUSTOM_DAILY_TRIO", "CUSTOM_TANGPING"]),
+    (12, 14, ["CUSTOM_SUN_MOON", "CUSTOM_PI_STATUS"]),
+    (14, 18, ["CUSTOM_PRINCE", "CUSTOM_DAILY_TRIO"]),
+    (18, 21, ["CUSTOM_HAICUOTU", "CUSTOM_TANGPING"]),
+    (21, 24, ["CUSTOM_SUN_MOON", "CUSTOM_POETRY_DAY"]),
+    (0, 6, ["CUSTOM_SUN_MOON", "CUSTOM_ANT"]),
 ]
 
 
@@ -270,7 +271,7 @@ async def choose_persona_from_config(config: dict, peek_next: bool = False) -> s
 async def advance_to_next_mode(mac: Optional[str], config: dict) -> str:
     modes = config.get("modes", DEFAULT_MODES)
     if not modes:
-        return "STOIC"
+        return "CUSTOM_DAYOVERVIEW"
 
     state = await get_device_state(mac) if mac else None
     current = state.get("last_persona", "") if state else ""
@@ -317,7 +318,9 @@ async def resolve_mode(
             return await advance_to_next_mode(mac, config)
         return await choose_persona_from_config(config)
 
-    return random.choice(["STOIC", "ROAST", "ZEN", "DAILY"])
+    return random.choice(
+        ["CUSTOM_DAYOVERVIEW", "CUSTOM_DAILY_TRIO", "CUSTOM_POETRY_DAY", "CUSTOM_SUN_MOON"]
+    )
 
 
 async def build_image(
@@ -337,7 +340,7 @@ async def build_image(
     current_user_id: Optional[int] = None,
     intent_only: bool = False,
     colors: int = 2,
-    album_bucket: str = "",
+    owner_account: str = "",
     day_override: Optional[str] = None,
     archive_screen: bool = False,
     phase_override: Optional[str] = None,
@@ -347,6 +350,16 @@ async def build_image(
     battery_pct = calc_battery_pct(v)
     config = await get_active_config(mac) if mac else None
     persona = await resolve_mode(mac, config, persona_override, force_next=force_next)
+
+    # 设备自己勾选的模式 = 它自己的订阅。设备来取图，说明它现在是在用设备。
+    # 预览（无设备）不传任何模式 —— 预览照样按全局订阅集合判，不豁免。
+    device_modes: set[str] = set()
+    if mac and isinstance(config, dict):
+        _raw_modes = config.get("modes") or []
+        if isinstance(_raw_modes, str):
+            _raw_modes = [x for x in _raw_modes.split(",")]
+        device_modes = {str(x).upper().strip() for x in _raw_modes if str(x).strip()}
+
     owner_user_id: Optional[int] = None
     if mac:
         from core.config_store import get_device_owner
@@ -360,9 +373,9 @@ async def build_image(
 
     # 相册按账号存：设备渲染时用这台设备 owner 的账号相册
     # （和无设备体验页是同一份，设备之间也不各存一份）
-    if not album_bucket and owner_user_id:
-        from core.album import account_bucket
-        album_bucket = account_bucket(owner_user_id)
+    if not owner_account and owner_user_id:
+        from core.account import account_bucket
+        owner_account = account_bucket(owner_user_id)
 
     registry = get_registry()
     
@@ -382,7 +395,7 @@ async def build_image(
                     if registry.is_supported(cand, mac):
                         fallback_persona = cand
                         break
-            persona = fallback_persona or "STOIC"
+            persona = fallback_persona or "CUSTOM_DAYOVERVIEW"
             logger.warning(
                 "[BUILD_IMAGE] Unsupported persona for %s, fallback to %s",
                 mac,
@@ -400,7 +413,7 @@ async def build_image(
     is_mode_cacheable = bool(mode_info.cacheable) if mode_info else True
 
     # ── 服务端内置 AI 配置（用户零配置）────────────────────────────
-    # 文字：MiniMax M3；图像：MiniMax image-01。凭证统一由后端 .env 提供，
+    # 文字：MiniMax M3；图像：MiniMax H3。凭证统一由后端 .env 提供，
     # 不再接受用户级 BYOK 覆盖（个人端模型配置能力已下线）。
     selected_config_user_id: Optional[int] = None
     config = dict(config or {})
@@ -504,6 +517,21 @@ async def build_image(
         config["modeLanguage"] = preview_ui_language
 
     cache_hit = False
+    img = None
+
+    # 每日内容缓存只在「没有临时覆盖」时用：预览时用户改了版式/参数，
+    # 那份内容跟设备看到的那张不是一回事，用缓存会给出错的结果。
+    # 每日内容缓存只给设备路径用：
+    # - 预览不入缓存（用户要的是「现在看看」，不是复用设备那份）
+    # - 有临时覆盖（改了城市/版式/便签）不入缓存，那不是设备看到的那张
+    # 但闸门对预览同样生效 —— 预览不豁免。
+    use_daily_cache = bool(mac) and not (
+        day_override
+        or preview_mode_override
+        or preview_memo_text
+        or preview_memo_settings
+        or skip_cache
+    )
 
     # ── Preview Cache: Check cache for preview requests (no mac required) ──
     mode_override_hash = None
@@ -532,21 +560,48 @@ async def build_image(
             cache_hit = True
             img = cached_img
 
-    if mac and config and is_mode_cacheable and not skip_cache:
-        if not intent_only:
-            cacheable_modes = get_registry().get_cacheable_ids()
-            await content_cache.check_and_regenerate_all(mac, config, v, screen_w, screen_h, colors=colors, cacheable_modes=cacheable_modes)
-        cached_img = await content_cache.get(
-            mac,
-            persona,
-            config,
-            screen_w=screen_w,
-            screen_h=screen_h,
-        )
-        if cached_img:
-            cache_hit = True
-            img = cached_img
-        else:
+    # 设备路径：每日内容缓存
+    #
+    # 注意这里**不**受 is_mode_cacheable 限制。cacheable 这个旧开关是给
+    # 「按 mac 批量预热」用的（哪些模式值得后台预生成一份），而每日内容
+    # 缓存取代了它 —— 命中就直接下发，不发任何请求。
+    # 继续用旧开关卡着，就等于 16 个模式里只有 1 个能享受日更缓存。
+    if mac and config and not skip_cache:
+        # 一个（模式 + 参数指纹 + 日期 + 画幅）一天一份，所有设备共享。
+        # 先看今天有没有；没有再生成。这取代了原来「按 mac 各存一份 +
+        # TTL 到点重生成」的做法 —— 后者会让两台屏各调一次模型。
+        if use_daily_cache:
+            from core.daily_cache import get_today, param_fingerprint, today_str
+            from core.subscription import ModeNotSubscribed, allow_modes, ensure_allowed
+
+            # 读缓存也要过闸门：未勾选的模式连旧图都不给下发。
+            # 设备自己的勾选放行（它就是在用设备），其余按全局订阅集合判。
+            try:
+                with allow_modes(device_modes):
+                    await ensure_allowed(persona, source="daily-cache-read")
+            except ModeNotSubscribed as exc:
+                from fastapi import HTTPException
+
+                logger.warning("[BUILD_IMAGE] %s 未订阅，拒绝下发缓存内容", exc.mode_id)
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"模式 {exc.mode_id} 未被订阅，已拒绝下发内容",
+                ) from exc
+
+            _fp = param_fingerprint(get_effective_mode_config(config, persona), persona)
+            _daily_img = await get_today(persona, _fp, today_str(), screen_w, screen_h)
+            if _daily_img is not None:
+                cache_hit = True
+                img = _daily_img
+                # 同步进按 mac 的旧缓存（读路径已不用它，留着兼容推送预览）
+                await content_cache.set(mac, persona, img, screen_w, screen_h)
+
+        # 注意：这里**不再**触发按 mac 的后台批量重生成。
+        # 那个逻辑会在缓存到期时把这台设备的全部模式重新生成一遍 ——
+        # 两台屏就调两次模型，正是要消除的浪费。
+        # 现在没命中就只生成当前这一个模式，写进每日内容缓存，别的屏共享。
+
+        if not cache_hit:
             logger.info("[CACHE MISS] %s:%s - Generating content", mac, persona)
     elif not mac:
         # Preview request without device mac
@@ -581,19 +636,32 @@ async def build_image(
                 get_date_context(),
                 get_weather(**location_args),
             )
-        img, content_data = await generate_and_render(
-            persona,
-            config,
-            date_ctx,
-            weather,
-            battery_pct,
-            screen_w=screen_w,
-            screen_h=screen_h,
-            mac=mac or "",
-            album_bucket=album_bucket,
-            colors=colors,
-            archive_screen=archive_screen,
-        )
+        from core.subscription import ModeNotSubscribed, allow_modes
+
+        try:
+            with allow_modes(device_modes):
+                img, content_data = await generate_and_render(
+                    persona,
+                    config,
+                    date_ctx,
+                    weather,
+                    battery_pct,
+                    screen_w=screen_w,
+                    screen_h=screen_h,
+                    mac=mac or "",
+                    owner_account=owner_account,
+                    colors=colors,
+                    archive_screen=archive_screen,
+                    use_daily_cache=use_daily_cache,
+                )
+        except ModeNotSubscribed as exc:
+            from fastapi import HTTPException
+
+            logger.warning("[BUILD_IMAGE] %s 未订阅，拒绝调用模型", exc.mode_id)
+            raise HTTPException(
+                status_code=403,
+                detail=f"模式 {exc.mode_id} 未被订阅，已拒绝调用模型",
+            ) from exc
         if isinstance(content_data, dict):
             logger.debug(
                 "[BUILD_IMAGE] content_data keys: %s, _is_fallback=%s, _used_fallback=%s, _llm_ok=%s",
@@ -611,7 +679,8 @@ async def build_image(
                 if jm and jm.definition.get("content", {}).get("type") == "image_gen":
                     content_fallback = not bool(content_data.get("image_url"))
 
-        if mac and config and is_mode_cacheable:
+        if mac and config:
+            # 同步进按 mac 的旧缓存。读路径已经不用它了，留着兼容推送预览。
             await content_cache.set(mac, persona, img, screen_w, screen_h)
 
         # ── Preview Cache: Save generated image for preview requests ──

@@ -341,7 +341,6 @@ def _parse_geocoding_item(item: dict) -> dict | None:
     }
 
 
-@_api_retry
 async def _fetch_nominatim(
     query: str,
     *,
@@ -359,8 +358,9 @@ async def _fetch_nominatim(
     if country_codes:
         params["countrycodes"] = country_codes
 
+    # Nominatim 在当前网络环境不可达：不重试、短超时，快速降级到 Open-Meteo 地理编码
     async with httpx.AsyncClient(
-        timeout=5.0,
+        timeout=2.0,
         headers={"User-Agent": _NOMINATIM_USER_AGENT},
     ) as client:
         resp = await client.get(_NOMINATIM_SEARCH_URL, params=params)

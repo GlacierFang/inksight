@@ -693,7 +693,7 @@ async def generate_json_mode_content(
     image_provider: str = "",
     image_model: str = "",
     mac: str = "",
-    album_bucket: str = "",
+    owner_account: str = "",
     screen_w: int = 400,
     screen_h: int = 300,
     # 个人端 BYOK 已下线：默认 None 表示不提供调用方 Key，由 _get_client 回退到服务端环境变量。
@@ -751,7 +751,7 @@ async def generate_json_mode_content(
         config=config or {},
         date_ctx=date_ctx or {},
         mac=mac,
-        album_bucket=album_bucket,
+        owner_account=owner_account,
         screen_w=screen_w,
         screen_h=screen_h,
         api_key=api_key,
@@ -778,23 +778,6 @@ async def generate_json_mode_content(
                 if k in {"city", "llm_provider", "llm_model", "image_provider", "image_model"}:
                     continue
                 content[k] = v
-        # MY_ADAPTIVE multi-image cycling: pick next image from image_urls array
-        if mode_id == "MY_ADAPTIVE" and isinstance(override, dict):
-            image_urls = override.get("image_urls")
-            if isinstance(image_urls, list) and image_urls:
-                urls = [u for u in image_urls if isinstance(u, str) and u.strip()]
-            elif content.get("image_url"):
-                urls = [content["image_url"]]
-            else:
-                urls = []
-            if urls:
-                if mac and len(urls) > 1:
-                    from .config_store import get_photo_frame_index, set_photo_frame_index
-                    idx = await get_photo_frame_index(mac)
-                    content["image_url"] = urls[idx % len(urls)]
-                    await set_photo_frame_index(mac, (idx + 1) % len(urls))
-                else:
-                    content["image_url"] = urls[0]
         content = await _prefetch_images(content, mode_def)
         return content
     if ctype == "computed":
@@ -997,6 +980,9 @@ async def _generate_computed_content(mode_def: dict, content_cfg: dict, fallback
     if provider == "sun_moon":
         from .sun_moon import build_sun_moon_content
         return await build_sun_moon_content(fallback, **kwargs)
+    if provider == "weather_dashboard":
+        from .weather_dashboard import build_weather_dashboard_content
+        return await build_weather_dashboard_content(fallback, **kwargs)
     if provider == "tiangong":
         from .tiangong import build_tiangong_content
         return await build_tiangong_content(fallback, **kwargs)
@@ -1018,9 +1004,6 @@ async def _generate_computed_content(mode_def: dict, content_cfg: dict, fallback
     if provider == "rihen":
         from .rihen import build_rihen_content
         return await build_rihen_content(fallback, **kwargs)
-    if provider == "album":
-        from .album import build_album_content
-        return await build_album_content(fallback, **kwargs)
     if provider == "year_progress":
         from .year_progress import build_year_progress_content
         return await build_year_progress_content(fallback, **kwargs)

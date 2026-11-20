@@ -61,7 +61,7 @@ def _extract_llm_base_url(ctx) -> str | None:
 
 # 服务端内置 MiniMax 端点（用户零配置）
 MINIMAX_BASE_URL = "https://api.minimaxi.com/v1"
-MINIMAX_IMAGE_API_URL = f"{MINIMAX_BASE_URL}/image_generation"
+MINIMAX_IMAGE_API_URL = f"{MINIMAX_BASE_URL}/images/generations"
 
 # LLM Provider configurations
 LLM_CONFIGS = {
@@ -1032,10 +1032,11 @@ Requirements:
             "model": (image_model or "").strip() or DEFAULT_IMAGE_MODEL,
             "prompt": full_prompt,
             "aspect_ratio": "3:2",
+            "area": "1K",
             "n": 1,
             "response_format": "url",
-            "prompt_optimizer": False,
-            "aigc_watermark": False,
+            # 新端点没有 prompt_optimizer/aigc_watermark；disable_prompt_enhanced 反向映射旧开关
+            "disable_prompt_enhanced": True,
         }
         headers = {
             "Authorization": f"Bearer {image_key}",
@@ -1075,7 +1076,8 @@ Requirements:
             }
 
         base_resp = result.get("base_resp") or {}
-        if base_resp.get("status_code") != 0:
+        # 新端点成功时响应里没有 base_resp 字段：只有存在且非 0 才是失败
+        if base_resp.get("status_code") not in (0, None):
             logger.error(
                 f"[ARTWALL] Image generation failed: {base_resp.get('status_code')} - {base_resp.get('status_msg')}"
             )
@@ -1086,7 +1088,22 @@ Requirements:
                 "prompt": image_prompt,
             }
 
-        image_urls = (result.get("data") or {}).get("image_urls") or []
+        # 新端点 data 是数组：业务失败是 HTTP 200 + item.error，图片在 item.url
+        items = result.get("data") or []
+        if not isinstance(items, list):
+            items = []
+        image_urls = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("error"):
+                logger.error(
+                    "[ARTWALL] Image generation failed: "
+                    + str(item["error"].get("message") or item["error"].get("code"))
+                )
+                break
+            if item.get("url"):
+                image_urls.append(item["url"])
         image_url = image_urls[0] if image_urls else ""
         if not image_url:
             logger.error("[ARTWALL] Image generation returned no image URL")

@@ -45,6 +45,13 @@ async def init_cache_db():
                 created_at TEXT NOT NULL
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS daily_text_cache (
+                cache_key TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
         await db.commit()
 
 from .config import (
@@ -445,6 +452,8 @@ class ContentCache:
             img, _content = await generate_and_render(
                 persona, config, date_ctx, weather, battery_pct,
                 screen_w=screen_w, screen_h=screen_h, colors=colors,
+                # 预热出的这张就是设备随后要拿到的画面，存进画廊。
+                archive_screen=True,
             )
             logger.info(f"[CACHE] ✓ {mac}:{persona}")
             return persona, img
@@ -484,6 +493,8 @@ class ContentCache:
             img, _content = await generate_and_render(
                 persona, config, date_ctx, weather, battery_pct,
                 screen_w=screen_w, screen_h=screen_h, colors=colors,
+                # 预热出的这张就是设备随后要拿到的画面，存进画廊。
+                archive_screen=True,
             )
 
             await self.set(mac, persona, img, screen_w, screen_h)

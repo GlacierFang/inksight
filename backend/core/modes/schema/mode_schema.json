@@ -39,7 +39,7 @@
         "properties": {
           "key": { "type": "string" },
           "label": { "type": "string" },
-          "type": { "type": "string", "enum": ["text", "textarea", "number", "select", "boolean"] },
+          "type": { "type": "string", "enum": ["text", "textarea", "number", "select", "boolean", "location"] },
           "placeholder": { "type": "string" },
           "default": {},
           "min": { "type": "number" },

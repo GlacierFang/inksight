@@ -130,6 +130,26 @@ async def build_solar_terms_content(fallback: dict | None = None, **kwargs: Any)
             "days": _days_text((day - today).days, en),
         })
 
+    # 小屏用：今天及以后最近 5 个节气，单列排版（296x128 放不下 24 行两列）。
+    pool = list(terms)
+    if pool and pool[-1][0] < today:
+        pool += list(terms_of_year(year + 1))
+    near = []
+    for day, name in pool:
+        if day < today:
+            continue
+        md = f"{day.month}/{day.day}"
+        days = _days_text((day - today).days, en)
+        near.append({
+            "name": name,
+            "md": md,
+            "days": days,
+            # 小屏一行放不下三列，拼成一句整行用（避免固定列宽在缩放下折行）
+            "line": f"{name} {md} {days}",
+        })
+        if len(near) >= 5:
+            break
+
     half = len(cells) // 2
     rows = []
     for i in range(half):
@@ -153,4 +173,5 @@ async def build_solar_terms_content(fallback: dict | None = None, **kwargs: Any)
         "next_name": next_name,
         "next_days": (next_date - today).days,
         "rows": rows,
+        "near": near,
     }
