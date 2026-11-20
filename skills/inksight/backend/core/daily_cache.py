@@ -205,9 +205,22 @@ def day_night_segment(persona: str, cfg: dict | None = None) -> str:
         return ""
 
 
-def daily_key(persona: str, fingerprint: str, day: str, screen_w: int, screen_h: int) -> str:
+def daily_key(
+    persona: str,
+    fingerprint: str,
+    day: str,
+    screen_w: int,
+    screen_h: int,
+    colors: int = 0,
+) -> str:
+    """当日缓存键。
+
+    colors 必须进键：缓存里存的是**量化后**的图（四色屏是 P 模式四色，
+    二色屏是 1 位），键里不带 colors 时四色先生成会让二色请求命中四色缓存。
+    """
     persona = (persona or "").upper()
-    return f"daily:{persona}:{fingerprint}:{day}:{screen_w}x{screen_h}"
+    suffix = f":c{colors}" if colors else ""
+    return f"daily:{persona}:{fingerprint}:{day}:{screen_w}x{screen_h}{suffix}"
 
 
 def text_key(persona: str, fingerprint: str, day: str) -> str:
@@ -247,21 +260,50 @@ async def _load_image(blob: bytes) -> Optional[Image.Image]:
 
 # ── 图片内容 ────────────────────────────────────────────────────
 
+def _adapt_colors(img: Image.Image, colors: int, strict: bool) -> Optional[Image.Image]:
+    """把缓存图适配成请求的颜色数。
+
+    四色请求遇到 1 位缓存：颜色信息已经丢了，还原不了 —— strict 时返回
+    None 让上层重新生成；不 strict（兜底路径）就照原样给，屏上总有东西。
+    二色请求遇到四色缓存：四色屏本来也只显示黑/白，这里免费降一档。
+    """
+    if not colors:
+        return img
+    if colors >= 3:
+        if img.mode == "P":
+            return img
+        return None if strict else img
+    if img.mode == "P":
+        return img.convert("1")
+    return img
+
+
 async def get_today(
-    persona: str, fingerprint: str, day: str, screen_w: int, screen_h: int
+    persona: str, fingerprint: str, day: str, screen_w: int, screen_h: int,
+    colors: int = 0,
 ) -> Optional[Image.Image]:
     """取当天的内容。没有就是 None。"""
-    key = daily_key(persona, fingerprint, day, screen_w, screen_h)
-    try:
-        rows = await _run_sql(
-            [("SELECT image_data FROM image_cache WHERE cache_key = ?", (key,))]
-        )
-    except Exception as exc:
-        logger.warning("[DAILY_CACHE] 读取失败 %s: %s", key, exc)
-        return None
-    if not rows or not rows[0]:
-        return None
-    return await _load_image(rows[0][0][0])
+    keys = [daily_key(persona, fingerprint, day, screen_w, screen_h, colors)]
+    if colors:
+        # 回退到没有颜色后缀的旧键（存量缓存），避免一次改动作废当天缓存。
+        keys.append(daily_key(persona, fingerprint, day, screen_w, screen_h))
+    for key in keys:
+        try:
+            rows = await _run_sql(
+                [("SELECT image_data FROM image_cache WHERE cache_key = ?", (key,))]
+            )
+        except Exception as exc:
+            logger.warning("[DAILY_CACHE] 读取失败 %s: %s", key, exc)
+            return None
+        if not rows or not rows[0]:
+            continue
+        img = await _load_image(rows[0][0][0])
+        if img is None:
+            continue
+        adapted = _adapt_colors(img, colors, strict=True)
+        if adapted is not None:
+            return adapted
+    return None
 
 
 async def set_daily(
@@ -271,11 +313,12 @@ async def set_daily(
     screen_w: int,
     screen_h: int,
     img: Image.Image,
+    colors: int = 0,
 ) -> None:
     """写入当天内容。同键覆盖。"""
     import io
 
-    key = daily_key(persona, fingerprint, day, screen_w, screen_h)
+    key = daily_key(persona, fingerprint, day, screen_w, screen_h, colors)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     data = buf.getvalue()
@@ -306,7 +349,8 @@ async def get_recent(
     屏上永远有东西，不用额外写一套降级链。
     """
     cutoff = (datetime.now() - timedelta(days=max_age_days)).isoformat()
-    pattern = _prefix(persona, fingerprint) + f"%:{screen_w}x{screen_h}"
+    # 末尾留 %：键可能是 :400x300 也可能是 :400x300:c4
+    pattern = _prefix(persona, fingerprint) + f"%:{screen_w}x{screen_h}%"
     try:
         rows = await _run_sql(
             [(
@@ -331,6 +375,7 @@ async def get_or_generate(
     screen_w: int,
     screen_h: int,
     generate_fn,
+    colors: int = 0,
 ) -> tuple[Optional[Image.Image], Optional[dict], bool]:
     """取当天内容，没有就生成。
 
@@ -345,9 +390,9 @@ async def get_or_generate(
     生成失败时退到 7 天内最近一次成功的：屏上永远有东西，
     不需要另写一套 429 降级链。
     """
-    key = daily_key(persona, fingerprint, day, screen_w, screen_h)
+    key = daily_key(persona, fingerprint, day, screen_w, screen_h, colors)
     async with generation_lock(key):
-        img = await get_today(persona, fingerprint, day, screen_w, screen_h)
+        img = await get_today(persona, fingerprint, day, screen_w, screen_h, colors)
         if img is not None:
             return img, None, False
 
@@ -359,7 +404,7 @@ async def get_or_generate(
             img = None
 
         if img is not None:
-            await set_daily(persona, fingerprint, day, screen_w, screen_h, img)
+            await set_daily(persona, fingerprint, day, screen_w, screen_h, img, colors)
             return img, content, True
 
         recent = await get_recent(persona, fingerprint, screen_w, screen_h)
@@ -369,9 +414,10 @@ async def get_or_generate(
 
 
 async def has_today(
-    persona: str, fingerprint: str, day: str, screen_w: int, screen_h: int
+    persona: str, fingerprint: str, day: str, screen_w: int, screen_h: int,
+    colors: int = 0,
 ) -> bool:
-    key = daily_key(persona, fingerprint, day, screen_w, screen_h)
+    key = daily_key(persona, fingerprint, day, screen_w, screen_h, colors)
     try:
         rows = await _run_sql(
             [("SELECT 1 FROM image_cache WHERE cache_key = ? LIMIT 1", (key,))]
