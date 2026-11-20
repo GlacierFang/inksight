@@ -77,8 +77,8 @@ class ConfigRequest(BaseModel):
     )
     llmProvider: str = Field(default="deepseek", description="LLM 提供商")
     llmModel: str = Field(default="deepseek-chat", max_length=50, description="LLM 模型名")
-    imageProvider: str = Field(default="aliyun", description="图像模型提供商")
-    imageModel: str = Field(default="qwen-image-max", max_length=50, description="图像模型名")
+    imageProvider: str = Field(default="minimax", description="图像模型提供商")
+    imageModel: str = Field(default="MiniMax-H3-Image", max_length=50, description="图像模型名")
     countdownEvents: list[dict] = Field(
         default_factory=list,
         max_length=10,

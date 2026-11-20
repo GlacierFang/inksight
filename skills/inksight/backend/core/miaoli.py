@@ -49,11 +49,11 @@ except Exception:  # pragma: no cover - dotenv 缺失不影响主流程
     pass
 
 MINIMAX_BASE_URL = "https://api.minimaxi.com/v1"
-MINIMAX_IMAGE_API_URL = MINIMAX_BASE_URL + "/image_generation"
-IMAGE_MODEL = "image-01"
+MINIMAX_IMAGE_API_URL = MINIMAX_BASE_URL + "/images/generations"
+IMAGE_MODEL = "MiniMax-H3-Image"
 IMAGE_ASPECT = "3:2"
 
-LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M2.7")
+LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M3")
 
 LOCK_STALE_SEC = 900
 
@@ -67,6 +67,11 @@ CAT_NAME = "喵狸"
 #   「前面是风格要求：日漫风格，狸花猫，后面是 llm 生成的动作。」
 # 风格和主体先读，模型才知道按什么画；动作在后。
 STYLE_SPEC = "日漫风格，狸花猫"
+
+# 2026-11-10 冰河大人报「猫出现多条腿」。这是模型画动态姿势时的具体失误，
+# 按 minimal-image-prompt 的规矩：只为已发生的具体错误加一条约束。
+# 只说腿的数量与完整性，不写姿态、不写动作 —— 动作仍由 LLM 那层给。
+ANATOMY_SPEC = "四条腿完整清晰，两条前腿两条后腿"
 
 # ── 四色盘 ──────────────────────────────────────────────────────────────
 # 屏是四色：黑 / 白 / 金黄 #E8B000 / 朱红 #C80000（core/config.py 的 EINK_4COLOR_PALETTE）。
@@ -255,7 +260,7 @@ def _image_prompt(scene: str, retry: bool = False) -> str:
     只给风格要求。不限定猫的造型，不写角色锚点，不写动态表达 —— 交给模型。
     """
     parts = [
-        STYLE_SPEC + "。" + scene.strip() + "。",
+        STYLE_SPEC + "，" + ANATOMY_SPEC + "。" + scene.strip() + "。",
         PALETTE_SPEC,
     ]
     prompt = "".join(p for p in parts if p)
@@ -304,10 +309,11 @@ async def _generate_art(dest: Path, scene: str, **kwargs) -> tuple[bool, str]:
             "model": IMAGE_MODEL,
             "prompt": prompt,
             "aspect_ratio": IMAGE_ASPECT,
+            "area": "1K",
             "n": 1,
             "response_format": "url",
-            "prompt_optimizer": False,
-            "aigc_watermark": False,
+            # 新端点没有 prompt_optimizer/aigc_watermark；disable_prompt_enhanced 反向映射旧开关
+            "disable_prompt_enhanced": True,
         }
         try:
             async with httpx.AsyncClient(timeout=180.0) as client:
@@ -324,12 +330,26 @@ async def _generate_art(dest: Path, scene: str, **kwargs) -> tuple[bool, str]:
             reasons.append("生图返回不是 JSON")
             break
         base_resp = data.get("base_resp") or {}
-        if base_resp.get("status_code") != 0:
+        # 新端点成功时响应里没有 base_resp 字段：只有存在且非 0 才是失败
+        if base_resp.get("status_code") not in (0, None):
             reasons.append("生图失败: " + str(base_resp.get("status_msg")))
             break
-        urls = (data.get("data") or {}).get("image_urls") or []
+        # 新端点 data 是数组：业务失败是 HTTP 200 + item.error，图片在 item.url
+        items = data.get("data") or []
+        if not isinstance(items, list):
+            items = []
+        urls = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("error"):
+                reasons.append("生图失败: " + str(item["error"].get("message") or item["error"].get("code")))
+                break
+            if item.get("url"):
+                urls.append(item["url"])
         if not urls:
-            reasons.append("生图没给图")
+            if not reasons:
+                reasons.append("生图没给图")
             break
 
         tmp = ART_DIR / (dest.stem + "_raw.png")

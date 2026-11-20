@@ -87,12 +87,17 @@ def test_provider_is_wired():
 
 
 def test_art_display_matches_mode_json():
-    """图心显示尺寸必须与模式 JSON 的 image 块一致，否则渲染器会二次缩放。"""
+    """图块必须与 provider 的 ART_DISPLAY **同宽**，且不高于它。
+
+    同宽 → 渲染器 fit=cover 的缩放系数恒为 1.0，只裁切、不重采样，细墨线不糊。
+    高度可以更矮：正文区要腾地方给字段，画面按对齐方式裁一刀。
+    """
     from core.songmeng import ART_DISPLAY
 
     body = _mode()["layout"]["body"]
     img = body[0]["conditions"][0]["children"][0]
-    assert (img["width"], img["height"]) == ART_DISPLAY
+    assert img["width"] == ART_DISPLAY[0]
+    assert img["height"] <= ART_DISPLAY[1]
 
 
 # ── 梦景解析 ────────────────────────────────────────────────
@@ -216,10 +221,15 @@ async def test_build_content_fills_from_state(monkeypatch, tmp_path):
     monkeypatch.setattr(songmeng, "STATE_FILE", tmp_path / "state.json")
     monkeypatch.setattr(songmeng, "ART_DIR", tmp_path)
 
+    # 日期必须用「当天」：写死哪天，哪天一过，这个测试就会走进真生成路径
+    # （generate_today_card 轮询 180 秒），把整个测试套件拖住。
+    from core.history_day import today_str
+
+    today = today_str()
     state = {
-        "date": "2026-10-29",
+        "date": today,
         "today": {
-            "date": "2026-10-29",
+            "date": today,
             "scene": "斗茶",
             "colophon": "一盏茶起，满室烟气",
             "art_url": "/static/songmeng/dream_20261029.png",

@@ -124,7 +124,7 @@ def _preview_url(mode_id: str, *, city: str | None = None, mac: str | None = Non
     return f"/api/preview?{urlencode(params)}"
 
 
-def _base_mobile_config(*, city: str, locale: str, widget_mode: str = "STOIC") -> dict:
+def _base_mobile_config(*, city: str, locale: str, widget_mode: str = "CUSTOM_DAYOVERVIEW") -> dict:
     return {
         "modes": [widget_mode],
         "city": city,
@@ -138,7 +138,7 @@ def _base_mobile_config(*, city: str, locale: str, widget_mode: str = "STOIC") -
 @router.get("/content/today")
 async def get_today_content(
     request: Request,
-    modes: str = Query(default="DAILY,POETRY,WEATHER"),
+    modes: str = Query(default="CUSTOM_DAYOVERVIEW,CUSTOM_POETRY_DAY,CUSTOM_DAILY_TRIO"),
     city: str = Query(default=DEFAULT_CITY),
     locale: Optional[str] = Query(default=None),
     limit: int = Query(default=5, ge=1, le=10),
@@ -152,7 +152,7 @@ async def get_today_content(
     registry = get_registry()
 
     # 服务端内置 MiniMax：用户零配置，base_cfg 已带默认 provider / model
-    base_cfg = _base_mobile_config(city=city, locale=resolved_locale, widget_mode=selected_modes[0] if selected_modes else "STOIC")
+    base_cfg = _base_mobile_config(city=city, locale=resolved_locale, widget_mode=selected_modes[0] if selected_modes else "CUSTOM_DAYOVERVIEW")
 
     items: list[dict] = []
     for mode_id in selected_modes:
@@ -255,11 +255,19 @@ async def get_widget_data(
         date_ctx = await get_date_context_cached()
         weather = await get_weather_cached(**extract_location_settings(effective_cfg, fallback_city=DEFAULT_CITY))
         try:
-            content = await generate_content_only(
-                selected_mode,
-                (config or _base_mobile_config(city=city, locale=locale, widget_mode=selected_mode)),
-                date_ctx,
-                weather,
+            from core.subscription import allow_modes
+
+            device_modes = {
+                str(x).upper().strip()
+                for x in (available_modes or [])
+                if str(x).strip()
+            }
+            with allow_modes(device_modes):
+                content = await generate_content_only(
+                    selected_mode,
+                    (config or _base_mobile_config(city=city, locale=locale, widget_mode=selected_mode)),
+                    date_ctx,
+                    weather,
                 mac=mac.upper(),
             )
         except Exception:

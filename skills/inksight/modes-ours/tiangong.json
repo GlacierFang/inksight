@@ -18,7 +18,8 @@
       "art_url": "",
       "has_image": "no",
       "seal_url": "",
-      "collection": "传世仅此一件"
+      "collection": "传世仅此一件",
+      "category": ""
     }
   },
   "layout": {
@@ -38,15 +39,26 @@
               {
                 "type": "two_column",
                 "left_x": 0,
-                "left_width": 176,
-                "gap": 12,
+                "left_width": 156,
+                "gap": 8,
                 "left": [
                   {
                     "type": "image",
                     "field": "art_url",
-                    "x": 8,
-                    "width": 160,
-                    "height": 200,
+                    "x": 0,
+                    "width": 156,
+                    "height": 190,
+                    "fit": "cover",
+                    "align_x": "center",
+                    "align_y": "center",
+                    "margin_bottom": 6
+                  },
+                  {
+                    "type": "image",
+                    "field": "seal_url",
+                    "x": 62,
+                    "width": 32,
+                    "height": 32,
                     "fit": "contain",
                     "margin_bottom": 0
                   }
@@ -56,73 +68,86 @@
                     "type": "text",
                     "field": "index_label",
                     "align": "left",
-                    "color": "red",
-                    "font_size": 13,
+                    "margin_x": 2,
+                    "font": "noto_serif_light",
+                    "font_size": 12,
                     "max_lines": 1,
-                    "margin_bottom": 2
+                    "margin_bottom": 1
                   },
                   {
                     "type": "text",
                     "field": "name",
                     "align": "left",
+                    "margin_x": 2,
                     "font": "noto_serif_bold",
-                    "font_size": 17,
+                    "font_size": 15,
                     "max_lines": 1,
-                    "margin_bottom": 11
+                    "margin_bottom": 2
+                  },
+                  {
+                    "type": "text",
+                    "template": "类别：{category}",
+                    "align": "left",
+                    "margin_x": 2,
+                    "font": "noto_serif_light",
+                    "font_size": 11,
+                    "max_lines": 1,
+                    "margin_bottom": 1
                   },
                   {
                     "type": "text",
                     "template": "器形：{shape}",
                     "align": "left",
-                    "margin_x": 0,
-                    "font_size": 12,
+                    "margin_x": 2,
+                    "font": "noto_serif_light",
+                    "font_size": 11,
                     "max_lines": 2,
-                    "margin_bottom": 5
+                    "margin_bottom": 1,
+                    "reserve_line_height": true
                   },
                   {
                     "type": "text",
                     "template": "用途：{use}",
                     "align": "left",
-                    "margin_x": 0,
-                    "font_size": 12,
+                    "margin_x": 2,
+                    "font": "noto_serif_light",
+                    "font_size": 11,
                     "max_lines": 2,
-                    "margin_bottom": 5
+                    "margin_bottom": 1,
+                    "reserve_line_height": true
                   },
                   {
                     "type": "text",
                     "template": "纹样：{pattern}",
                     "align": "left",
-                    "margin_x": 0,
-                    "font_size": 12,
+                    "margin_x": 2,
+                    "font": "noto_serif_light",
+                    "font_size": 11,
                     "max_lines": 2,
-                    "margin_bottom": 5
+                    "margin_bottom": 1,
+                    "reserve_line_height": true
                   },
                   {
                     "type": "text",
                     "template": "款识：{mark}",
                     "align": "left",
-                    "margin_x": 0,
-                    "font_size": 12,
+                    "margin_x": 2,
+                    "font": "noto_serif_light",
+                    "font_size": 11,
                     "max_lines": 2,
-                    "margin_bottom": 9
+                    "margin_bottom": 1,
+                    "reserve_line_height": true
                   },
                   {
                     "type": "text",
-                    "field": "origin",
+                    "template": "来历：{origin}",
                     "align": "left",
-                    "margin_x": 0,
+                    "margin_x": 2,
                     "font": "noto_serif_light",
-                    "font_size": 12,
-                    "max_lines": 3
-                  },
-                  {
-                    "type": "image",
-                    "field": "seal_url",
-                    "x": 340,
-                    "width": 44,
-                    "height": 44,
-                    "fit": "contain",
-                    "margin_bottom": 0
+                    "font_size": 11,
+                    "max_lines": 2,
+                    "margin_bottom": 0,
+                    "reserve_line_height": true
                   }
                 ]
               }
@@ -152,11 +177,22 @@
               },
               {
                 "type": "text",
+                "template": "类别：{category}",
+                "align": "center",
+                "margin_x": 0,
+                "font": "noto_serif_light",
+                "font_size": 13,
+                "max_lines": 1,
+                "margin_bottom": 5
+              },
+              {
+                "type": "text",
                 "template": "器形：{shape}",
                 "align": "center",
                 "font_size": 13,
                 "max_lines": 2,
-                "margin_bottom": 5
+                "margin_bottom": 5,
+                "reserve_line_height": true
               },
               {
                 "type": "text",
@@ -164,7 +200,8 @@
                 "align": "center",
                 "font_size": 13,
                 "max_lines": 2,
-                "margin_bottom": 5
+                "margin_bottom": 5,
+                "reserve_line_height": true
               },
               {
                 "type": "text",
@@ -172,7 +209,8 @@
                 "align": "center",
                 "font_size": 13,
                 "max_lines": 2,
-                "margin_bottom": 5
+                "margin_bottom": 5,
+                "reserve_line_height": true
               },
               {
                 "type": "text",
@@ -180,7 +218,8 @@
                 "align": "center",
                 "font_size": 13,
                 "max_lines": 2,
-                "margin_bottom": 9
+                "margin_bottom": 9,
+                "reserve_line_height": true
               },
               {
                 "type": "text",
@@ -188,7 +227,8 @@
                 "align": "center",
                 "font": "noto_serif_light",
                 "font_size": 13,
-                "max_lines": 3
+                "max_lines": 3,
+                "reserve_line_height": true
               }
             ]
           }
@@ -199,6 +239,7 @@
       "label": "天工阁",
       "attribution_template": "{collection}",
       "dashed": true
-    }
+    },
+    "body_align": "top"
   }
 }

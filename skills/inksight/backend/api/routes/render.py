@@ -211,12 +211,12 @@ async def render(
                             await update_device_state(
                                 mac, last_reconnect_regen_at=now_dt.isoformat()
                             )
-                            await content_cache.force_regenerate_all(
-                                mac, cfg, params.v, params.w, params.h,
-                                colors=params.colors,
-                            )
-                            # Do NOT set skip_cache=True here: after force_regenerate_all
-                            # the cache is warm, so build_image should hit it immediately.
+                            # 不再 force_regenerate_all 全部模式。
+                            # 那会在每次重连时把这台设备的**所有**模式重生成一遍 ——
+                            # 设备只是短暂断网也要付一份全量生图的钱。
+                            # 每日内容缓存接管后：命中就直接下发旧图，
+                            # 没命中只生成当前这一个模式（get_or_generate 负责），
+                            # 写进共享缓存，别的屏也复用。
                     except (TypeError, ValueError, OSError):
                         logger.warning("[RECONNECT] Failed to evaluate reconnect policy for %s", mac, exc_info=True)
 
@@ -319,19 +319,34 @@ async def get_widget(
         w, h = 800, 480
 
     config = await get_active_config(mac) or {}
-    persona = mode.upper() if mode else config.get("modes", ["STOIC"])[0] if config.get("modes") else "STOIC"
+    persona = (
+        mode.upper()
+        if mode
+        else config.get("modes", ["CUSTOM_DAYOVERVIEW"])[0]
+        if config.get("modes")
+        else "CUSTOM_DAYOVERVIEW"
+    )
     location_args = extract_location_settings(config)
     date_ctx = await get_date_context()
     weather = await get_weather(**location_args)
-    img, _ = await generate_and_render(
-        persona,
-        config,
-        date_ctx,
-        weather,
-        100.0,
-        screen_w=w,
-        screen_h=h,
-    )
+
+    from core.subscription import allow_modes
+
+    device_modes = {
+        str(x).upper().strip()
+        for x in (config.get("modes") or [])
+        if str(x).strip()
+    }
+    with allow_modes(device_modes):
+        img, _ = await generate_and_render(
+            persona,
+            config,
+            date_ctx,
+            weather,
+            100.0,
+            screen_w=w,
+            screen_h=h,
+        )
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
@@ -388,10 +403,10 @@ async def preview(
     
     # 相册按账号存，只有一份：设备在作用域内用设备 owner 的账号相册，
     # 无设备体验页用当前登录用户的账号相册（同一个账号就是同一份）。
-    album_bucket = ""
+    owner_account = ""
     if not mac and current_user_id:
-        from core.album import account_bucket
-        album_bucket = account_bucket(current_user_id)
+        from core.account import account_bucket
+        owner_account = account_bucket(current_user_id)
     
     try:
         effective_v = await resolve_preview_voltage(v, mac)
@@ -424,7 +439,7 @@ async def preview(
             current_user_id=current_user_id,
             intent_only=(intent == 1),
             colors=colors,
-            album_bucket=album_bucket,
+            owner_account=owner_account,
             day_override=day,
             # 画廊收录的模式靠预览页生成内容（它们多数不在设备轮转里），
             # 这里出图即存档，回顾页才会自己长出来。
@@ -540,10 +555,10 @@ async def preview_stream(
     except Exception:
         logger.warning("[PREVIEW_STREAM] Failed to resolve current user for preview", exc_info=True)
 
-    album_bucket = ""
+    owner_account = ""
     if not mac and current_user_id:
-        from core.album import account_bucket
-        album_bucket = account_bucket(current_user_id)
+        from core.account import account_bucket
+        owner_account = account_bucket(current_user_id)
 
     async def stream():
         try:
@@ -578,7 +593,7 @@ async def preview_stream(
                 preview_ui_language=_preview_ui_lang,
                 current_user_id=current_user_id,
                 colors=colors,
-                album_bucket=album_bucket,
+                owner_account=owner_account,
                 # 同上：预览出的正式画面存进画廊。
                 archive_screen=_is_location_only(parsed_mode_override),
             )

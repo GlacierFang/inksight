@@ -141,7 +141,7 @@ FORBIDDEN = (
     "理想", "自由", "追求", "童年", "回忆", "意识", "明白",
 )
 
-LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M2.7")
+LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M3")
 
 LOCK_STALE_SEC = 900
 RECENT_KEEP = 3

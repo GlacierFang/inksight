@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from PIL import Image
 
 from core.pipeline import generate_and_render, _generate_content_for_persona, get_effective_mode_config
+from core.subscription import allow_modes
 
 
 def _make_image() -> Image.Image:
@@ -162,9 +163,14 @@ class TestGenerateAndRender:
         ):
             mock_gc.return_value = {"quote": "Test", "author": "Author"}
 
-            result_img, result_content = await generate_and_render(
-                "STOIC", sample_config, sample_date_ctx, sample_weather, 85.0
-            )
+            # 订阅闸门：测试里显式声明这个模式允许生成。
+            # use_daily_cache=False：这个用例测的是管线机制，
+            # 走每日缓存会命中真实 cache.db 里的历史内容，断言就不成立。
+            with allow_modes(["STOIC"]):
+                result_img, result_content = await generate_and_render(
+                    "STOIC", sample_config, sample_date_ctx, sample_weather, 85.0,
+                    use_daily_cache=False,
+                )
             assert result_img is mock_img
             assert result_content == {"quote": "Test", "author": "Author"}
             mock_gc.assert_called_once()
@@ -181,7 +187,11 @@ class TestGenerateAndRender:
         ):
             mock_gc.return_value = {"quote": "Test", "author": "Author"}
 
-            result_img, result_content = await generate_and_render(
-                "STOIC", None, sample_date_ctx, sample_weather, 85.0
-            )
+            # 订阅闸门：测试里显式声明这个模式允许生成。
+            # use_daily_cache=False：见上面的说明。
+            with allow_modes(["STOIC"]):
+                result_img, result_content = await generate_and_render(
+                    "STOIC", None, sample_date_ctx, sample_weather, 85.0,
+                    use_daily_cache=False,
+                )
             assert result_img is mock_img

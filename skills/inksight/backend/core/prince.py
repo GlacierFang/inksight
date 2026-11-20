@@ -7,7 +7,7 @@
 - 不记长期状态：没有养成、没有亲密度、没有连续情绪状态机。
 - 唯一的"历史"用途是别把上一句又说一遍——用现有 content_history 里的
   上一条渲染记录，不另开账本、不另加表。
-- 角色图放在 runtime_characters/<账号桶>/ 下，账号桶沿用 album_bucket
+- 角色图放在 runtime_characters/<账号桶>/ 下，账号桶沿用 owner_account
   （U<user_id>），跟相册一个口径。
 - 只有中文一套文案，不做双语。
 """
@@ -356,7 +356,7 @@ async def build_prince_content(fallback: dict, **kwargs) -> dict:
     content["today_code"] = weather_code
 
     # ── 角色图 ────────────────────────────────────────────
-    account = str(kwargs.get("album_bucket") or "").strip().upper()
+    account = str(kwargs.get("owner_account") or "").strip().upper()
     if account:
         char_file = find_character_file(account, emotion)
         if char_file is not None:

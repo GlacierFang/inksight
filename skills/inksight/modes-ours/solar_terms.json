@@ -14,7 +14,8 @@
       "current_index": "",
       "next_name": "",
       "next_days": 0,
-      "rows": []
+      "rows": [],
+      "near": []
     }
   },
   "layout": {
@@ -79,14 +80,20 @@
             }
           ]
         },
-        {"type": "spacer", "height": 1},
+        {
+          "type": "spacer",
+          "height": 1
+        },
         {
           "type": "separator",
           "style": "solid",
           "line_width": 1,
           "margin_x": 0
         },
-        {"type": "spacer", "height": 2},
+        {
+          "type": "spacer",
+          "height": 2
+        },
         {
           "type": "repeat",
           "field": "rows",
@@ -110,7 +117,7 @@
                 "field": "l_md",
                 "font_size": 9,
                 "line_height": 14,
-                "width": 26,
+                "width": 34,
                 "align": "left",
                 "max_lines": 1
               },
@@ -137,7 +144,7 @@
                 "field": "r_md",
                 "font_size": 9,
                 "line_height": 14,
-                "width": 26,
+                "width": 34,
                 "align": "left",
                 "max_lines": 1
               },
@@ -158,6 +165,68 @@
     "footer": {
       "label": "节气倒计时",
       "line_width": 0
+    }
+  },
+  "layout_overrides": {
+    "296x128": {
+      "body": {
+        "type": "column",
+        "padding_x": 4,
+        "padding_y": 1,
+        "gap": 2,
+        "children": [
+          {
+            "type": "row",
+            "gap": 4,
+            "align": "center",
+            "children": [
+              {
+                "type": "text",
+                "template": "{current_name}",
+                "font_size": 12,
+                "line_height": 14,
+                "width": 32,
+                "align": "left",
+                "max_lines": 1
+              },
+              {
+                "type": "text",
+                "template": "距{next_name} {next_days}天",
+                "font_size": 10,
+                "line_height": 13,
+                "grow": 1,
+                "align": "right",
+                "max_lines": 1
+              }
+            ]
+          },
+          {
+            "type": "separator",
+            "style": "solid",
+            "line_width": 1,
+            "margin_x": 0
+          },
+          {
+            "type": "repeat",
+            "field": "near",
+            "limit": 4,
+            "gap": 2,
+            "item": {
+              "type": "text",
+              "field": "line",
+              "font_size": 10,
+              "line_height": 16,
+              "grow": 1,
+              "max_lines": 1
+            }
+          }
+        ]
+      },
+      "footer": {
+        "label": "节气倒计时",
+        "font_size": 9,
+        "line_width": 0
+      }
     }
   }
 }

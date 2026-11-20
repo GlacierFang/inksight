@@ -50,7 +50,7 @@ SEAL_THRESHOLD = 6        # 册内剩余不超过这么多天时，页面落「�
 MAX_CHARS = 28
 LOCK_STALE_SEC = 900
 RECENT_KEEP = 7           # 生成时给模型看最近几天（防重复）
-LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M2.7")
+LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M3")
 
 # 屏幕版式档位：必须与 modes-ours/rihen.json 的 layout / layout_overrides 对齐。
 # 键是精确的屏幕尺寸（与 layout_overrides 的 key 一致），其余尺寸走 default。

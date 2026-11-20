@@ -641,6 +641,46 @@ async def _llm_line(kind: str, date_key: str, prompt: str, location_key: str, **
 # --------------------------------------------------------------------------
 
 
+def _period_from_sun(
+    now_local: datetime, sunrise_dt: datetime | None, sunset_dt: datetime | None
+) -> str:
+    """昼夜判定：有日出日落按真实时刻，没有就按 6-18 点粗判。"""
+    if sunrise_dt and sunset_dt:
+        return "day" if sunrise_dt <= now_local <= sunset_dt else "night"
+    return "day" if 6 <= now_local.hour < 18 else "night"
+
+
+def cache_period(cfg: dict | None = None) -> str:
+    """当前该出白天版还是夜里版 —— 给缓存键分段用。
+
+    只读运行时缓存里的日出日落，不发网络请求。缓存里没有今天的记录时，
+    按 6-18 点粗判，和 build_sun_moon_content 的兜底是同一套规则。
+    """
+    now_utc = datetime.now(timezone.utc)
+    location = _resolve_location(cfg if isinstance(cfg, dict) else {})
+    cache = _read_cache()
+    locations = cache.get("locations") if isinstance(cache, dict) else None
+    bucket = locations.get(_location_key(location)) if isinstance(locations, dict) else None
+    daily = bucket.get("daily") if isinstance(bucket, dict) else None
+    if not isinstance(daily, dict):
+        return _period_from_sun(_local_now(now_utc, None, DEFAULT_TZ_NAME), None, None)
+    now_local = _local_now(
+        now_utc, daily.get("utc_offset_seconds"), daily.get("timezone") or DEFAULT_TZ_NAME
+    )
+    rows = daily.get("rows")
+    today = None
+    if isinstance(rows, list):
+        for row in rows:
+            if isinstance(row, dict) and row.get("date") == now_local.strftime("%Y-%m-%d"):
+                today = row
+                break
+    if not today:
+        return _period_from_sun(now_local, None, None)
+    return _period_from_sun(
+        now_local, _parse_naive(today.get("sunrise")), _parse_naive(today.get("sunset"))
+    )
+
+
 async def build_sun_moon_content(fallback: dict | None = None, **kwargs) -> dict:
     """生成日昼与月相内容。"""
     config = kwargs.get("config")
@@ -678,12 +718,7 @@ async def build_sun_moon_content(fallback: dict | None = None, **kwargs) -> dict
     # 昼夜判定：地点当地时间与当天日出日落比较
     sunrise_dt = _parse_naive(today.get("sunrise") if today else None)
     sunset_dt = _parse_naive(today.get("sunset") if today else None)
-    if sunrise_dt and sunset_dt and sunrise_dt <= now_local <= sunset_dt:
-        period = "day"
-    elif sunrise_dt and sunset_dt:
-        period = "night"
-    else:
-        period = "day" if 6 <= now_local.hour < 18 else "night"
+    period = _period_from_sun(now_local, sunrise_dt, sunset_dt)
 
     phase = moon_phase(now_utc)
     illum_pct = int(round(phase["illum"] * 100))

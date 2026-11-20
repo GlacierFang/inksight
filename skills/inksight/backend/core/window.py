@@ -28,27 +28,26 @@ STATE_DIR = _BACKEND_DIR / "runtime_cache" / "window"
 STATE_FILE = STATE_DIR / "state.json"
 
 MINIMAX_BASE_URL = "https://api.minimaxi.com/v1"
-MINIMAX_IMAGE_API_URL = f"{MINIMAX_BASE_URL}/image_generation"
-IMAGE_MODEL = "image-01"
+MINIMAX_IMAGE_API_URL = f"{MINIMAX_BASE_URL}/images/generations"
+IMAGE_MODEL = "MiniMax-H3-Image"
 IMAGE_ASPECT = "3:2"
 
 # 屏上正文区尺寸（400x300 去掉页脚 30px）
 ART_DISPLAY = (400, 270)
 
-LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M2.7")
+LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M3")
 
-# ── 四色盘（与 config.py 的 EINK_4COLOR_PALETTE 一致）────────────────────
-PALETTE_SPEC = (
-    "画面只用四种颜色：纯白纸面底、墨黑 #000000 勾线与暗部、金黄 #E8B000 填色、朱红 #C80000 点缀。"
-    "同一色系内可以有深浅变化（深金黄到淡金黄、朱红有浓淡），用明暗表现体积与柔和光影；"
-    "但不要出现第五种色相（不要蓝、绿、紫、青），不要写实材质纹理，"
-    "四色套色版画质感，线条清晰，不要任何文字、印章、标签、水印。"
-)
+# ── 画风：真实照片（2026-11-17 12:28 冰河大人定）──────────────────────
+# 窗外是「从屋里往外看」，所以要照片，不是插画。
+# 不写四色：屏上四色由渲染器的 Atkinson 抖动归色，与 prompt 无关；
+# 原来的 PALETTE_SPEC（含「不要写实材质纹理」）正在拦着照片，必须删。
+# 不写构图指令（「窗框出现在画面边缘」）—— 靠描述，不靠排布。
+STYLE = "真实照片风格"
 
 # ── 窗：整张图就是从屋里向外望的一扇窗 ─────────────────────────────────
 # 靠提示词保证「有窗」，不做看图复核。
-WINDOW_SPEC = "画面是从屋内向外望的一扇窗，窗框出现在画面边缘，窗外是主要画面。"
-WINDOW_SPEC_RETRY = " 画面必须是从屋内透过一扇窗向外看的视角，窗框一定要出现在画面里。"
+WINDOW_SPEC = "画面是从屋内向外望的一扇窗"
+WINDOW_SPEC_RETRY = "画面必须是从屋内透过一扇窗向外看的视角，窗框一定要出现在画面里"
 
 # ── 窗外景象（LLM 写一句）──────────────────────────────────────────────
 SCENE_PROMPT = (
@@ -165,10 +164,15 @@ async def _llm_scene(desc: str, temp: str, **kwargs) -> str:
 
 # ── 出图 ──────────────────────────────────────────────────────────────
 
-def _image_prompt(scene: str, retry: bool = False) -> str:
-    parts = [scene.strip()]
+def _image_prompt(scene: str, weather: str = "", retry: bool = False) -> str:
+    """窗外景象 + 当天天气 + 窗 + 真实照片风格。
+
+    天气直接进 prompt（2026-11-17 12:29 冰河大人定）：照片要有当天实况，
+    靠模型自己编天气会跟真实天气对不上。
+    """
+    parts = [scene.strip(), (weather or "").strip()]
     parts.append(WINDOW_SPEC_RETRY if retry else WINDOW_SPEC)
-    parts.append(PALETTE_SPEC)
+    parts.append(STYLE)
     return "。".join(p for p in parts if p)
 
 
@@ -197,7 +201,7 @@ def _prepare_art(src: Path, dest: Path) -> tuple[bool, str]:
     return True, f"{dw}x{dh}"
 
 
-async def _generate_art(dest: Path, scene: str, **kwargs) -> tuple[bool, str]:
+async def _generate_art(dest: Path, scene: str, weather: str = "", **kwargs) -> tuple[bool, str]:
     import httpx
 
     key = (kwargs.get("image_api_key") or "").strip() or os.getenv("MINIMAX_API_KEY", "").strip()
@@ -206,15 +210,16 @@ async def _generate_art(dest: Path, scene: str, **kwargs) -> tuple[bool, str]:
 
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     reasons: list[str] = []
-    for prompt in (_image_prompt(scene, False), _image_prompt(scene, True)):
+    for prompt in (_image_prompt(scene, weather, False), _image_prompt(scene, weather, True)):
         payload = {
             "model": IMAGE_MODEL,
             "prompt": prompt,
             "aspect_ratio": IMAGE_ASPECT,
+            "area": "1K",
             "n": 1,
             "response_format": "url",
-            "prompt_optimizer": False,
-            "aigc_watermark": False,
+            # 新端点没有 prompt_optimizer/aigc_watermark；disable_prompt_enhanced 反向映射旧开关
+            "disable_prompt_enhanced": True,
         }
         try:
             async with httpx.AsyncClient(timeout=180.0) as client:
@@ -231,12 +236,26 @@ async def _generate_art(dest: Path, scene: str, **kwargs) -> tuple[bool, str]:
             reasons.append("生图返回不是 JSON")
             break
         base_resp = data.get("base_resp") or {}
-        if base_resp.get("status_code") != 0:
+        # 新端点成功时响应里没有 base_resp 字段：只有存在且非 0 才是失败
+        if base_resp.get("status_code") not in (0, None):
             reasons.append(f"生图失败: {base_resp.get('status_msg')}")
             break
-        urls = (data.get("data") or {}).get("image_urls") or []
+        # 新端点 data 是数组：业务失败是 HTTP 200 + item.error，图片在 item.url
+        items = data.get("data") or []
+        if not isinstance(items, list):
+            items = []
+        urls = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("error"):
+                reasons.append("生图失败: " + str(item["error"].get("message") or item["error"].get("code")))
+                break
+            if item.get("url"):
+                urls.append(item["url"])
         if not urls:
-            reasons.append("生图没给图")
+            if not reasons:
+                reasons.append("生图没给图")
             break
 
         tmp = ART_DIR / (dest.stem + "_raw.png")
@@ -313,7 +332,7 @@ async def build_window_content(fallback: dict | None = None, **kwargs) -> dict:
         logger.warning("[Window] 没拿到窗外景象")
         content["has_image"] = "no"
         return content
-    ok, reason = await _generate_art(dest, scene, **kwargs)
+    ok, reason = await _generate_art(dest, scene, weather_text, **kwargs)
     if not ok:
         logger.warning("[Window] 出图失败: %s", reason)
         content["has_image"] = "no"

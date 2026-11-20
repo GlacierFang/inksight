@@ -41,7 +41,7 @@ async def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 mac TEXT NOT NULL,
                 nickname TEXT DEFAULT '',
-                modes TEXT DEFAULT 'STOIC,ROAST,ZEN,DAILY',
+                modes TEXT DEFAULT 'CUSTOM_DAYOVERVIEW,CUSTOM_DAILY_TRIO,CUSTOM_POETRY_DAY',
                 refresh_strategy TEXT DEFAULT 'random',
                 character_tones TEXT DEFAULT '',
                 language TEXT DEFAULT 'zh',
@@ -56,8 +56,8 @@ async def init_db():
                 refresh_interval INTEGER DEFAULT 60,
                 llm_provider TEXT DEFAULT 'deepseek',
                 llm_model TEXT DEFAULT 'deepseek-chat',
-                image_provider TEXT DEFAULT 'aliyun',
-                image_model TEXT DEFAULT 'qwen-image-max',
+                image_provider TEXT DEFAULT 'minimax',
+                image_model TEXT DEFAULT 'MiniMax-H3-Image',
                 countdown_events TEXT DEFAULT '[]',
                 time_slot_rules TEXT DEFAULT '[]',
                 memo_text TEXT DEFAULT '',
@@ -88,7 +88,7 @@ async def init_db():
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         mac TEXT NOT NULL,
                         nickname TEXT DEFAULT '',
-                        modes TEXT DEFAULT 'STOIC,ROAST,ZEN,DAILY',
+                        modes TEXT DEFAULT 'CUSTOM_DAYOVERVIEW,CUSTOM_DAILY_TRIO,CUSTOM_POETRY_DAY',
                         refresh_strategy TEXT DEFAULT 'random',
                         character_tones TEXT DEFAULT '',
                         language TEXT DEFAULT 'zh',
@@ -103,8 +103,8 @@ async def init_db():
                         refresh_interval INTEGER DEFAULT 60,
                         llm_provider TEXT DEFAULT 'deepseek',
                         llm_model TEXT DEFAULT 'deepseek-chat',
-                        image_provider TEXT DEFAULT 'aliyun',
-                        image_model TEXT DEFAULT 'qwen-image-max',
+                        image_provider TEXT DEFAULT 'minimax',
+                        image_model TEXT DEFAULT 'MiniMax-H3-Image',
                         countdown_events TEXT DEFAULT '[]',
                         time_slot_rules TEXT DEFAULT '[]',
                         memo_text TEXT DEFAULT '',
@@ -145,8 +145,8 @@ async def init_db():
         _EXPECTED_COLUMNS = {
             "llm_provider": "TEXT DEFAULT 'deepseek'",
             "llm_model": "TEXT DEFAULT 'deepseek-chat'",
-            "image_provider": "TEXT DEFAULT 'aliyun'",
-            "image_model": "TEXT DEFAULT 'qwen-image-max'",
+            "image_provider": "TEXT DEFAULT 'minimax'",
+            "image_model": "TEXT DEFAULT 'MiniMax-H3-Image'",
             "countdown_events": "TEXT DEFAULT '[]'",
             "time_slot_rules": "TEXT DEFAULT '[]'",
             "memo_text": "TEXT DEFAULT ''",
@@ -243,17 +243,6 @@ async def init_db():
                 await db.commit()
         except Exception:
             logger.warning("[MIGRATION] Failed to add chip_family column", exc_info=True)
-
-        # Migration: add photo_frame_index column if missing
-        try:
-            cursor = await db.execute("PRAGMA table_info(device_state)")
-            columns = await cursor.fetchall()
-            names = [c[1] for c in columns]
-            if "photo_frame_index" not in names:
-                await db.execute("ALTER TABLE device_state ADD COLUMN photo_frame_index INTEGER DEFAULT 0")
-            await db.commit()
-        except Exception:
-            logger.warning("[MIGRATION] Failed to add photo_frame_index column", exc_info=True)
 
         # Migration: add OTA columns if missing
         try:
@@ -382,7 +371,7 @@ async def init_db():
                 push_enabled INTEGER DEFAULT 0,
                 push_time TEXT DEFAULT '08:00',
                 push_modes TEXT DEFAULT '[]',
-                widget_mode TEXT DEFAULT 'STOIC',
+                widget_mode TEXT DEFAULT 'CUSTOM_DAYOVERVIEW',
                 locale TEXT DEFAULT 'zh',
                 timezone TEXT DEFAULT 'Asia/Shanghai',
                 updated_at TEXT NOT NULL,
@@ -558,7 +547,7 @@ def _default_user_preferences(user_id: int) -> dict:
         "push_enabled": False,
         "push_time": "08:00",
         "push_modes": [],
-        "widget_mode": "STOIC",
+        "widget_mode": "CUSTOM_DAYOVERVIEW",
         "locale": "zh",
         "timezone": "Asia/Shanghai",
         "updated_at": "",
@@ -580,7 +569,7 @@ async def get_user_preferences(user_id: int) -> dict:
         "push_enabled": bool(row[1]),
         "push_time": row[2] or "08:00",
         "push_modes": _parse_json_blob(row[3], []),
-        "widget_mode": (row[4] or "STOIC").upper(),
+        "widget_mode": (row[4] or "CUSTOM_DAYOVERVIEW").upper(),
         "locale": row[5] or "zh",
         "timezone": row[6] or "Asia/Shanghai",
         "updated_at": row[7] or "",
@@ -596,7 +585,7 @@ async def save_user_preferences(user_id: int, data: dict) -> dict:
     if not isinstance(push_modes, list):
         push_modes = current["push_modes"]
     push_modes = [str(mode).strip().upper() for mode in push_modes if str(mode).strip()]
-    widget_mode = str(data.get("widget_mode", current["widget_mode"]) or current["widget_mode"]).strip().upper() or "STOIC"
+    widget_mode = str(data.get("widget_mode", current["widget_mode"]) or current["widget_mode"]).strip().upper() or "CUSTOM_DAYOVERVIEW"
     locale = str(data.get("locale", current["locale"]) or current["locale"]).strip().lower() or "zh"
     timezone = str(data.get("timezone", current["timezone"]) or current["timezone"]).strip() or "Asia/Shanghai"
 
@@ -1857,25 +1846,8 @@ async def set_cycle_index(mac: str, idx: int):
     await db.commit()
 
 
-async def get_photo_frame_index(mac: str) -> int:
-    db = await get_main_db()
-    cursor = await db.execute(
-        "SELECT photo_frame_index FROM device_state WHERE mac = ?", (mac,)
-    )
-    row = await cursor.fetchone()
-    return row[0] if row and row[0] else 0
 
 
-async def set_photo_frame_index(mac: str, idx: int):
-    now = datetime.now().isoformat()
-    db = await get_main_db()
-    await db.execute(
-        """INSERT INTO device_state (mac, photo_frame_index, updated_at)
-           VALUES (?, ?, ?)
-           ON CONFLICT(mac) DO UPDATE SET photo_frame_index = ?, updated_at = ?""",
-        (mac, idx, now, idx, now),
-    )
-    await db.commit()
 
 
 async def update_device_state(mac: str, **kwargs):
@@ -1895,7 +1867,6 @@ async def update_device_state(mac: str, **kwargs):
             "last_refresh_at",
             "pending_refresh",
             "cycle_index",
-            "photo_frame_index",
             "pending_mode",
             "last_state_poll_at",
             "runtime_mode",

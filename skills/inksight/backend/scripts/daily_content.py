@@ -43,10 +43,12 @@ def gallery_daily_modes() -> list[str]:
     """
     from core.gallery import modes as gallery_modes
 
+    # wide（电子世界）按日期现算、不落盘；daily=False 的模式已下线，
+    # 只保留往期存档，不再每天出图（省一次文字+生图调用）。
     return [
         item["mode_id"]
         for item in gallery_modes()
-        if item.get("form") != "wide"
+        if item.get("form") != "wide" and item.get("daily", True)
     ]
 
 # 设备画幅（4 寸墨水屏）。存档只收这个尺寸：预览页可以随便改尺寸，
@@ -56,31 +58,12 @@ SCREEN_H = 300
 COLORS = 4
 
 
-async def _load_template_config() -> dict:
-    """取当前生效的设备配置当模板（城市/坐标/语言）。
+async def _load_template_config(mac: str) -> dict:
+    """取这台设备的生效配置当模板（城市/坐标/语言）。
 
     只借位置信息，不借 MAC —— 详见模块 docstring。
     """
     from core.config_store import get_active_config
-
-    try:
-        from core.db import get_main_db
-
-        db = await get_main_db()
-        cursor = await db.execute(
-            "SELECT mac FROM configs WHERE is_active = 1 ORDER BY id DESC LIMIT 1"
-        )
-        row = await cursor.fetchone()
-    except Exception as exc:  # pragma: no cover - 取不到就退回默认配置
-        print(f"[daily] 读配置失败，用默认配置: {exc}")
-        row = None
-
-    mac = None
-    if row:
-        try:
-            mac = row[0]
-        except (TypeError, IndexError):
-            mac = None
 
     if not mac:
         return {}
@@ -110,11 +93,50 @@ async def _load_template_config() -> dict:
     return template
 
 
+async def _targets() -> list[tuple[str, str, dict]]:
+    """要生成的（模式, mac, 该设备配置模板）清单。
+
+    遍历**每台在用设备**的勾选集合 —— 两台设备城市不同，内容就该不同。
+    同城市的两台设备由每日缓存去重（键含参数指纹），不会重复调模型。
+
+    未勾选的不调模型 —— 这是硬要求，不是优化。
+    """
+    from core.subscription import active_device_configs
+
+    devices = await active_device_configs()
+    if not devices:
+        print("[daily] 没有在用设备，跳过", flush=True)
+        return []
+
+    gallery_modes = set(gallery_daily_modes())
+    targets: list[tuple[str, str, dict]] = []
+    seen: set[tuple[str, str]] = set()
+
+    for dev in devices:
+        mac = dev["mac"]
+        cfg = await _load_template_config(mac)
+        if not cfg:
+            continue
+        for mode_id in dev["modes"]:
+            if mode_id not in gallery_modes:
+                continue
+            key = (mac, mode_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            targets.append((mode_id, mac, cfg))
+
+    if not targets:
+        print("[daily] 没有需要生成的内容（都未勾选或都已下线）", flush=True)
+    return targets
+
+
 async def _generate_one(
     mode_id: str,
     config: dict,
     date_ctx: dict,
     weather: dict,
+    mac: str = "",
 ) -> tuple[bool, str]:
     """给一个模式生成当天内容 + 落盘当天整屏图。
 
@@ -131,18 +153,21 @@ async def _generate_one(
     """
     from core.pipeline import generate_and_render
 
-    img, content = await generate_and_render(
-        mode_id,
-        config,
-        date_ctx,
-        weather,
-        100,                     # 电量：只影响状态栏显示
-        screen_w=SCREEN_W,
-        screen_h=SCREEN_H,
-        mac="",                  # 不绑设备
-        colors=COLORS,
-        archive_screen=True,     # 落盘到 runtime_cache/<state>/screens/<今天>.png
-    )
+    from core.subscription import allow_modes
+
+    with allow_modes([mode_id]):
+        img, content = await generate_and_render(
+            mode_id,
+            config,
+            date_ctx,
+            weather,
+            100,                     # 电量：只影响状态栏显示
+            screen_w=SCREEN_W,
+            screen_h=SCREEN_H,
+            mac=mac,                 # 归属设备（内容本身不绑设备）
+            colors=COLORS,
+            archive_screen=True,     # 落盘到 runtime_cache/<state>/screens/<今天>.png
+        )
 
     if img is None:
         return False, "出图返回空"
@@ -160,31 +185,43 @@ async def main() -> int:
     from core.context import extract_location_settings, get_date_context, get_weather
 
     day = datetime.now().strftime("%Y-%m-%d")
-    config = await _load_template_config()
 
-    # 日期上下文与天气：和设备下发时取的是同一套，保证画面一致。
+    # 日期上下文：和设备下发时取的是同一套，保证画面一致。
     date_ctx = await get_date_context()
-    location = extract_location_settings(config)
-    weather = await get_weather(**location)
 
-    modes = gallery_daily_modes()
-    print(f"[daily] {day} | 模板配置: {config.get('city') or '（默认）'} | {len(modes)} 个模式", flush=True)
+    targets = await _targets()
+    print(f"[daily] {day} | {len(targets)} 个（设备 x 模式）待生成", flush=True)
 
     ok_count = 0
-    for mode_id in modes:
+    for mode_id, mac, cfg in targets:
+        from core.context import extract_location_settings
+
         try:
-            ok, note = await _generate_one(mode_id, config, date_ctx, weather)
+            location = extract_location_settings(cfg)
+            dev_weather = await get_weather(**location)
+            ok, note = await _generate_one(mode_id, cfg, date_ctx, dev_weather, mac)
         except Exception as exc:
-            print(f"[daily] {mode_id} 失败: {exc}", flush=True)
+            print(f"[daily] {mode_id} ({mac}) 失败: {exc}", flush=True)
             continue
         if ok:
             ok_count += 1
-            print(f"[daily] {mode_id} ok ({note})", flush=True)
+            print(f"[daily] {mode_id} ({mac}) ok ({note})", flush=True)
         else:
-            print(f"[daily] {mode_id} 未生成: {note}", flush=True)
+            print(f"[daily] {mode_id} ({mac}) 未生成: {note}", flush=True)
 
-    print(f"[daily] 完成 {ok_count}/{len(modes)}", flush=True)
-    return 0 if ok_count == len(modes) else 1
+    print(f"[daily] 完成 {ok_count}/{len(targets)}", flush=True)
+
+    # 清掉 7 天前的每日内容（保留期就是 7 天）
+    try:
+        from core.daily_cache import cleanup
+
+        deleted = await cleanup()
+        if deleted:
+            print(f"[daily] 清理过期内容 {deleted} 条", flush=True)
+    except Exception as exc:
+        print(f"[daily] 清理失败（不影响本次生成）: {exc}", flush=True)
+
+    return 0 if ok_count == len(targets) else 1
 
 
 if __name__ == "__main__":

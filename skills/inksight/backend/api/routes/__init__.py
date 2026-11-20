@@ -1,5 +1,5 @@
 from .admin_analytics import router as admin_analytics_router
-from .album import router as album_router
+
 from .auth import router as auth_router
 from .config import router as config_router
 from .health import router as health_router
@@ -30,7 +30,6 @@ api_routers = [
     locations_router,
     uploads_router,
     voice_router,
-    album_router,
 ]
 
 page_routers = [pages_router]

@@ -1,0 +1,512 @@
+{
+  "mode_id": "CUSTOM_POETRY_DAY",
+  "display_name": "诗笺日课",
+  "icon": "star",
+  "cacheable": false,
+  "description": "一屏四块：当日主诗、宋代掌故、当天到家/出门事实（诗签与在外时长）、双城天气。主诗取自本地诗库，掌故出自手写考据池，事实读本地蓝牙落盘，配不上诗签时回本地诗库取诗；双城可自选。",
+  "settings_schema": [
+    {
+      "key": "poetry_home",
+      "label": "城市一（家）",
+      "type": "location",
+      "description": "自选第一座城市的天气来源，留空则沿用蓝牙事件里的天气"
+    },
+    {
+      "key": "poetry_away",
+      "label": "城市二（在外）",
+      "type": "location",
+      "description": "自选第二座城市的天气来源，留空则沿用蓝牙事件里的天气"
+    }
+  ],
+  "content": {
+    "type": "composite",
+    "steps": [
+      {
+        "type": "computed",
+        "provider": "poetry_day",
+        "fallback": {
+          "fact_state": "none",
+          "fact_meta": "",
+          "fact_time": "",
+          "fact_poem_title": "",
+          "fact_poem_author": "",
+          "fact_lines": [],
+          "fact_poem_source": "",
+          "fact_weather": "",
+          "fact_duration": "",
+          "poem_title": "山居秋暝",
+          "poem_author": "王维",
+          "poem_lines": [
+            "空山新雨后",
+            "天气晚来秋",
+            "明月松间照",
+            "清泉石上流"
+          ]
+        }
+      },
+      {
+        "type": "computed",
+        "provider": "song_lore",
+        "fallback": {
+          "lore_title": "",
+          "lore_era": "",
+          "lore_lines": [],
+          "lore_note": ""
+        }
+      }
+    ],
+    "fallback": {
+      "fact_state": "none",
+      "fact_meta": "",
+      "fact_time": "",
+      "fact_poem_title": "",
+      "fact_poem_author": "",
+      "fact_lines": [],
+      "fact_poem_source": "",
+      "fact_weather": "",
+      "lore_title": "",
+      "lore_era": "",
+      "lore_lines": [],
+      "lore_note": "",
+      "poem_title": "山居秋暝",
+      "poem_author": "王维",
+      "poem_lines": [
+        "空山新雨后",
+        "天气晚来秋",
+        "明月松间照",
+        "清泉石上流"
+      ],
+      "fact_duration": ""
+    }
+  },
+  "layout": {
+    "layout_engine": "component_tree",
+    "status_bar": {
+      "line_width": 1,
+      "dashed": true
+    },
+    "component_theme": {
+      "body_font": "noto_serif_regular",
+      "body_font_size": 12,
+      "body_line_gap": 4
+    },
+    "body": {
+      "type": "column",
+      "padding_x": 12,
+      "padding_y": 4,
+      "justify": "center",
+      "gap": 4,
+      "children": [
+        {
+          "type": "row",
+          "gap": 14,
+          "align": "start",
+          "children": [
+            {
+              "type": "column",
+              "width": 148,
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "field": "fact_meta",
+                  "font": "noto_serif_light",
+                  "font_size": 10,
+                  "line_height": 15,
+                  "align": "left",
+                  "max_lines": 1
+                },
+                {
+                  "type": "big_number",
+                  "field": "fact_time",
+                  "font_size": 26,
+                  "align": "left"
+                },
+                {
+                  "type": "text",
+                  "field": "fact_duration",
+                  "font": "noto_serif_light",
+                  "font_size": 10,
+                  "line_height": 15,
+                  "align": "left",
+                  "max_lines": 1
+                },
+                {
+                  "type": "separator",
+                  "style": "short",
+                  "width": 36
+                },
+                {
+                  "type": "text",
+                  "template": "{fact_poem_title} {fact_poem_author}",
+                  "font": "noto_serif_bold",
+                  "font_size": 11,
+                  "line_height": 16,
+                  "align": "left",
+                  "max_lines": 1
+                },
+                {
+                  "type": "repeat",
+                  "field": "fact_lines",
+                  "limit": 4,
+                  "gap": 3,
+                  "item": {
+                    "type": "text",
+                    "field": "_value",
+                    "font": "noto_serif_regular",
+                    "font_size": 10,
+                    "line_height": 15,
+                    "align": "left",
+                    "max_lines": 1
+                  }
+                },
+                {
+                  "type": "separator",
+                  "style": "short",
+                  "width": 36
+                },
+                {
+                  "type": "text",
+                  "field": "fact_weather",
+                  "font": "noto_serif_light",
+                  "font_size": 10,
+                  "line_height": 15,
+                  "align": "left",
+                  "max_lines": 2
+                }
+              ]
+            },
+            {
+              "type": "column",
+              "width": 200,
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "template": "{poem_title} {poem_author}",
+                  "font": "noto_serif_bold",
+                  "font_size": 13,
+                  "line_height": 16,
+                  "align": "center",
+                  "max_lines": 1
+                },
+                {
+                  "type": "repeat",
+                  "field": "poem_lines",
+                  "limit": 4,
+                  "gap": 3,
+                  "item": {
+                    "type": "text",
+                    "field": "_value",
+                    "font": "noto_serif_regular",
+                    "font_size": 13,
+                    "line_height": 16,
+                    "align": "center",
+                    "max_lines": 1
+                  }
+                },
+                {
+                  "type": "separator",
+                  "style": "short",
+                  "width": 44
+                },
+                {
+                  "type": "text",
+                  "field": "lore_era",
+                  "font": "noto_serif_light",
+                  "font_size": 13,
+                  "line_height": 16,
+                  "align": "center",
+                  "max_lines": 1
+                },
+                {
+                  "type": "text",
+                  "field": "lore_title",
+                  "font": "noto_serif_bold",
+                  "font_size": 13,
+                  "line_height": 16,
+                  "align": "center",
+                  "max_lines": 1
+                },
+                {
+                  "type": "repeat",
+                  "field": "lore_lines",
+                  "limit": 3,
+                  "gap": 3,
+                  "item": {
+                    "type": "text",
+                    "field": "_value",
+                    "font": "noto_serif_regular",
+                    "font_size": 13,
+                    "line_height": 16,
+                    "align": "center",
+                    "max_lines": 1
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "footer": {
+      "label": "诗笺日课",
+      "attribution_template": "{fact_poem_source}",
+      "dashed": true
+    }
+  },
+  "layout_overrides": {
+    "296x128": {
+      "body": {
+        "type": "column",
+        "padding_x": 6,
+        "padding_y": 2,
+        "justify": "center",
+        "gap": 5,
+        "children": [
+          {
+            "type": "row",
+            "gap": 8,
+            "align": "start",
+            "children": [
+              {
+                "type": "column",
+                "width": 116,
+                "gap": 5,
+                "children": [
+                  {
+                    "type": "big_number",
+                    "field": "fact_time",
+                    "font_size": 16,
+                    "align": "left"
+                  },
+                  {
+                    "type": "text",
+                    "field": "fact_meta",
+                    "font": "noto_serif_light",
+                    "font_size": 10,
+                    "line_height": 15,
+                    "align": "left",
+                    "max_lines": 1
+                  },
+                  {
+                    "type": "text",
+                    "field": "fact_weather",
+                    "font": "noto_serif_light",
+                    "font_size": 10,
+                    "line_height": 15,
+                    "align": "left",
+                    "max_lines": 2
+                  }
+                ]
+              },
+              {
+                "type": "column",
+                "width": 158,
+                "gap": 5,
+                "children": [
+                  {
+                    "type": "text",
+                    "template": "{poem_title} {poem_author}",
+                    "font": "noto_serif_bold",
+                    "font_size": 10,
+                    "line_height": 15,
+                    "align": "center",
+                    "max_lines": 1
+                  },
+                  {
+                    "type": "repeat",
+                    "field": "poem_lines",
+                    "limit": 3,
+                    "gap": 2,
+                    "item": {
+                      "type": "text",
+                      "field": "_value",
+                      "font": "noto_serif_regular",
+                      "font_size": 10,
+                      "line_height": 15,
+                      "align": "center",
+                      "max_lines": 1
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "footer": {
+        "label": "诗笺日课",
+        "attribution_template": "{fact_poem_source}",
+        "dashed": true,
+        "height": 18
+      }
+    },
+    "648x480": {
+      "body": {
+        "type": "column",
+        "padding_x": 30,
+        "padding_y": 10,
+        "justify": "center",
+        "gap": 8,
+        "children": [
+          {
+            "type": "row",
+            "gap": 24,
+            "align": "start",
+            "children": [
+              {
+                "type": "column",
+                "width": 240,
+                "gap": 5,
+                "children": [
+                  {
+                    "type": "text",
+                    "field": "fact_meta",
+                    "font": "noto_serif_light",
+                    "font_size": 12,
+                    "line_height": 17,
+                    "align": "left",
+                    "max_lines": 1
+                  },
+                  {
+                    "type": "big_number",
+                    "field": "fact_time",
+                    "font_size": 40,
+                    "align": "left"
+                  },
+                  {
+                    "type": "text",
+                    "field": "fact_duration",
+                    "font": "noto_serif_light",
+                    "font_size": 12,
+                    "line_height": 17,
+                    "align": "left",
+                    "max_lines": 1
+                  },
+                  {
+                    "type": "separator",
+                    "style": "short",
+                    "width": 60
+                  },
+                  {
+                    "type": "text",
+                    "template": "{fact_poem_title} {fact_poem_author}",
+                    "font": "noto_serif_bold",
+                    "font_size": 14,
+                    "line_height": 19,
+                    "align": "left",
+                    "max_lines": 1
+                  },
+                  {
+                    "type": "repeat",
+                    "field": "fact_lines",
+                    "limit": 4,
+                    "gap": 4,
+                    "item": {
+                      "type": "text",
+                      "field": "_value",
+                      "font": "noto_serif_regular",
+                      "font_size": 12,
+                      "line_height": 17,
+                      "align": "left",
+                      "max_lines": 1
+                    }
+                  },
+                  {
+                    "type": "separator",
+                    "style": "short",
+                    "width": 60
+                  },
+                  {
+                    "type": "text",
+                    "field": "fact_weather",
+                    "font": "noto_serif_light",
+                    "font_size": 12,
+                    "line_height": 17,
+                    "align": "left",
+                    "max_lines": 2
+                  }
+                ]
+              },
+              {
+                "type": "column",
+                "width": 300,
+                "gap": 5,
+                "children": [
+                  {
+                    "type": "text",
+                    "template": "{poem_title} {poem_author}",
+                    "font": "noto_serif_bold",
+                    "font_size": 16,
+                    "line_height": 21,
+                    "align": "center",
+                    "max_lines": 1
+                  },
+                  {
+                    "type": "repeat",
+                    "field": "poem_lines",
+                    "limit": 4,
+                    "gap": 4,
+                    "item": {
+                      "type": "text",
+                      "field": "_value",
+                      "font": "noto_serif_regular",
+                      "font_size": 16,
+                      "line_height": 21,
+                      "align": "center",
+                      "max_lines": 1
+                    }
+                  },
+                  {
+                    "type": "separator",
+                    "style": "short",
+                    "width": 70
+                  },
+                  {
+                    "type": "text",
+                    "field": "lore_era",
+                    "font": "noto_serif_light",
+                    "font_size": 16,
+                    "line_height": 21,
+                    "align": "center",
+                    "max_lines": 1
+                  },
+                  {
+                    "type": "text",
+                    "field": "lore_title",
+                    "font": "noto_serif_bold",
+                    "font_size": 16,
+                    "line_height": 21,
+                    "align": "center",
+                    "max_lines": 1
+                  },
+                  {
+                    "type": "repeat",
+                    "field": "lore_lines",
+                    "limit": 3,
+                    "gap": 4,
+                    "item": {
+                      "type": "text",
+                      "field": "_value",
+                      "font": "noto_serif_regular",
+                      "font_size": 16,
+                      "line_height": 21,
+                      "align": "center",
+                      "max_lines": 1
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "footer": {
+        "label": "诗笺日课",
+        "attribution_template": "{fact_poem_source}",
+        "dashed": true
+      }
+    }
+  }
+}

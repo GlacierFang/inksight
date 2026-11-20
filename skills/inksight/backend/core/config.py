@@ -302,8 +302,13 @@ _load_dotenv(_Path(__file__).resolve().parent.parent / ".env")
 # dotenv 默认不覆盖系统已有环境变量，这里强制设置为 certifi 最新证书包
 try:
     import certifi as _certifi
-    _os.environ["SSL_CERT_FILE"] = _certifi.where()
-    _os.environ["REQUESTS_CA_BUNDLE"] = _certifi.where()
+    _existing_ssl = _os.environ.get("SSL_CERT_FILE")
+    if _existing_ssl:
+        # 已有 CA bundle（如出口代理 MITM 信任链）时保持原值：覆盖成 certifi 会导致代理链路验签失败
+        _os.environ.setdefault("REQUESTS_CA_BUNDLE", _existing_ssl)
+    else:
+        _os.environ["SSL_CERT_FILE"] = _certifi.where()
+        _os.environ["REQUESTS_CA_BUNDLE"] = _certifi.where()
 except ImportError:
     pass
 
@@ -371,24 +376,24 @@ DEFAULT_CITY = "杭州"
 DEFAULT_LLM_PROVIDER = "minimax"
 DEFAULT_LLM_MODEL = "MiniMax-M3"
 DEFAULT_IMAGE_PROVIDER = "minimax"
-DEFAULT_IMAGE_MODEL = "image-01"
+DEFAULT_IMAGE_MODEL = "MiniMax-H3-Image"
 DEFAULT_LANGUAGE = "zh"
 DEFAULT_MODE_LANGUAGE = ""  # empty = follow webapp language setting
 DEFAULT_CONTENT_TONE = "neutral"
-DEFAULT_MODES = ["DAILY"]
+# 2026-11-17：系统默认能力下线，默认模式改为自研「每日总览」。
+DEFAULT_MODES = ["CUSTOM_DAYOVERVIEW"]
 DEFAULT_REFRESH_STRATEGY = "random"
 DEFAULT_REFRESH_INTERVAL = 60  # minutes
 
 # 硬编码模式列表仅作为 fallback，运行时应通过 mode_registry 获取
+# 2026-11-17：系统默认能力（核心/更多）整体下线，这里只列保留的自研模式。
 _BUILTIN_MODE_IDS = {
-    "STOIC", "ROAST", "ZEN", "DAILY",
-    "BRIEFING", "ARTWALL", "RECIPE", "FITNESS",
-    "POETRY", "COUNTDOWN",
-    "ALMANAC", "LETTER", "THISDAY", "RIDDLE",
-    "QUESTION", "BIAS", "STORY", "LIFEBAR", "CHALLENGE",
-    "HABIT", "MEMO", "CALENDAR", "TIMETABLE",
-    "WORD_OF_THE_DAY", "VOCAB_REVIEW",
-    "MY_ADAPTIVE", "MY_QUOTE",
+    "CUSTOM_YEAR_PROGRESS", "CUSTOM_PRINCE", "CUSTOM_ANT",
+    "CUSTOM_TANGPING", "CUSTOM_PI_STATUS", "CUSTOM_SUN_MOON",
+    "CUSTOM_TIANGONG", "CUSTOM_DANQING", "CUSTOM_HAICUOTU",
+    "CUSTOM_DONGJING", "CUSTOM_EWORLD", "CUSTOM_DAYOVERVIEW",
+    "CUSTOM_POETRY_DAY", "CUSTOM_DAILY_TRIO", "CUSTOM_WINDOW",
+    "CUSTOM_SOLAR_TERMS",
 }
 
 

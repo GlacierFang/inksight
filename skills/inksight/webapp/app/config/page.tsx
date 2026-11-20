@@ -483,14 +483,6 @@ interface DeviceStats {
 
 type RuntimeMode = "active" | "interval" | "unknown";
 
-type AlbumPhoto = {
-  id: string;
-  filename: string;
-  url: string;
-};
-
-const ALBUM_MAX_PHOTOS = 7;
-
 function ConfigPageInner() {
   const pathname = usePathname();
   const locale = localeFromPathname(pathname || "/");
@@ -820,19 +812,6 @@ function ConfigPageInner() {
   const [previewLlmStatus, setPreviewLlmStatus] = useState<string | null>(null);
   const [previewConfirm, setPreviewConfirm] = useState<PendingPreviewConfirm | null>(null);
 
-  // 自适应图片（MY_ADAPTIVE）多图上传弹窗
-  const adaptiveFileInputRef = useRef<HTMLInputElement | null>(null);
-  const [adaptiveModal, setAdaptiveModal] = useState<{ action: "preview" | "apply" } | null>(null);
-  const [adaptiveImageUrls, setAdaptiveImageUrls] = useState<string[]>([]);
-  const [adaptiveUploading2, setAdaptiveUploading2] = useState(false);
-
-  // 相册（CUSTOM_ALBUM）照片管理弹窗：照片存在服务端，按账号归档（设备 owner 的账号相册）
-  const albumFileInputRef = useRef<HTMLInputElement | null>(null);
-  const [albumModal, setAlbumModal] = useState<{ action: "preview" | "apply" } | null>(null);
-  const [albumPhotos, setAlbumPhotos] = useState<AlbumPhoto[]>([]);
-  const [albumUploading, setAlbumUploading] = useState(false);
-  const [albumLoading, setAlbumLoading] = useState(false);
-
   // 参数弹窗（与 /preview 页面保持一致）
   const [paramModal, setParamModal] = useState<ParamModalState | null>(null);
   const [quoteDraft, setQuoteDraft] = useState("");
@@ -925,98 +904,7 @@ function ConfigPageInner() {
     if (nextUrl) previewObjectUrlRef.current = nextUrl;
     setPreviewImg(nextUrl);
   }, []);
-
-  const uploadLocalImage = useCallback(async (file: File): Promise<string> => {
-    const fd = new FormData();
-    fd.append("file", file);
-    const up = await fetch(apiUrl("/api/uploads"), { method: "POST", body: fd });
-    if (!up.ok) {
-      const err = await up.text().catch(() => "");
-      throw new Error(err || `upload failed: ${up.status}`);
-    }
-    const data = (await up.json()) as { url?: string };
-    if (!data.url) throw new Error("upload failed: missing url");
-    return data.url;
-  }, []);
-
-  // ---- 相册（CUSTOM_ALBUM）照片管理 ----
-  // 照片按账号存在服务端 runtime_album/U<user_id>/；设备作用域下服务端会解析到这台设备 owner 的账号，
   // 所以这里用设备路由，前端只负责上传/删除/预览。
-  const albumApiBase = useCallback(() => {
-    if (!mac) return "";
-    return `/api/album/${encodeURIComponent(mac)}`;
-  }, [mac]);
-
-  const loadAlbumPhotos = useCallback(async () => {
-    const base = albumApiBase();
-    if (!base) {
-      setAlbumPhotos([]);
-      return;
-    }
-    setAlbumLoading(true);
-    try {
-      const res = await fetch(apiUrl(`${base}/photos`), { headers: authHeaders() });
-      if (!res.ok) throw new Error(`list failed: ${res.status}`);
-      const data = (await res.json()) as { photos?: AlbumPhoto[] };
-      setAlbumPhotos(Array.isArray(data.photos) ? data.photos : []);
-    } catch (err) {
-      console.error("[CONFIG] Failed to load album photos:", err);
-      setAlbumPhotos([]);
-    } finally {
-      setAlbumLoading(false);
-    }
-  }, [albumApiBase]);
-
-  const uploadAlbumPhotos = useCallback(async (files: FileList | null) => {
-    const base = albumApiBase();
-    if (!base || !files || files.length === 0) return;
-    setAlbumUploading(true);
-    try {
-      for (const file of Array.from(files)) {
-        if (albumPhotos.length + Array.from(files).indexOf(file) >= ALBUM_MAX_PHOTOS) {
-          showToast(`最多 ${ALBUM_MAX_PHOTOS} 张照片`, "error");
-          break;
-        }
-        const fd = new FormData();
-        fd.append("file", file);
-        const res = await fetch(apiUrl(`${base}/photos`), {
-          method: "POST",
-          body: fd,
-          headers: authHeaders(),
-        });
-        if (!res.ok) {
-          const msg = await res.text().catch(() => "");
-          throw new Error(msg || `upload failed: ${res.status}`);
-        }
-      }
-      await loadAlbumPhotos();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "上传失败";
-      showToast(msg, "error");
-    } finally {
-      setAlbumUploading(false);
-    }
-  }, [albumApiBase, albumPhotos.length, loadAlbumPhotos, showToast]);
-
-  const deleteAlbumPhoto = useCallback(async (photoId: string) => {
-    const base = albumApiBase();
-    if (!base) return;
-    try {
-      const res = await fetch(apiUrl(`${base}/photos/${encodeURIComponent(photoId)}`), {
-        method: "DELETE",
-        headers: authHeaders(),
-      });
-      if (!res.ok) {
-        const msg = await res.text().catch(() => "");
-        throw new Error(msg || `delete failed: ${res.status}`);
-      }
-      await loadAlbumPhotos();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "删除失败";
-      showToast(msg, "error");
-    }
-  }, [albumApiBase, loadAlbumPhotos, showToast]);
-
   useEffect(() => {
     return () => {
       if (previewObjectUrlRef.current) {
@@ -1207,15 +1095,6 @@ function ConfigPageInner() {
         setIsFocusListening(Boolean(cfg.is_focus_listening ?? Number(cfg.focus_listening || 0) === 1));
         setAlwaysActive(Boolean(cfg.is_always_active ?? Number(cfg.always_active || 0) === 1));
         const loadedOverrides = ((cfg.mode_overrides || cfg.modeOverrides || {}) as Record<string, ModeOverride>);
-        const adaptiveOv = loadedOverrides?.MY_ADAPTIVE;
-        if (adaptiveOv) {
-          const urls = adaptiveOv.image_urls;
-          if (Array.isArray(urls) && urls.length > 0) {
-            setAdaptiveImageUrls(urls.filter((u: unknown) => typeof u === "string" && (u as string).trim()) as string[]);
-          } else if (typeof adaptiveOv.image_url === "string" && (adaptiveOv.image_url as string).trim()) {
-            setAdaptiveImageUrls([adaptiveOv.image_url as string]);
-          }
-        }
         const memoFromOverride = loadedOverrides?.MEMO?.memo_text;
         if (typeof memoFromOverride === "string" && memoFromOverride.trim()) {
           setMemoText(memoFromOverride);
@@ -2047,15 +1926,6 @@ function ConfigPageInner() {
   const handleModePreview = (m: string) => {
     const modeId = (m || "").toUpperCase();
     setPreviewMode(modeId);
-    if (modeId === "MY_ADAPTIVE") {
-      setAdaptiveModal({ action: "preview" });
-      return;
-    }
-    if (modeId === "CUSTOM_ALBUM") {
-      setAlbumModal({ action: "preview" });
-      void loadAlbumPhotos();
-      return;
-    }
     if (requiresParamModal(modeId)) {
       openParamModal(modeId, "preview");
       return;
@@ -2066,15 +1936,6 @@ function ConfigPageInner() {
 
   const handleModeApply = async (m: string) => {
     const modeId = (m || "").toUpperCase();
-    if (modeId === "MY_ADAPTIVE" && !selectedModes.has(modeId)) {
-      setAdaptiveModal({ action: "apply" });
-      return;
-    }
-    if (modeId === "CUSTOM_ALBUM" && !selectedModes.has(modeId)) {
-      setAlbumModal({ action: "apply" });
-      void loadAlbumPhotos();
-      return;
-    }
     if (requiresParamModal(modeId) && !selectedModes.has(modeId)) {
       // only require params when adding to carousel
       openParamModal(modeId, "apply");
@@ -2334,14 +2195,6 @@ function ConfigPageInner() {
     return map;
   }, [catalogItems, false]);
 
-  const coreModes = useMemo(
-    () => catalogItems.filter((m) => m.category === "core").map((m) => m.mode_id.toUpperCase()),
-    [catalogItems],
-  );
-  const extraModes = useMemo(
-    () => catalogItems.filter((m) => m.category === "more").map((m) => m.mode_id.toUpperCase()),
-    [catalogItems],
-  );
   const customModes = useMemo(
     () => catalogItems.filter((m) => m.category === "custom").map((m) => m.mode_id.toUpperCase()),
     [catalogItems],
@@ -2396,44 +2249,6 @@ function ConfigPageInner() {
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-10">
-      {/* Hidden file picker for MY_ADAPTIVE multi-image upload */}
-      <input
-        ref={adaptiveFileInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={async (e) => {
-          const f = e.target.files?.[0] || null;
-          e.currentTarget.value = "";
-          if (!f) return;
-          setAdaptiveUploading2(true);
-          try {
-            const url = await uploadLocalImage(f);
-            setAdaptiveImageUrls((prev) => {
-              if (prev.length >= 6) return prev;
-              return [...prev, url];
-            });
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : "请选择一张本地图片";
-            showToast(msg, "error");
-          } finally {
-            setAdaptiveUploading2(false);
-          }
-        }}
-      />
-      {/* Hidden file picker for album (CUSTOM_ALBUM) photo upload */}
-      <input
-        ref={albumFileInputRef}
-        type="file"
-        accept="image/*"
-        multiple
-        className="hidden"
-        onChange={async (e) => {
-          const files = e.target.files;
-          e.currentTarget.value = "";
-          await uploadAlbumPhotos(files);
-        }}
-      />
       {/* Header */}
       <div className="mb-8">
         <h1 className="font-serif text-3xl font-bold text-ink mb-2">{"设备配置"}</h1>
@@ -2732,8 +2547,6 @@ function ConfigPageInner() {
                     customModeMeta={customModeMeta}
                     deletableCustomModes={deletableCustomModes}
                     modeMeta={modeMeta}
-                    coreModes={coreModes}
-                    extraModes={extraModes}
                     handleModePreview={handleModePreview}
                     handleModeApply={handleModeApply}
                     handleCustomModeDelete={handleCustomModeDelete}
@@ -3264,174 +3077,6 @@ function ConfigPageInner() {
       ) : null}
 
       {/* 邀请码输入弹窗 */}
-
-      {/* 相框多图管理弹窗 */}
-      {adaptiveModal ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setAdaptiveModal(null)} />
-          <div className="relative w-[min(520px,calc(100vw-32px))] rounded-sm border border-ink/15 bg-white shadow-xl">
-            <div className="px-4 py-3 border-b border-ink/10 flex items-center justify-between">
-              <div className="text-sm font-semibold text-ink">
-                {"相框图片管理"}
-              </div>
-              <button className="text-ink-light hover:text-ink" onClick={() => setAdaptiveModal(null)}>
-                ✕
-              </button>
-            </div>
-            <div className="px-4 py-4 space-y-3">
-              <div className="text-xs text-ink-light">
-                {"上传至多 6 张图片，设备每次刷新时循环显示下一张。"}
-              </div>
-              <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                {"预览或下发只会临时生效；如需下次打开仍保留这些图片，请点击页面上的“保存到设备”。"}
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                {adaptiveImageUrls.map((url, i) => (
-                  <div key={`${url}-${i}`} className="relative group aspect-[4/3] rounded border border-ink/15 overflow-hidden bg-paper-dark">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={uploadSrc(url)} alt={`photo ${i + 1}`} className="w-full h-full object-cover" />
-                    <button
-                      className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={() => setAdaptiveImageUrls((prev) => prev.filter((_, idx) => idx !== i))}
-                      title={"移除"}
-                    >
-                      ✕
-                    </button>
-                    <div className="absolute bottom-0 left-0 right-0 bg-black/40 text-white text-[10px] text-center py-0.5">
-                      {i + 1}
-                    </div>
-                  </div>
-                ))}
-                {adaptiveImageUrls.length < 6 && (
-                  <button
-                    className="aspect-[4/3] rounded border-2 border-dashed border-ink/20 flex flex-col items-center justify-center text-ink-light hover:text-ink hover:border-ink/40 transition-colors"
-                    onClick={() => adaptiveFileInputRef.current?.click()}
-                    disabled={adaptiveUploading2}
-                  >
-                    {adaptiveUploading2 ? (
-                      <Loader2 size={20} className="animate-spin" />
-                    ) : (
-                      <>
-                        <span className="text-xl leading-none">+</span>
-                        <span className="text-[10px] mt-0.5">{"添加图片"}</span>
-                      </>
-                    )}
-                  </button>
-                )}
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <Button
-                  variant="outline"
-                  onClick={() => setAdaptiveModal(null)}
-                >
-                  {"取消"}
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={adaptiveImageUrls.length === 0 || previewLoading}
-                  onClick={async () => {
-                    const action = adaptiveModal.action;
-                    const override: ModeOverride = { image_urls: [...adaptiveImageUrls], image_url: adaptiveImageUrls[0] || "" };
-                    setAdaptiveModal(null);
-                    await commitModalAction("MY_ADAPTIVE", action, override);
-                  }}
-                >
-                  {adaptiveModal.action === "apply"
-                    ? "确认并加入轮播"
-                    : "确认并预览"}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {/* 相册照片管理弹窗 */}
-      {albumModal ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setAlbumModal(null)} />
-          <div className="relative w-[min(520px,calc(100vw-32px))] rounded-sm border border-ink/15 bg-white shadow-xl">
-            <div className="px-4 py-3 border-b border-ink/10 flex items-center justify-between">
-              <div className="text-sm font-semibold text-ink">
-                {"相册照片管理"}
-              </div>
-              <button className="text-ink-light hover:text-ink" onClick={() => setAlbumModal(null)}>
-                ✕
-              </button>
-            </div>
-            <div className="px-4 py-4 space-y-3">
-              <div className="text-xs text-ink-light">
-                {`上传至多 ${ALBUM_MAX_PHOTOS} 张照片，设备每天轮播显示一张，同一天始终显示同一张。`}
-              </div>
-              <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                {"照片已保存在服务器；把相册加入轮播后，点击页面上的“保存到设备”即可生效。"}
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                {albumPhotos.map((photo, i) => (
-                  <div key={photo.id} className="relative group aspect-[4/3] rounded border border-ink/15 overflow-hidden bg-paper-dark">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={apiUrl(`/api/album/${encodeURIComponent(mac || "")}/photos/${encodeURIComponent(photo.id)}/raw`)}
-                      alt={photo.filename || `photo ${i + 1}`}
-                      className="w-full h-full object-cover"
-                    />
-                    <button
-                      className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={() => deleteAlbumPhoto(photo.id)}
-                      title={"删除"}
-                    >
-                      ✕
-                    </button>
-                    <div className="absolute bottom-0 left-0 right-0 bg-black/40 text-white text-[10px] text-center py-0.5">
-                      {i + 1}
-                    </div>
-                  </div>
-                ))}
-                {albumPhotos.length < ALBUM_MAX_PHOTOS && (
-                  <button
-                    className="aspect-[4/3] rounded border-2 border-dashed border-ink/20 flex flex-col items-center justify-center text-ink-light hover:text-ink hover:border-ink/40 transition-colors"
-                    onClick={() => albumFileInputRef.current?.click()}
-                    disabled={albumUploading}
-                  >
-                    {albumUploading ? (
-                      <Loader2 size={20} className="animate-spin" />
-                    ) : (
-                      <>
-                        <span className="text-xl leading-none">+</span>
-                        <span className="text-[10px] mt-0.5">{"添加照片"}</span>
-                      </>
-                    )}
-                  </button>
-                )}
-              </div>
-              <div className="text-xs text-ink-light">
-                {albumLoading ? "加载中…" : `已上传 ${albumPhotos.length} / ${ALBUM_MAX_PHOTOS} 张`}
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <Button
-                  variant="outline"
-                  onClick={() => setAlbumModal(null)}
-                >
-                  {"取消"}
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={albumPhotos.length === 0 || previewLoading}
-                  onClick={async () => {
-                    const action = albumModal.action;
-                    setAlbumModal(null);
-                    await commitModalAction("CUSTOM_ALBUM", action);
-                  }}
-                >
-                  {albumModal.action === "apply"
-                    ? "确认并加入轮播"
-                    : "确认并预览"}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       {/* 参数弹窗：与 /preview 页面一致（预览/加入轮播都会触发） */}
       {paramModal ? (

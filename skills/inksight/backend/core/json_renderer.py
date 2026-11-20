@@ -2382,6 +2382,7 @@ def _render_forecast_cards(ctx: RenderContext, block: dict) -> None:
     temp_range_field = block.get("temp_range_field", "temp_range")
     show_desc = bool(block.get("show_desc", True))
     show_temp = bool(block.get("show_temp", True))
+    show_date = bool(block.get("show_date", True))
     margin_x = block.get("margin_x")
     if margin_x is not None:
         margin_x = int(margin_x * scale)
@@ -2449,7 +2450,7 @@ def _render_forecast_cards(ctx: RenderContext, block: dict) -> None:
             ctx.draw.text((x_center - dw / 2, y), day, fill=EINK_FG, font=font_day)
             y += (bbox[3] - bbox[1]) + day_gap
 
-        if date:
+        if date and show_date:
             bbox = font_date.getbbox(date)
             tw = bbox[2] - bbox[0]
             th = bbox[3] - bbox[1]

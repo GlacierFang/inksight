@@ -2,7 +2,7 @@
 
 产出：
 - 图鉴条目：名 / 异名 / 尺寸 / 产地 / 特征 / 题识，由 LLM 当日现编（生灵皆虚构）。
-- 图：MiniMax image-01 按屏上四色盘（白/黑/金黄/朱红）画成卡通版画，
+- 图：MiniMax H3 生图按屏上四色盘（白/黑/金黄/朱红）画成卡通版画，
   下载后裁白边 + 保线下采样，按显示尺寸 1:1 存本地。
 
 水怎么画（2026-10-29 冰河大人定的路子）：
@@ -47,8 +47,8 @@ except Exception:  # pragma: no cover - dotenv 缺失不影响主流程
     pass
 
 MINIMAX_BASE_URL = "https://api.minimaxi.com/v1"
-MINIMAX_IMAGE_API_URL = f"{MINIMAX_BASE_URL}/image_generation"
-IMAGE_MODEL = "image-01"
+MINIMAX_IMAGE_API_URL = f"{MINIMAX_BASE_URL}/images/generations"
+IMAGE_MODEL = "MiniMax-H3-Image"
 IMAGE_ASPECT = "16:9"
 
 # 画心在屏上的显示尺寸，必须与模式 JSON 里 image 块的 width/height 一致。
@@ -75,7 +75,7 @@ RECENT_KEEP = 7
 ENTRY_KEYS = ("名", "异名", "尺寸", "产地", "特征", "题识", "画")
 
 # 展签用的 LLM：按可靠性排序。第一个空输出/解析失败就换下一个。
-LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M2.7")
+LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M3")
 
 # --------------------------------------------------------------------------
 # 提示词
@@ -425,10 +425,11 @@ async def _generate_art(
             "model": IMAGE_MODEL,
             "prompt": prompt,
             "aspect_ratio": IMAGE_ASPECT,
+            "area": "1K",
             "n": 1,
             "response_format": "url",
-            "prompt_optimizer": False,
-            "aigc_watermark": False,
+            # 新端点没有 prompt_optimizer/aigc_watermark；disable_prompt_enhanced 反向映射旧开关
+            "disable_prompt_enhanced": True,
         }
         try:
             async with httpx.AsyncClient(timeout=180.0) as client:
@@ -445,12 +446,26 @@ async def _generate_art(
             reasons.append("生图返回不是 JSON")
             break
         base_resp = data.get("base_resp") or {}
-        if base_resp.get("status_code") != 0:
+        # 新端点成功时响应里没有 base_resp 字段：只有存在且非 0 才是失败
+        if base_resp.get("status_code") not in (0, None):
             reasons.append(f"生图失败: {base_resp.get('status_msg')}")
             break
-        urls = (data.get("data") or {}).get("image_urls") or []
+        # 新端点 data 是数组：业务失败是 HTTP 200 + item.error，图片在 item.url
+        items = data.get("data") or []
+        if not isinstance(items, list):
+            items = []
+        urls = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("error"):
+                reasons.append("生图失败: " + str(item["error"].get("message") or item["error"].get("code")))
+                break
+            if item.get("url"):
+                urls.append(item["url"])
         if not urls:
-            reasons.append("生图没给图")
+            if not reasons:
+                reasons.append("生图没给图")
             break
 
         tmp = ART_DIR / (dest.stem + "_raw.png")
@@ -594,13 +609,49 @@ async def generate_today_card(force: bool = False, **kwargs) -> dict | None:
     return None
 
 
+
+def _art_url(record: dict, date_key: str) -> str:
+    """那天那张素材图：优先用记下的 art_url，旧记录按命名规则找回。"""
+    from .history_day import art_url_or_pattern
+
+    return art_url_or_pattern(record, date_key, "haicuotu", "beast_{date}_{index:03d}.png")
+
+
+def _history_content(record: dict, fallback: dict | None) -> dict:
+    """历史日的整屏内容：只取记到过的字段，缺的如实标「历史缺失」。"""
+    from .history_day import MISSING
+
+    content = {
+        "index_label": f"第 {record.get('index', 1)} 则",
+        "name": str(record.get("名") or MISSING),
+        "alias": str(record.get("异名") or MISSING),
+        "size": str(record.get("尺寸") or MISSING),
+        "origin": str(record.get("产地") or MISSING),
+        "feature": str(record.get("特征") or MISSING),
+        "colophon": str(record.get("题识") or MISSING),
+        "art_url": _art_url(record, date_key),
+        "has_image": "yes" if _art_url(record, date_key) else "no",
+    }
+    content["credit"] = content["colophon"]
+    if isinstance(fallback, dict):
+        for key, value in fallback.items():
+            if not content.get(key):
+                content[key] = value
+    return content
+
+
 async def build_haicuotu_content(fallback: dict | None = None, **kwargs) -> dict:
-    date_key = datetime.now().strftime("%Y-%m-%d")
+    from .history_day import resolve_day
+
+    date_key = resolve_day(kwargs)
     state = _read_state()
     days = state.get("days")
     today = days.get(date_key) if isinstance(days, dict) else None
 
+    # 历史日：只读已有记录。绝不补生成 —— 那天没生成过就是没生成过。
     if not isinstance(today, dict) or not today.get("名"):
+        if date_key != datetime.now().strftime("%Y-%m-%d"):
+            return _history_content(today or {}, fallback)
         today = await generate_today_card(**kwargs)
 
     today = today or {}
