@@ -146,7 +146,7 @@ async def generate_and_render(
         )
 
     img, content, fresh = await get_or_generate(
-        persona, fingerprint, day, screen_w, screen_h, _generate
+        persona, fingerprint, day, screen_w, screen_h, _generate, colors=colors
     )
     if img is None:
         raise RuntimeError(f"每日内容不可用: {persona}")
