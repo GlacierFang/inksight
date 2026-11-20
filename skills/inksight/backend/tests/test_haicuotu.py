@@ -86,12 +86,17 @@ def test_provider_is_wired():
 
 
 def test_art_display_matches_mode_json():
-    """图心显示尺寸必须与模式 JSON 的 image 块一致，否则渲染器会二次缩放。"""
+    """图块必须与 provider 的 ART_DISPLAY **同宽**，且不高于它。
+
+    同宽 → 渲染器 fit=cover 的缩放系数恒为 1.0，只裁切、不重采样，细墨线不糊。
+    高度可以更矮：正文区要腾地方给字段，画面按对齐方式裁一刀。
+    """
     from core.haicuotu import ART_DISPLAY
 
     body = _mode()["layout"]["body"]
     img = body[0]["conditions"][0]["children"][0]
-    assert (img["width"], img["height"]) == ART_DISPLAY
+    assert img["width"] == ART_DISPLAY[0]
+    assert img["height"] <= ART_DISPLAY[1]
 
 
 # ── 条目解析 ────────────────────────────────────────────────

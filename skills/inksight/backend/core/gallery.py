@@ -50,8 +50,10 @@ _MODES: dict[str, dict] = {
         "fields": [("画名", "画名"), ("作者", "作者"), ("朝代", "朝代"),
                    ("题材", "题材"), ("题跋", "题跋"), ("印文", "印文")],
     },
+    # 大宋梦影：2026-11-17 下线。往期存档保留，不再每天出图。
     "CUSTOM_SONGMENG": {
         "name": "大宋梦影", "form": "grid", "state": "songmeng", "shape": "list",
+        "daily": False,
         "rows": "recent", "title": "scene", "text": "colophon", "meta": "",
         "fields": [("scene", "场景"), ("colophon", "题记")],
     },
@@ -75,8 +77,10 @@ _MODES: dict[str, dict] = {
                    ("state_line", "状态"), ("trip_line", "行程"),
                    ("signature", "签名")],
     },
+    # 狸行记：2026-11-17 下线。往期存档保留，不再每天出图。
     "CUSTOM_MIAOLI": {
         "name": "狸行记", "form": "grid", "state": "miaoli", "shape": "map",
+        "daily": False,
         "title": "title", "text": "scene", "meta": "",
         "fields": [("title", "标题"), ("scene", "画面"), ("signature", "签名")],
     },
@@ -84,6 +88,8 @@ _MODES: dict[str, dict] = {
         "name": "小景", "form": "grid", "state": "xiaojing", "shape": "map",
         # 一天四张（晨/昼/暮/夜）：一天出多张图，条目按「日期+时段」展开。
         "multi_phase": True,
+        # 小景：2026-11-17 下线。往期存档保留，不再每天出图。
+        "daily": False,
         "title": "phase_label", "text": "phase_label", "meta": "",
         "fields": [("phase_label", "时段")],
     },
@@ -93,8 +99,10 @@ _MODES: dict[str, dict] = {
         "title": "city_name", "text": "weather_text", "meta": "",
         "fields": [("city_name", "城市"), ("weather_text", "天气")],
     },
+    # 透屏：2026-11-17 下线。往期存档保留，不再每天出图。
     "CUSTOM_THROUGH": {
         "name": "透屏", "form": "grid", "state": "through", "shape": "map",
+        "daily": False,
         "title": "silkscreen", "text": "scene", "meta": "",
         "fields": [("silkscreen", "丝印"), ("scene", "所见")],
     },
@@ -104,7 +112,13 @@ _MODES: dict[str, dict] = {
 def modes() -> list[dict]:
     """画廊收录的模式清单（前端据此排 tab）。"""
     return [
-        {"mode_id": mid, "name": spec["name"], "form": spec["form"]}
+        {
+            "mode_id": mid,
+            "name": spec["name"],
+            "form": spec["form"],
+            # daily=False：模式已下线，只保留往期存档，不再每天出图。
+            "daily": spec.get("daily", True),
+        }
         for mid, spec in _MODES.items()
     ]
 

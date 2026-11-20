@@ -2,7 +2,7 @@
 
 产出：
 - 场景 / 题记 / 画面：由 LLM 当日现编（梦影即虚构，不必对得上史实）。
-- 图：MiniMax image-01 按屏上四色盘（白/黑/金黄/朱红）画成卡通版画，
+- 图：MiniMax H3 生图按屏上四色盘（白/黑/金黄/朱红）画成卡通版画，
   下载后裁白边 + 保线下采样，按显示尺寸 1:1 存本地。
 
 为什么走卡通：
@@ -45,8 +45,8 @@ except Exception:  # pragma: no cover - dotenv 缺失不影响主流程
     pass
 
 MINIMAX_BASE_URL = "https://api.minimaxi.com/v1"
-MINIMAX_IMAGE_API_URL = f"{MINIMAX_BASE_URL}/image_generation"
-IMAGE_MODEL = "image-01"
+MINIMAX_IMAGE_API_URL = f"{MINIMAX_BASE_URL}/images/generations"
+IMAGE_MODEL = "MiniMax-H3-Image"
 IMAGE_ASPECT = "16:9"
 
 # 画心在屏上的显示尺寸，必须与模式 JSON 里 image 块的 width/height 一致。
@@ -59,7 +59,7 @@ RECENT_KEEP = 7
 DREAM_KEYS = ("场景", "题记", "画面")
 
 # 展签用的 LLM：按可靠性排序。第一个空输出/解析失败就换下一个。
-LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M2.7")
+LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M3")
 
 # --------------------------------------------------------------------------
 # 提示词
@@ -333,10 +333,11 @@ async def _generate_image(scene: str, dest: Path, **kwargs) -> tuple[bool, str]:
             "model": IMAGE_MODEL,
             "prompt": prompt,
             "aspect_ratio": IMAGE_ASPECT,
+            "area": "1K",
             "n": 1,
             "response_format": "url",
-            "prompt_optimizer": False,
-            "aigc_watermark": False,
+            # 新端点没有 prompt_optimizer/aigc_watermark；disable_prompt_enhanced 反向映射旧开关
+            "disable_prompt_enhanced": True,
         }
         try:
             async with httpx.AsyncClient(timeout=180.0) as client:
@@ -353,12 +354,26 @@ async def _generate_image(scene: str, dest: Path, **kwargs) -> tuple[bool, str]:
             reasons.append("生图返回不是 JSON")
             break
         base_resp = data.get("base_resp") or {}
-        if base_resp.get("status_code") != 0:
+        # 新端点成功时响应里没有 base_resp 字段：只有存在且非 0 才是失败
+        if base_resp.get("status_code") not in (0, None):
             reasons.append(f"生图失败: {base_resp.get('status_msg')}")
             break
-        urls = (data.get("data") or {}).get("image_urls") or []
+        # 新端点 data 是数组：业务失败是 HTTP 200 + item.error，图片在 item.url
+        items = data.get("data") or []
+        if not isinstance(items, list):
+            items = []
+        urls = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("error"):
+                reasons.append("生图失败: " + str(item["error"].get("message") or item["error"].get("code")))
+                break
+            if item.get("url"):
+                urls.append(item["url"])
         if not urls:
-            reasons.append("生图没给图")
+            if not reasons:
+                reasons.append("生图没给图")
             break
 
         tmp = ART_DIR / (dest.stem + "_raw.png")
@@ -389,24 +404,8 @@ async def _generate_image(scene: str, dest: Path, **kwargs) -> tuple[bool, str]:
 
 
 def _cleanup_art(date_key: str) -> None:
-    try:
-        today = datetime.strptime(date_key, "%Y-%m-%d")
-    except ValueError:
-        return
-    keep = {
-        today.strftime("dream_%Y%m%d.png"),
-        (today - timedelta(days=1)).strftime("dream_%Y%m%d.png"),
-    }
-    try:
-        for path in ART_DIR.glob("dream_*.png"):
-            if path.name in keep:
-                continue
-            try:
-                path.unlink()
-            except OSError:
-                continue
-    except OSError:
-        pass
+    """不清理了：往期梦景永久保留（2026-10-29 起），理由同天工阁。"""
+    return
 
 
 def _local_art_exists(url: str) -> bool:
@@ -498,8 +497,15 @@ async def _generate_once(date_key: str, force: bool, **kwargs) -> dict | None:
         }
         state["today"] = card
         state["date"] = date_key
-        recent.append({"date": date_key, "scene": card["scene"], "colophon": card["colophon"]})
-        state["recent"] = recent[-RECENT_KEEP:]
+        recent = [r for r in recent if r.get("date") != date_key]
+        recent.append({
+            "date": date_key,
+            "scene": card["scene"],
+            "colophon": card["colophon"],
+            "art_url": art_url,
+            "has_image": has_image,
+        })
+        state["recent"] = recent  # 全留：画廊要回看往期（prompt 只取最近 RECENT_KEEP 条）
         _write_state(state)
         _cleanup_art(date_key)
         return card
@@ -517,14 +523,52 @@ async def generate_today_card(force: bool = False, **kwargs) -> dict | None:
     return None
 
 
+
+def _art_url(record: dict, date_key: str) -> str:
+    """那天那张素材图：优先用记下的 art_url，旧记录按命名规则找回。"""
+    from .history_day import art_url_or_pattern
+
+    return art_url_or_pattern(record, date_key, "songmeng", "dream_{date}.png")
+
+
+def _history_card(state: dict, date_key: str) -> dict:
+    """往期记录里那一天的那张卡；没有就标「历史缺失」。"""
+    from .history_day import MISSING
+
+    for item in reversed(state.get("recent") or []):
+        if isinstance(item, dict) and str(item.get("date")) == date_key:
+            art_url = _art_url(item, date_key)
+            return {
+                "date": date_key,
+                "scene": str(item.get("scene") or MISSING),
+                "colophon": str(item.get("colophon") or MISSING),
+                "art_url": art_url,
+                "has_image": "yes" if art_url else "no",
+            }
+    return {
+        "date": date_key,
+        "scene": MISSING,
+        "colophon": MISSING,
+        "art_url": "",
+        "has_image": "no",
+    }
+
+
 async def build_songmeng_content(fallback: dict | None = None, **kwargs) -> dict:
-    date_key = datetime.now().strftime("%Y-%m-%d")
+    from .history_day import resolve_day
+
+    date_key = resolve_day(kwargs)
     state = _read_state()
-    _roll_state(state, date_key)
     today = state.get("today")
     card = today if isinstance(today, dict) and today.get("date") == date_key else None
+
+    # 历史日：从往期记录里找那一天。找不到就如实标「历史缺失」，不补生成。
     if card is None:
-        card = await generate_today_card(**kwargs)
+        if date_key != datetime.now().strftime("%Y-%m-%d"):
+            card = _history_card(state, date_key)
+        else:
+            _roll_state(state, date_key)
+            card = await generate_today_card(**kwargs)
 
     card = card or {}
     scene = str(card.get("scene") or "")

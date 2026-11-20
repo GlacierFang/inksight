@@ -2,7 +2,7 @@
 
 产出三块：
 - 展签：器名 / 器形 / 用途 / 纹样 / 款识 / 来历，由 LLM 当日现写。
-- 图：MiniMax image-01 按四色盘出图（指定尺寸 512x768），下载后裁白边 +
+- 图：MiniMax H3 生图按四色盘出图（指定尺寸 512x768），下载后裁白边 +
   保线下采样，按显示尺寸 1:1 存本地。
 - 藏品目录：本地记账，用来防重复（每天的器物门类轮转 + 最近 7 件不重样）。
 
@@ -38,13 +38,15 @@ STATE_FILE = STATE_DIR / "state.json"
 ART_DIR = _BACKEND_DIR / "static" / "tiangong"
 
 MINIMAX_BASE_URL = "https://api.minimaxi.com/v1"
-MINIMAX_IMAGE_API_URL = f"{MINIMAX_BASE_URL}/image_generation"
-IMAGE_MODEL = "image-01"
-# 生图尺寸：image-01 支持 width/height（512-2048，须为 8 的倍数）。
+MINIMAX_IMAGE_API_URL = f"{MINIMAX_BASE_URL}/images/generations"
+IMAGE_MODEL = "MiniMax-H3-Image"
+# 生图尺寸（新端点只认 aspect_ratio，width/height 已废弃）。
 # 注意：两者同时给时 aspect_ratio 优先，width/height 会失效，所以这里不发
 # aspect_ratio。512x768 = 2:3，与屏上图幅 156x234 同比例。
 IMAGE_WIDTH = 512
 IMAGE_HEIGHT = 768
+# 新端点只支持 aspect_ratio（width/height 会失效）
+IMAGE_ASPECT = "2:3"
 
 # 器物图在屏上的显示尺寸，必须与模式 JSON 里 image 块的 width/height 一致。
 # 这样渲染器 fit=contain 时是 1:1，不会再缩一次（也就不会二次稀释细线）。
@@ -63,7 +65,7 @@ ENTRY_KEYS = ("名称", "器形", "用途", "纹样", "款识", "来历", "图")
 
 # 展签用的 LLM：按可靠性排序。第一个空输出/解析失败就换下一个。
 # MiniMax-M3 把思考内联在 content 里且吃满 token 预算，不适合当默认。
-LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M2.7")
+LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M3")
 
 # 四色盘说明：直接告诉生图模型要什么颜色，别让它自己发挥。
 #
@@ -304,13 +306,13 @@ async def _generate_art(entry: dict, dest: Path, **kwargs) -> tuple[bool, str]:
         payload = {
             "model": IMAGE_MODEL,
             "prompt": prompt,
-            # 不发 aspect_ratio：两者同时给时它优先，width/height 会失效
-            "width": IMAGE_WIDTH,
-            "height": IMAGE_HEIGHT,
+            # 新端点只认 aspect_ratio + area，不接受 width/height
+            "aspect_ratio": IMAGE_ASPECT,
+            "area": "1K",
             "n": 1,
             "response_format": "url",
-            "prompt_optimizer": False,
-            "aigc_watermark": False,
+            # 新端点没有 prompt_optimizer/aigc_watermark；disable_prompt_enhanced 反向映射旧开关
+            "disable_prompt_enhanced": True,
         }
         try:
             async with httpx.AsyncClient(timeout=180.0) as client:
@@ -327,12 +329,26 @@ async def _generate_art(entry: dict, dest: Path, **kwargs) -> tuple[bool, str]:
             reasons.append("生图返回不是 JSON")
             break
         base_resp = data.get("base_resp") or {}
-        if base_resp.get("status_code") != 0:
+        # 新端点成功时响应里没有 base_resp 字段：只有存在且非 0 才是失败
+        if base_resp.get("status_code") not in (0, None):
             reasons.append(f"生图失败: {base_resp.get('status_msg')}")
             break
-        urls = (data.get("data") or {}).get("image_urls") or []
+        # 新端点 data 是数组：业务失败是 HTTP 200 + item.error，图片在 item.url
+        items = data.get("data") or []
+        if not isinstance(items, list):
+            items = []
+        urls = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("error"):
+                reasons.append("生图失败: " + str(item["error"].get("message") or item["error"].get("code")))
+                break
+            if item.get("url"):
+                urls.append(item["url"])
         if not urls:
-            reasons.append("生图没给图")
+            if not reasons:
+                reasons.append("生图没给图")
             break
 
         tmp = ART_DIR / (dest.stem + "_raw.png")
@@ -402,37 +418,51 @@ def _seal_path() -> str:
 
 
 def _cleanup_art(date_key: str, keep_days: int = 7) -> None:
-    """清理过期器物图：保留最近 keep_days 天（含今天），其余删掉。
+    """不清理了：往期器物图永久保留（2026-10-29 起）。
 
-    天工阁的图比躺平巴拉大得多，不清理会一直堆在 static/tiangong/ 里。
-    只按文件名里的日期判断，不碰 seal_v1.png 这类固定素材。
+    画廊要回看每天那一张。删掉的图找不回来 —— 同一张图重画也不是同一张。
+    单张几 KB，一年也就十几兆，磁盘放得下。别再改回按天删除。
     """
-    try:
-        today = datetime.strptime(date_key, "%Y-%m-%d")
-    except ValueError:
-        return
-    keep: set[str] = set()
-    for offset in range(max(0, int(keep_days))):
-        keep.add((today - timedelta(days=offset)).strftime("%Y%m%d"))
-    try:
-        for path in ART_DIR.glob("obj_*.png"):
-            parts = path.stem.split("_")
-            if len(parts) < 3:
-                continue
-            stamp = parts[1]
-            if stamp in keep:
-                continue
-            try:
-                path.unlink()
-            except OSError:
-                continue
-    except OSError:
-        pass
+    return
+
+
+
+def _art_url(record: dict, date_key: str) -> str:
+    """那天那张素材图：优先用记下的 art_url，旧记录按命名规则找回。"""
+    from .history_day import art_url_or_pattern
+
+    return art_url_or_pattern(record, date_key, "tiangong", "obj_{date}_{index:03d}.png")
+
+
+def _history_content(record: dict, fallback: dict | None) -> dict:
+    """历史日的整屏内容：只取记到过的字段，缺的如实标「历史缺失」。"""
+    from .history_day import MISSING
+
+    content = {
+        "index_label": f"第 {record.get('index', 1)} 号",
+        "category": str(record.get("category") or MISSING),
+        "name": str(record.get("名称") or MISSING),
+        "shape": str(record.get("器形") or MISSING),
+        "use": str(record.get("用途") or MISSING),
+        "pattern": str(record.get("纹样") or MISSING),
+        "mark": str(record.get("款识") or MISSING),
+        "origin": str(record.get("来历") or MISSING),
+        "art_url": _art_url(record, date_key),
+        "has_image": "yes" if _art_url(record, date_key) else "no",
+        "seal_url": _seal_path(),
+        "collection": "天工阁藏品 · 传世仅此一件",
+    }
+    if isinstance(fallback, dict):
+        for key, value in fallback.items():
+            if not content.get(key):
+                content[key] = value
+    return content
 
 
 async def build_tiangong_content(fallback: dict | None = None, **kwargs) -> dict:
-    now = datetime.now()
-    date_key = now.strftime("%Y-%m-%d")
+    from .history_day import resolve_day
+
+    date_key = resolve_day(kwargs)
     state = _read_state()
 
     days = state.get("days")
@@ -440,7 +470,10 @@ async def build_tiangong_content(fallback: dict | None = None, **kwargs) -> dict
         days = {}
     today = days.get(date_key)
 
+    # 历史日：只读已有记录，不补生成。
     if not isinstance(today, dict) or not today.get("名称"):
+        if date_key != datetime.now().strftime("%Y-%m-%d"):
+            return _history_content(today or {}, fallback)
         catalog = _catalog(state)
         index = len(catalog) + 1
         category = CATEGORIES[(index - 1) % len(CATEGORIES)]
@@ -490,6 +523,7 @@ async def build_tiangong_content(fallback: dict | None = None, **kwargs) -> dict
 
     content = {
         "index_label": f"第 {today.get('index', 1)} 号",
+        "category": str(today.get("category") or ""),
         "name": today.get("名称", ""),
         "shape": today.get("器形", ""),
         "use": today.get("用途", ""),

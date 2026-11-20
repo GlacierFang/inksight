@@ -60,14 +60,9 @@ async def start_scheduler() -> None:
         misfire_grace_time=3600,
     )
 
-    # 周更任务：每周一 03:00 通过 LLM 生成新谜语
-    scheduler.add_job(
-        job_weekly_update,
-        CronTrigger(day_of_week="mon", hour=3, minute=0),
-        id="weekly_update",
-        name="Weekly Static Data Update",
-        misfire_grace_time=7200,
-    )
+    # 周更任务（RIDDLE 谜语库）：2026-11-17 起停用。
+    # RIDDLE 模式已下线，日课三则自己出谜语，这条每周 100 条的 LLM 调用纯属烧 token。
+    # 保留 job_weekly_update 代码，方便以后要恢复谜语库时直接挂回去。
 
     scheduler.start()
     logger.info("[Scheduler] Started with %d jobs", len(scheduler.get_jobs()))

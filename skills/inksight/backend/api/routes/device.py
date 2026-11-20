@@ -8,8 +8,8 @@ import struct
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Cookie, Depends, Header, Query, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, Response
 from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 
 from api.shared import (
@@ -24,6 +24,10 @@ from api.shared import (
 )
 from core.auth import require_admin, require_device_token, require_user, validate_mac_param
 from core.config import SCREEN_HEIGHT, SCREEN_WIDTH
+from core.gallery import entries as gallery_entries
+from core.gallery import screen_png as gallery_screen_png
+from core.gallery import modes as gallery_modes
+from core.gallery import render_wide as gallery_render_wide
 from core.context import calc_battery_pct, extract_location_settings, get_date_context, get_weather
 from core.config_store import (
     consume_claim_token,
@@ -672,6 +676,58 @@ async def content_history(
 ):
     await ensure_web_or_device_access(request, mac, x_device_token, ink_session)
     return {"mac": mac, "history": await get_content_history(mac, limit, offset, mode)}
+
+
+@router.get("/device/{mac}/gallery")
+async def gallery(
+    mac: str,
+    request: Request,
+    mode: Optional[str] = Query(default=None),
+    day: Optional[str] = Query(default=None),
+    x_device_token: Optional[str] = Header(default=None),
+    ink_session: Optional[str] = Cookie(default=None),
+):
+    """画廊：每天那一张图 + 那几句话的往期。
+
+    不带 mode → 收录哪些模式；带 mode → 该模式的条目。
+    wide 形态（电子世界 / 汴京梦华）不落盘，带 day 现算那一天。
+    """
+    await ensure_web_or_device_access(request, mac, x_device_token, ink_session)
+    if not mode:
+        return {"mac": mac, "modes": gallery_modes()}
+
+    mode_id = mode.upper()
+    known = {item["mode_id"] for item in gallery_modes()}
+    if mode_id not in known:
+        raise HTTPException(status_code=404, detail="unknown gallery mode")
+    form = next(item["form"] for item in gallery_modes() if item["mode_id"] == mode_id)
+    if form == "wide":
+        target = day or datetime.now().strftime("%Y-%m-%d")
+        return {
+            "mac": mac,
+            "mode": mode_id,
+            "form": form,
+            "entry": await gallery_render_wide(mode_id, target),
+        }
+    return {"mac": mac, "mode": mode_id, "form": form, "entries": gallery_entries(mode_id)}
+
+
+@router.get("/device/{mac}/gallery/image")
+async def gallery_image(
+    mac: str,
+    request: Request,
+    mode: str = Query(...),
+    day: str = Query(...),
+    x_device_token: Optional[str] = Header(default=None),
+    ink_session: Optional[str] = Cookie(default=None),
+):
+    """画廊里某一天那张图（静态目录网页够不着，这里代发）。"""
+    await ensure_web_or_device_access(request, mac, x_device_token, ink_session)
+    # 回顾页要的是**整屏图**（状态栏、页脚、字段都在里面），不是素材图。
+    data = gallery_screen_png(mode, day)
+    if not data:
+        raise HTTPException(status_code=404, detail="no screen for that day")
+    return Response(content=data, media_type="image/png")
 
 
 @router.post("/device/{mac}/habit/check")

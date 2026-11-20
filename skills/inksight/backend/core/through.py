@@ -31,14 +31,14 @@ STATE_DIR = _BACKEND_DIR / "runtime_cache" / "through"
 STATE_FILE = STATE_DIR / "state.json"
 
 MINIMAX_BASE_URL = "https://api.minimaxi.com/v1"
-MINIMAX_IMAGE_API_URL = f"{MINIMAX_BASE_URL}/image_generation"
-IMAGE_MODEL = "image-01"
+MINIMAX_IMAGE_API_URL = f"{MINIMAX_BASE_URL}/images/generations"
+IMAGE_MODEL = "MiniMax-H3-Image"
 IMAGE_ASPECT = "3:2"
 
 # 屏上正文区尺寸（400x300 去掉页脚 30px）
 ART_DISPLAY = (400, 270)
 
-LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M2.7")
+LLM_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M3")
 
 # ── 四色盘（与 config.py 的 EINK_4COLOR_PALETTE 一致）────────────────────
 PALETTE_SPEC = (
@@ -195,10 +195,11 @@ async def _generate_art(dest: Path, scene: str, **kwargs) -> tuple[bool, str]:
             "model": IMAGE_MODEL,
             "prompt": prompt,
             "aspect_ratio": IMAGE_ASPECT,
+            "area": "1K",
             "n": 1,
             "response_format": "url",
-            "prompt_optimizer": False,
-            "aigc_watermark": False,
+            # 新端点没有 prompt_optimizer/aigc_watermark；disable_prompt_enhanced 反向映射旧开关
+            "disable_prompt_enhanced": True,
         }
         try:
             async with httpx.AsyncClient(timeout=180.0) as client:
@@ -215,12 +216,26 @@ async def _generate_art(dest: Path, scene: str, **kwargs) -> tuple[bool, str]:
             reasons.append("生图返回不是 JSON")
             break
         base_resp = data.get("base_resp") or {}
-        if base_resp.get("status_code") != 0:
+        # 新端点成功时响应里没有 base_resp 字段：只有存在且非 0 才是失败
+        if base_resp.get("status_code") not in (0, None):
             reasons.append(f"生图失败: {base_resp.get('status_msg')}")
             break
-        urls = (data.get("data") or {}).get("image_urls") or []
+        # 新端点 data 是数组：业务失败是 HTTP 200 + item.error，图片在 item.url
+        items = data.get("data") or []
+        if not isinstance(items, list):
+            items = []
+        urls = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("error"):
+                reasons.append("生图失败: " + str(item["error"].get("message") or item["error"].get("code")))
+                break
+            if item.get("url"):
+                urls.append(item["url"])
         if not urls:
-            reasons.append("生图没给图")
+            if not reasons:
+                reasons.append("生图没给图")
             break
 
         tmp = ART_DIR / (dest.stem + "_raw.png")

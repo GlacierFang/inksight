@@ -18,6 +18,12 @@ if str(BACKEND_DIR) not in sys.path:
 
 
 async def main() -> int:
+    from core.subscription import subscribed_modes
+
+    if "CUSTOM_ANT" not in await subscribed_modes():
+        print("[ant] 未被订阅，跳过", flush=True)
+        return 0
+
     from core.ant import generate_today_card
 
     card = await generate_today_card()

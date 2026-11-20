@@ -2,15 +2,22 @@
 
 产出：
 - 题签：画名 / 作者 / 朝代 / 题材 / 题跋 / 印文，由 LLM 当日现写。
-- 图：MiniMax image-01 按屏上四色盘（白/黑/金黄/朱红）画出横幅式画心，
+- 图：MiniMax H3 生图按屏上四色盘（白/黑/金黄/朱红）画出横幅式画心，
   下载后裁白边 + 保线下采样，按显示尺寸 1:1 存本地。
 - 印：作者私印，用 LLM 给的四字印文本地画一枚朱文方印。
 
-原则（与天工阁一致）：
+原则：
 - 图是锦上添花，题签才是每天稳定出货的东西；生图真出错时出纯题签版式。
 - 数值与图都不由题签编造——题签只描述「图里画的那个东西」。
 - 不做预四色化：图直接交给渲染器的 Atkinson 抖动。
 - 作者、画名必须是虚构的：不得使用真实宋代画家的名字，不得使用真实画作名。
+
+出图提示词（2026-10-30 冰河大人定：原来限制太死）：
+- 丹青谱有自己的一套提示词，不再跟天工阁共用器物那套。
+- 题签里的「图」字段只描述画面本身（主体、意境、疏密、笔意、气氛），
+  不再规定「左右分置 + 固定留白 + 指定两处填色」——那套写死的排版指令
+  让每幅画长得一模一样：主体被挤到边角，中间一片空纸。
+- 构图交给画师按题材自己定。
 """
 
 from __future__ import annotations
@@ -26,10 +33,7 @@ from pathlib import Path
 from . import eink_snap
 from .tiangong import (
     IMAGE_MODEL,
-    IMAGE_PROMPT_RETRY,
-    IMAGE_PROMPT_TMPL,
     LLM_MODELS,
-    PALETTE_SPEC,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,13 +44,15 @@ STATE_FILE = STATE_DIR / "state.json"
 ART_DIR = _BACKEND_DIR / "static" / "danqing"
 
 MINIMAX_BASE_URL = "https://api.minimaxi.com/v1"
-MINIMAX_IMAGE_API_URL = f"{MINIMAX_BASE_URL}/image_generation"
+MINIMAX_IMAGE_API_URL = f"{MINIMAX_BASE_URL}/images/generations"
 
 # 横幅式画心（宋人手卷/横幅一路，横向铺满屏面）。三条屏（400/296/648）都用同一条
 # 2.23:1 的比例，画心在每一块屏上都能满宽、不裁切、不留白边。
 # 生图与显示尺寸同比例，不裁不压 —— 1152:512 ≈ 392:176。
 IMAGE_WIDTH = 1152
 IMAGE_HEIGHT = 512
+# 新端点只支持 aspect_ratio（width/height 会失效）
+IMAGE_ASPECT = "21:9"
 
 # 画心在屏上的显示尺寸，必须与模式 JSON 里 image 块的 width/height 一致。
 ART_DISPLAY = (392, 176)
@@ -57,6 +63,32 @@ GENRES = (
 )
 
 ENTRY_KEYS = ("画名", "作者", "朝代", "题材", "题跋", "印文", "图")
+
+# 丹青谱专用四色盘（不再跟天工阁共用器物那套）。
+#
+# 与天工阁的差别：
+# - 不再写死「缩到 150 像素宽」——画心在屏上是 392 像素宽，那个数字是错的，
+#   模型为了满足它会把线条和构图一起简化掉。
+# - 不再一刀切禁掉灰阶与明暗：层次本来就该有，只是层次要靠同色系浓淡来做，
+#   靠第五种色相来做。墨线保持浓黑（接近纯黑）是为了避免下采样后中灰被抖成黄点。
+DANQING_PALETTE_SPEC = (
+    "画面只用四种颜色：纯白纸面底、墨黑 #000000 勾线、金黄 #E8B000 填色、朱红 #C80000 点缀。"
+    "墨要浓，接近纯黑，可以有枯笔飞白与浓淡干湿的笔意，但主线要黑实，不要淡到发灰；"
+    "金黄与朱红各自可以有深浅层次，用明暗表现体积、前后与远近。"
+    "不要出现第五种色相（不要蓝、绿、紫、青），不要写实材质纹理，不要照片感。"
+    "构图、疏密、留白由你按题材自己定，主体要在画面里站得住，不要缩在边角。"
+    "宋代绘画的气韵，线条与墨韵本身要好看，不要任何文字、印章、题签、标签、水印、边框。"
+)
+
+# 第一次：按题签描述的画面，画成四色画心。
+DANQING_IMAGE_PROMPT = "{desc}。{palette}"
+# 真出错时的重试版本：更强调墨线与画幅。
+DANQING_IMAGE_PROMPT_RETRY = (
+    "{desc}。墨线要粗而清晰，画幅要满幅有力，不要只剩边角零星几笔。"
+    "画面只用四种颜色：纯白纸面底、墨黑 #000000 勾线、金黄 #E8B000 填色、朱红 #C80000 点缀；"
+    "金黄与朱红可加深浅层次表现体积；不要出现第五种色相，不要写实材质纹理；"
+    "不要任何文字、印章、题签、标签、水印、边框。"
+)
 
 ENTRY_PROMPT = """你在经营一座虚构的书画馆「丹青谱」。阁中所藏皆为宋代绘画，**但每一幅都不曾存在过**。
 今天要造第 {index} 号藏品。
@@ -72,12 +104,13 @@ ENTRY_PROMPT = """你在经营一座虚构的书画馆「丹青谱」。阁中�
 朝代：<北宋或南宋>
 题跋：<画上的一行题跋，12-20 字，像古人题跋的口吻，不要现代词>
 印文：<四字印文，如「拙庵居士」>
-图：<给画师的中文提示词，30-50 字，必须是横向横幅构图（宽约为高的两倍，宋人手卷布局），写清画面主体与左右布局、留白位置，并说明哪部分填金黄、哪部分用朱红>
+图：<给画师的中文描述，40-70 字。只写画面本身：画的是什么、什么意境、构图疏密与视觉重心、笔意与气氛。横幅卷轴，宽约为高的两倍。>
 
 要求：
 1. 作者、画名、印文必须全部虚构，不得使用真实宋代画家名或真实画作名；
 2. 题跋要像古人的口吻，不要现代词（如工厂、实验室、摄影、展览）；
-3. 图的提示词要能独立看懂画的是什么，构图必须是横向横幅，并写明哪部分填金黄、哪部分用朱红；
+3. 图的描述只说画什么，不要写成排版指令：不要规定左右各放什么、不要指定留白位置、
+   不要指定哪里填金黄哪里用朱红——这些交给画师自己判断，每天的画才画得不一样；
 4. 每个字段都要短，全文不超过 140 字。"""
 
 FALLBACK_ENTRY = {
@@ -87,7 +120,7 @@ FALLBACK_ENTRY = {
     "题材": "山水",
     "题跋": "霜落空山有客归，路深不辨斜阳微。",
     "印文": "拙庵居士",
-    "图": "一幅宋代山水横幅手卷，左右展开的平远构图，右侧层叠淡墨山峦，左侧大片留白与小舟，近处枯树与策杖行人；远山填金黄，人物衣袍用朱红",
+    "图": "一幅宋代山水横幅卷轴，平远江景，远山层叠、近处枯树小舟，疏处见天光，意境萧疏秋寂",
 }
 
 
@@ -184,7 +217,9 @@ async def _llm_entry(index: int, recent: list, genre: str, **kwargs) -> dict:
 
         entry = _parse_entry(raw)
         if entry.get("画名"):
-            for key in ("作者", "朝代", "题材", "题跋", "印文"):
+            # 「题材」不在这个兜底名单里：ENTRY_PROMPT 根本没向 LLM 要这个字段，
+            # 兜一次就等于把每一天都写成「山水」。它由调用方按轮转值补。
+            for key in ("作者", "朝代", "题跋", "印文"):
                 entry.setdefault(key, FALLBACK_ENTRY[key])
             entry.setdefault("图", FALLBACK_ENTRY["图"])
             return entry
@@ -244,25 +279,25 @@ async def _generate_art(entry: dict, dest: Path, **kwargs) -> tuple[bool, str]:
 
     desc = str(entry.get("图") or "").strip()
     if not desc:
-        desc = "一幅宋代册页画，浅墨山水，大片留白"
+        desc = "一幅宋代山水横幅卷轴，远山近树，意境萧疏"
 
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     reasons = []
     prompts = (
-        IMAGE_PROMPT_TMPL.format(desc=desc, palette=PALETTE_SPEC),
-        IMAGE_PROMPT_RETRY.format(desc=desc),
+        DANQING_IMAGE_PROMPT.format(desc=desc, palette=DANQING_PALETTE_SPEC),
+        DANQING_IMAGE_PROMPT_RETRY.format(desc=desc),
     )
     for prompt in prompts:
         payload = {
             "model": IMAGE_MODEL,
             "prompt": prompt,
-            # 不发 aspect_ratio：两者同时给时它优先，width/height 会失效
-            "width": IMAGE_WIDTH,
-            "height": IMAGE_HEIGHT,
+            # 新端点只认 aspect_ratio + area，不接受 width/height
+            "aspect_ratio": IMAGE_ASPECT,
+            "area": "1K",
             "n": 1,
             "response_format": "url",
-            "prompt_optimizer": False,
-            "aigc_watermark": False,
+            # 新端点没有 prompt_optimizer/aigc_watermark；disable_prompt_enhanced 反向映射旧开关
+            "disable_prompt_enhanced": True,
         }
         try:
             async with httpx.AsyncClient(timeout=180.0) as client:
@@ -279,12 +314,26 @@ async def _generate_art(entry: dict, dest: Path, **kwargs) -> tuple[bool, str]:
             reasons.append("生图返回不是 JSON")
             break
         base_resp = data.get("base_resp") or {}
-        if base_resp.get("status_code") != 0:
+        # 新端点成功时响应里没有 base_resp 字段：只有存在且非 0 才是失败
+        if base_resp.get("status_code") not in (0, None):
             reasons.append(f"生图失败: {base_resp.get('status_msg')}")
             break
-        urls = (data.get("data") or {}).get("image_urls") or []
+        # 新端点 data 是数组：业务失败是 HTTP 200 + item.error，图片在 item.url
+        items = data.get("data") or []
+        if not isinstance(items, list):
+            items = []
+        urls = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("error"):
+                reasons.append("生图失败: " + str(item["error"].get("message") or item["error"].get("code")))
+                break
+            if item.get("url"):
+                urls.append(item["url"])
         if not urls:
-            reasons.append("生图没给图")
+            if not reasons:
+                reasons.append("生图没给图")
             break
 
         tmp = ART_DIR / (dest.stem + "_raw.png")
@@ -364,36 +413,47 @@ def _seal_path(seal_text: str) -> str:
 
 
 def _cleanup_art(date_key: str, keep_days: int = 7) -> None:
-    """清理过期画心：保留最近 keep_days 天（含今天），其余删掉。
+    """不清理了：往期画心永久保留（2026-10-29 起）。
 
-    只按文件名里的日期判断，不碰 seal_*.png 这类固定素材。
+    画廊要回看每天那一张。删掉的画找不回来 —— 同一张重画也不是同一张。
     """
-    try:
-        today = datetime.strptime(date_key, "%Y-%m-%d")
-    except ValueError:
-        return
-    keep: set[str] = set()
-    for offset in range(max(0, int(keep_days))):
-        keep.add((today - timedelta(days=offset)).strftime("%Y%m%d"))
-    try:
-        for path in ART_DIR.glob("art_*.png"):
-            parts = path.stem.split("_")
-            if len(parts) < 3:
-                continue
-            stamp = parts[1]
-            if stamp in keep:
-                continue
-            try:
-                path.unlink()
-            except OSError:
-                continue
-    except OSError:
-        pass
+    return
+
+
+
+def _art_url(record: dict, date_key: str) -> str:
+    """那天那张素材图：优先用记下的 art_url，旧记录按命名规则找回。"""
+    from .history_day import art_url_or_pattern
+
+    return art_url_or_pattern(record, date_key, "danqing", "art_{date}_{index:03d}.png")
+
+
+def _history_content(record: dict, fallback: dict | None) -> dict:
+    """历史日的整屏内容：只取记到过的字段，缺的如实标「历史缺失」。"""
+    from .history_day import MISSING
+
+    content = {
+        "index_label": f"第 {record.get('index', 1)} 幅",
+        "title": str(record.get("画名") or MISSING),
+        "artist": str(record.get("作者") or MISSING),
+        "dynasty": str(record.get("朝代") or MISSING),
+        "genre": str(record.get("题材") or MISSING),
+        "colophon": str(record.get("题跋") or MISSING),
+        "seal_url": _seal_path(str(record.get("印文") or "")),
+        "art_url": _art_url(record, date_key),
+        "has_image": "yes" if _art_url(record, date_key) else "no",
+    }
+    if isinstance(fallback, dict):
+        for key, value in fallback.items():
+            if not content.get(key):
+                content[key] = value
+    return content
 
 
 async def build_danqing_content(fallback: dict | None = None, **kwargs) -> dict:
-    now = datetime.now()
-    date_key = now.strftime("%Y-%m-%d")
+    from .history_day import resolve_day
+
+    date_key = resolve_day(kwargs)
     state = _read_state()
 
     days = state.get("days")
@@ -401,7 +461,10 @@ async def build_danqing_content(fallback: dict | None = None, **kwargs) -> dict:
         days = {}
     today = days.get(date_key)
 
+    # 历史日：只读已有记录，不补生成。
     if not isinstance(today, dict) or not today.get("画名"):
+        if date_key != datetime.now().strftime("%Y-%m-%d"):
+            return _history_content(today or {}, fallback)
         catalog = _catalog(state)
         index = len(catalog) + 1
         genre = GENRES[(index - 1) % len(GENRES)]
@@ -428,7 +491,10 @@ async def build_danqing_content(fallback: dict | None = None, **kwargs) -> dict:
             "画名": entry.get("画名", ""),
             "作者": entry.get("作者", ""),
             "朝代": entry.get("朝代", ""),
-            "题材": entry.get("题材", ""),
+            # 题材：LLM 明确说了就用它，否则用轮转值。
+            # （ENTRY_PROMPT 压根没问 LLM 题材，早先取 entry 只会拿到兜底的「山水」，
+            #   于是 8 题材轮转全白转，页面上每天都是山水。）
+            "题材": str(entry.get("题材") or genre),
             "题跋": entry.get("题跋", ""),
             "印文": entry.get("印文", ""),
             "图": entry.get("图", ""),

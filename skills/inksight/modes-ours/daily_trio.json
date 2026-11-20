@@ -1,0 +1,323 @@
+{
+  "mode_id": "CUSTOM_DAILY_TRIO",
+  "display_name": "日课三则",
+  "icon": "coffee",
+  "cacheable": true,
+  "description": "一屏三样：毒舌一句、谜语一道、微故事一个。一次模型调用出全部三块，比毒舌/猜谜/微故事三个模式各占一屏更省。",
+  "content": {
+    "type": "llm_json",
+    "prompt_template": "你是一位「日课」作者，一屏里同时给三样东西：一句毒舌、一道谜语、一个三段式微故事。\n用 JSON 输出：\n{{\"roast\": \"毒舌一句（28字以内）\", \"riddle_category\": \"类型（谜语/脑筋急转弯/冷知识）\", \"riddle_question\": \"谜面或问题（34字以内）\", \"riddle_hint\": \"提示（10字以内）\", \"riddle_answer\": \"谜底或答案（12字以内）\", \"story_title\": \"故事标题（6字以内）\", \"story_opening\": \"开头（22字以内）\", \"story_twist\": \"转折（28字以内）\", \"story_ending\": \"结尾（18字以内）\", \"story_genre\": \"类型（悬疑/温情/科幻/荒诞）\"}}\n要求：\n1. 毒舌要像损友在你旁边说的话，精准针对环境里的某一个具体细节，不要泛泛而谈，不要网络段子\n2. 谜语要有意思，难度适中，老少皆宜\n3. 微故事是三段式：开头设场景、转折出人意料、结尾留余味；不要大团圆，不要鸡汤，像闪小说\n4. 三样都要和今天的环境（时间/天气/节日）有呼应\n只输出 JSON，不要解释。\n环境：{context}",
+    "output_schema": {
+      "roast": {
+        "type": "string",
+        "default": "服务器也累了，和你一样需要休息。"
+      },
+      "riddle_category": {
+        "type": "string",
+        "default": "谜语"
+      },
+      "riddle_question": {
+        "type": "string",
+        "default": "两个胖子（打一城市名）"
+      },
+      "riddle_hint": {
+        "type": "string",
+        "default": "想想体重"
+      },
+      "riddle_answer": {
+        "type": "string",
+        "default": "合肥"
+      },
+      "story_title": {
+        "type": "string",
+        "default": "末班车"
+      },
+      "story_opening": {
+        "type": "string",
+        "default": "她每天都坐末班地铁，座位对面总是同一个男人在看书。"
+      },
+      "story_twist": {
+        "type": "string",
+        "default": "有一天她终于鼓起勇气搭话，男人抬头，手里的书封面是她写的小说。"
+      },
+      "story_ending": {
+        "type": "string",
+        "default": "小说的最后一章写的是：她从未搭话。"
+      },
+      "story_genre": {
+        "type": "string",
+        "default": "温情"
+      }
+    },
+    "temperature": 0.9,
+    "fallback": {
+      "roast": "服务器也累了，和你一样需要休息。",
+      "riddle_category": "谜语",
+      "riddle_question": "两个胖子（打一城市名）",
+      "riddle_hint": "想想体重",
+      "riddle_answer": "合肥",
+      "story_title": "末班车",
+      "story_opening": "她每天都坐末班地铁，座位对面总是同一个男人在看书。",
+      "story_twist": "有一天她终于鼓起勇气搭话，男人抬头，手里的书封面是她写的小说。",
+      "story_ending": "小说的最后一章写的是：她从未搭话。",
+      "story_genre": "温情"
+    }
+  },
+  "layout": {
+    "layout_engine": "component_tree",
+    "status_bar": {
+      "line_width": 1,
+      "dashed": true
+    },
+    "component_theme": {
+      "body_font": "noto_serif_regular",
+      "body_font_size": 11,
+      "body_line_gap": 4
+    },
+    "body": {
+      "type": "column",
+      "padding_x": 14,
+      "padding_y": 4,
+      "justify": "center",
+      "gap": 3,
+      "children": [
+        {
+          "type": "text",
+          "field": "roast",
+          "font": "noto_serif_bold",
+          "font_size": 15,
+          "align": "center",
+          "max_lines": 2
+        },
+        {
+          "type": "separator",
+          "style": "short",
+          "width": 44
+        },
+        {
+          "type": "column",
+          "gap": 2,
+          "children": [
+            {
+              "type": "text",
+              "field": "riddle_category",
+              "font": "noto_serif_light",
+              "font_size": 9,
+              "align": "center",
+              "max_lines": 1
+            },
+            {
+              "type": "text",
+              "field": "riddle_question",
+              "font": "noto_serif_bold",
+              "font_size": 13,
+              "align": "center",
+              "max_lines": 2
+            },
+            {
+              "type": "text",
+              "template": "提示：{riddle_hint}　谜底：{riddle_answer}",
+              "font": "noto_serif_light",
+              "font_size": 10,
+              "align": "center",
+              "max_lines": 1
+            }
+          ]
+        },
+        {
+          "type": "separator",
+          "style": "short",
+          "width": 44
+        },
+        {
+          "type": "column",
+          "gap": 1,
+          "children": [
+            {
+              "type": "text",
+              "template": "{story_genre} · {story_title}",
+              "font": "noto_serif_bold",
+              "font_size": 12,
+              "align": "center",
+              "max_lines": 1
+            },
+            {
+              "type": "text",
+              "field": "story_opening",
+              "font": "noto_serif_regular",
+              "font_size": 11,
+              "align": "left",
+              "max_lines": 2
+            },
+            {
+              "type": "text",
+              "field": "story_twist",
+              "font": "noto_serif_regular",
+              "font_size": 11,
+              "align": "left",
+              "max_lines": 2
+            },
+            {
+              "type": "text",
+              "field": "story_ending",
+              "font": "noto_serif_light",
+              "font_size": 11,
+              "align": "left",
+              "max_lines": 2
+            }
+          ]
+        }
+      ]
+    },
+    "footer": {
+      "label": "日课三则",
+      "attribution_template": "{story_genre}",
+      "dashed": true
+    }
+  },
+  "layout_overrides": {
+    "296x128": {
+      "body": {
+        "type": "column",
+        "padding_x": 8,
+        "padding_y": 2,
+        "justify": "center",
+        "gap": 2,
+        "children": [
+          {
+            "type": "text",
+            "field": "roast",
+            "font": "noto_serif_bold",
+            "font_size": 11,
+            "align": "center",
+            "max_lines": 2
+          },
+          {
+            "type": "text",
+            "field": "riddle_question",
+            "font": "noto_serif_bold",
+            "font_size": 10,
+            "align": "center",
+            "max_lines": 1
+          },
+          {
+            "type": "text",
+            "template": "谜底：{riddle_answer}",
+            "font": "noto_serif_light",
+            "font_size": 9,
+            "align": "center",
+            "max_lines": 1
+          }
+        ]
+      },
+      "footer": {
+        "label": "日课三则",
+        "attribution_template": "{story_genre}",
+        "dashed": true,
+        "height": 18
+      }
+    },
+    "648x480": {
+      "body": {
+        "type": "column",
+        "padding_x": 30,
+        "padding_y": 8,
+        "justify": "center",
+        "gap": 6,
+        "children": [
+          {
+            "type": "text",
+            "field": "roast",
+            "font": "noto_serif_bold",
+            "font_size": 22,
+            "align": "center",
+            "max_lines": 3
+          },
+          {
+            "type": "separator",
+            "style": "short",
+            "width": 80
+          },
+          {
+            "type": "column",
+            "gap": 3,
+            "children": [
+              {
+                "type": "text",
+                "field": "riddle_category",
+                "font": "noto_serif_light",
+                "font_size": 12,
+                "align": "center",
+                "max_lines": 1
+              },
+              {
+                "type": "text",
+                "field": "riddle_question",
+                "font": "noto_serif_bold",
+                "font_size": 18,
+                "align": "center",
+                "max_lines": 3
+              },
+              {
+                "type": "text",
+                "template": "提示：{riddle_hint}　谜底：{riddle_answer}",
+                "font": "noto_serif_light",
+                "font_size": 14,
+                "align": "center",
+                "max_lines": 1
+              }
+            ]
+          },
+          {
+            "type": "separator",
+            "style": "short",
+            "width": 80
+          },
+          {
+            "type": "column",
+            "gap": 2,
+            "children": [
+              {
+                "type": "text",
+                "template": "{story_genre} · {story_title}",
+                "font": "noto_serif_bold",
+                "font_size": 18,
+                "align": "center",
+                "max_lines": 1
+              },
+              {
+                "type": "text",
+                "field": "story_opening",
+                "font": "noto_serif_regular",
+                "font_size": 15,
+                "align": "left",
+                "max_lines": 2
+              },
+              {
+                "type": "text",
+                "field": "story_twist",
+                "font": "noto_serif_regular",
+                "font_size": 15,
+                "align": "left",
+                "max_lines": 2
+              },
+              {
+                "type": "text",
+                "field": "story_ending",
+                "font": "noto_serif_light",
+                "font_size": 15,
+                "align": "left",
+                "max_lines": 2
+              }
+            ]
+          }
+        ]
+      },
+      "footer": {
+        "label": "日课三则",
+        "attribution_template": "{story_genre}",
+        "dashed": true
+      }
+    }
+  }
+}

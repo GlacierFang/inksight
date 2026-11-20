@@ -1,0 +1,410 @@
+{
+  "mode_id": "CUSTOM_DAYOVERVIEW",
+  "display_name": "每日总览",
+  "icon": "tips",
+  "cacheable": false,
+  "description": "日期、天气、历法与语录贴士合并看板",
+  "settings_schema": [
+    {
+      "key": "forecast_days",
+      "label": "预报天数",
+      "type": "number",
+      "default": 4,
+      "min": 1,
+      "max": 7,
+      "step": 1
+    },
+    {
+      "key": "city",
+      "label": "城市",
+      "type": "location",
+      "description": "留空则使用设备位置"
+    }
+  ],
+  "content": {
+    "type": "composite",
+    "steps": [
+      {
+        "type": "computed",
+        "provider": "daily_meta",
+        "fallback": {
+          "year": 2026,
+          "day": 1,
+          "month_cn": "一月",
+          "weekday_cn": "周一",
+          "lunar_date": "农历正月初一",
+          "day_of_year": 1,
+          "days_in_year": 365
+        }
+      },
+      {
+        "type": "computed",
+        "provider": "almanac_local",
+        "fallback": {
+          "lunar_display": "",
+          "ganzhi_zodiac": "",
+          "solar_term": "",
+          "next_term": "",
+          "days_to_next_term": 0
+        }
+      },
+      {
+        "type": "external_data",
+        "provider": "weather_forecast",
+        "fallback": {
+          "city": "",
+          "today_temp": "--",
+          "today_desc": "暂无数据",
+          "today_code": -1,
+          "today_low": "--",
+          "today_high": "--",
+          "today_range": "-- / --",
+          "today_humidity": "--",
+          "today_wind_dir": "",
+          "today_wind_level": "",
+          "sunrise": "",
+          "sunset": "",
+          "advice": "注意根据天气添减衣物",
+          "forecast": []
+        }
+      },
+      {
+        "type": "llm",
+        "output_format": "json",
+        "output_fields": [
+          "quote",
+          "author",
+          "tip"
+        ],
+        "temperature": 0.7,
+        "max_tokens": 8192,
+        "prompt_template": "你是一位博学的每日推荐助手。请结合今天的日期、节气与天气生成一份每日推荐，用 JSON 格式输出，包含以下字段：\\n1. quote: 一句语录（中文，18字以内，不带引号），偏人生感悟\\n2. author: 语录作者\\n3. tip: 一条具体、可执行的冷知识或生活小贴士（24字以内），不要写成鸡汤感悟\\n要求：只输出 JSON，不要解释。\\n今天：{year}年{month_cn}{day}日{weekday_cn}，节气：{solar_term}（距{next_term}还有{days_to_next_term}天），农历{lunar_display}，天气：{today_desc} {today_temp}°C，{advice}",
+        "fallback": {
+          "quote": "不以物喜，不以己悲。",
+          "author": "范仲淹",
+          "tip": "秋燥易咳嗽，多饮温水。"
+        },
+        "fallback_pool": [
+          {
+            "quote": "不以物喜，不以己悲。",
+            "author": "范仲淹",
+            "tip": "秋燥易咳嗽，多饮温水。"
+          },
+          {
+            "quote": "知止而后有定，定而后能静。",
+            "author": "《大学》",
+            "tip": "午睡20分钟最佳，过长易头痛。"
+          },
+          {
+            "quote": "路漫漫其修远兮，吾将上下而求索。",
+            "author": "屈原",
+            "tip": "蓝光影响睡眠，睡前少看手机。"
+          }
+        ]
+      }
+    ],
+    "fallback": {
+      "year": 2026,
+      "day": 1,
+      "month_cn": "一月",
+      "weekday_cn": "周一",
+      "day_of_year": 1,
+      "days_in_year": 365,
+      "lunar_display": "",
+      "ganzhi_zodiac": "",
+      "solar_term": "",
+      "next_term": "",
+      "days_to_next_term": 0,
+      "city": "",
+      "today_temp": "--",
+      "today_desc": "暂无数据",
+      "today_code": -1,
+      "today_low": "--",
+      "today_high": "--",
+      "today_range": "-- / --",
+      "today_humidity": "--",
+      "today_wind_dir": "",
+      "today_wind_level": "",
+      "sunrise": "",
+      "sunset": "",
+      "advice": "注意根据天气添减衣物",
+      "forecast": [],
+      "quote": "不以物喜，不以己悲。",
+      "author": "范仲淹",
+      "tip": "秋燥易咳嗽，多饮温水。"
+    }
+  },
+  "layout": {
+    "status_bar": {
+      "line_width": 1,
+      "dashed": false
+    },
+    "body_align": "center",
+    "body": [
+      {
+        "type": "two_column",
+        "left_width": 124,
+        "gap": 10,
+        "left_x": 10,
+        "left": [
+          {
+            "type": "big_number",
+            "field": "day",
+            "font_size": 28,
+            "align": "left",
+            "margin_x": 0,
+            "margin_bottom": 2
+          },
+          {
+            "type": "text",
+            "template": "{year}年 {month_cn}",
+            "font_size": 11,
+            "line_height": 14,
+            "align": "left",
+            "margin_x": 0,
+            "max_lines": 1,
+            "margin_bottom": 4
+          },
+          {
+            "type": "text",
+            "field": "weekday_cn",
+            "font_size": 11,
+            "line_height": 14,
+            "align": "left",
+            "margin_x": 0,
+            "max_lines": 1,
+            "margin_bottom": 4
+          },
+          {
+            "type": "text",
+            "template": "{lunar_display} {ganzhi_zodiac}",
+            "font_size": 11,
+            "line_height": 14,
+            "align": "left",
+            "margin_x": 0,
+            "max_lines": 1,
+            "margin_bottom": 2
+          },
+          {
+            "type": "progress_bar",
+            "field": "day_of_year",
+            "max_field": "days_in_year",
+            "width": 84,
+            "height": 5,
+            "margin_x": 0
+          }
+        ],
+        "right": [
+          {
+            "type": "big_number",
+            "field": "today_temp",
+            "font_size": 24,
+            "align": "left",
+            "margin_x": 0,
+            "unit": "°C",
+            "margin_bottom": 2
+          },
+          {
+            "type": "weather_icon_text",
+            "field": "today_desc",
+            "code_field": "today_code",
+            "font_size": 11,
+            "icon_size": 16,
+            "icon_gap": 4,
+            "suffix_field": "city",
+            "suffix_gap": 6,
+            "suffix_font_size": 10,
+            "align": "left",
+            "margin_x": 0,
+            "margin_bottom": 1
+          },
+          {
+            "type": "text",
+            "template": "{today_range} 湿度{today_humidity}%",
+            "font_size": 10,
+            "line_height": 13,
+            "align": "left",
+            "margin_x": 0,
+            "max_lines": 1,
+            "margin_bottom": 4
+          },
+          {
+            "type": "text",
+            "template": "{today_wind_dir}{today_wind_level} 日出{sunrise} 日落{sunset}",
+            "font_size": 10,
+            "line_height": 13,
+            "align": "left",
+            "margin_x": 0,
+            "max_lines": 1,
+            "margin_bottom": 4
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "template": "{solar_term} · 距{next_term}{days_to_next_term}天",
+        "font_size": 11,
+        "line_height": 14,
+        "align": "left",
+        "margin_x": 10,
+        "max_lines": 1,
+        "margin_bottom": 3
+      },
+      {
+        "type": "spacer",
+        "height_px": 4
+      },
+      {
+        "type": "separator",
+        "style": "solid",
+        "line_width": 1,
+        "margin_x": 10
+      },
+      {
+        "type": "spacer",
+        "height_px": 4
+      },
+      {
+        "type": "text",
+        "field": "quote",
+        "font_size": 16,
+        "line_height": 20,
+        "align": "left",
+        "margin_x": 10,
+        "max_lines": 1,
+        "margin_bottom": 3
+      },
+      {
+        "type": "text",
+        "template": "— {author}",
+        "font_size": 10,
+        "line_height": 13,
+        "align": "left",
+        "margin_x": 10,
+        "max_lines": 1,
+        "margin_bottom": 3
+      },
+      {
+        "type": "spacer",
+        "height_px": 8
+      },
+      {
+        "type": "forecast_cards",
+        "field": "forecast",
+        "max_items": 4,
+        "margin_x": 8,
+        "gap": 6,
+        "icon_size": 18,
+        "day_font_size": 10,
+        "date_font_size": 9,
+        "desc_font_size": 9,
+        "temp_font_size": 10,
+        "day_gap": 2,
+        "date_gap": 2,
+        "icon_gap": 3,
+        "desc_gap": 1,
+        "show_desc": false,
+        "show_date": false,
+        "margin_bottom": 2
+      },
+      {
+        "type": "spacer",
+        "height_px": 4
+      },
+      {
+        "type": "text",
+        "template": "{advice} · {tip}",
+        "font_size": 10,
+        "line_height": 13,
+        "align": "left",
+        "margin_x": 10,
+        "max_lines": 1,
+        "margin_bottom": 3
+      }
+    ],
+    "footer": {
+      "label": "每日总览",
+      "attribution_template": "— {solar_term}",
+      "height": 24
+    }
+  },
+  "layout_overrides": {
+    "296x128": {
+      "body_align": "center",
+      "body": [
+        {
+          "type": "group",
+          "children": [
+            {
+              "type": "two_column",
+              "stack_when_short": false,
+              "left_width": 96,
+              "gap": 8,
+              "left_x": 6,
+              "left": [
+                {
+                  "type": "big_number",
+                  "field": "day",
+                  "font_size": 20,
+                  "align": "left",
+                  "margin_x": 0
+                },
+                {
+                  "type": "text",
+                  "template": "{month_cn} {weekday_cn}",
+                  "font_size": 10,
+                  "line_height": 15,
+                  "align": "left",
+                  "margin_x": 0,
+                  "max_lines": 1
+                }
+              ],
+              "right": [
+                {
+                  "type": "big_number",
+                  "field": "today_temp",
+                  "font_size": 16,
+                  "align": "left",
+                  "margin_x": 0,
+                  "unit": "°C"
+                },
+                {
+                  "type": "weather_icon_text",
+                  "field": "today_desc",
+                  "code_field": "today_code",
+                  "font_size": 10,
+                  "icon_size": 13,
+                  "icon_gap": 3,
+                  "suffix_field": "city",
+                  "suffix_gap": 5,
+                  "suffix_font_size": 10,
+                  "align": "left",
+                  "margin_x": 0,
+                  "margin_bottom": 0
+                }
+              ]
+            },
+            {
+              "type": "spacer",
+              "height_px": 8
+            },
+            {
+              "type": "text",
+              "field": "quote",
+              "font_size": 10,
+              "line_height": 15,
+              "align": "left",
+              "margin_x": 6,
+              "max_lines": 1
+            }
+          ]
+        }
+      ],
+      "footer": {
+        "label": "每日总览",
+        "attribution_template": "— {solar_term}",
+        "height": 20
+      }
+    }
+  }
+}

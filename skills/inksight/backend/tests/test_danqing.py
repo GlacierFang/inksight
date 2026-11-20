@@ -132,6 +132,52 @@ def test_prompt_forbids_real_painters():
     assert "不得用真实宋代画家的名" in ENTRY_PROMPT
 
 
+def test_entry_prompt_does_not_lock_composition():
+    """题签的「图」字段不能写死排版。
+
+    2026-10-30 冰河大人定：原来要求 LLM 写「左右布局 + 留白位置 + 哪块填金黄",
+    于是每幅画长得一模一样——主体被挤到边角，中间一片空纸。
+    """
+    from core.danqing import ENTRY_PROMPT
+
+    # 只看「图」字段的要求行：后面「要求」里的禁止说明会提到这些词，那是禁令不是指令。
+    spec_line = next(
+        line for line in ENTRY_PROMPT.splitlines() if line.startswith("图：")
+    )
+    for banned in ("左右布局", "留白位置", "填金黄", "用朱红"):
+        assert banned not in spec_line, f"「图」字段还在写死排版：{banned}"
+    # 明确把排版决定权交回给画师。
+    assert "不要规定左右各放什么" in ENTRY_PROMPT
+    assert "交给画师自己判断" in ENTRY_PROMPT
+
+
+def test_danqing_has_own_palette_not_tiangongs():
+    """丹青谱不再借天工阁器物那套提示词。"""
+    from core import danqing
+
+    assert hasattr(danqing, "DANQING_PALETTE_SPEC")
+    spec = danqing.DANQING_PALETTE_SPEC
+    # 天工阁那句「缩到 150 像素宽」对画心是错的，画心在屏上 392 像素宽。
+    assert "150 像素" not in spec
+    # 层次靠同色系浓淡，不靠禁掉明暗。
+    assert "不要阴影和明暗排线" not in spec
+    assert "深浅" in spec
+
+
+def test_image_prompts_render_without_placeholder_errors():
+    """两个出图提示词都要能填好。"""
+    from core.danqing import (
+        DANQING_IMAGE_PROMPT,
+        DANQING_IMAGE_PROMPT_RETRY,
+        DANQING_PALETTE_SPEC,
+    )
+
+    first = DANQING_IMAGE_PROMPT.format(desc="一幅山水", palette=DANQING_PALETTE_SPEC)
+    retry = DANQING_IMAGE_PROMPT_RETRY.format(desc="一幅山水")
+    assert "{" not in first and "{" not in retry
+    assert "山水" in first and "山水" in retry
+
+
 # ── 私印 ────────────────────────────────────────────────────
 def test_seal_is_generated_and_reused(tmp_path, monkeypatch):
     from core import danqing
@@ -320,7 +366,11 @@ def test_has_small_and_large_overrides():
 
 
 def test_image_block_size_matches_provider_display():
-    """版式里的图尺寸必须与 provider 的 ART_DISPLAY 一致，否则会二次缩放丢墨线。"""
+    """版式里的图块必须与 provider 的 ART_DISPLAY **同宽**，且不高于它。
+
+    同宽 → 渲染器 fit=cover 的缩放系数恒为 1.0，只裁切、不重采样（不丢墨线）。
+    高度可以更矮：正文区要腾地方给字段，画面按对齐方式裁一刀。
+    """
     from core.danqing import ART_DISPLAY
 
     mode = _mode()
@@ -337,7 +387,10 @@ def test_image_block_size_matches_provider_display():
                 walk(value)
 
     walk(mode["layout"])
-    assert ART_DISPLAY in sizes, f"版式没有用 ART_DISPLAY {ART_DISPLAY}，实得 {sizes}"
+    assert sizes, "版式里没有 art_url 图块"
+    for width, height in sizes:
+        assert width == ART_DISPLAY[0], f"图块宽 {width} != ART_DISPLAY {ART_DISPLAY}"
+        assert height <= ART_DISPLAY[1], f"图块高 {height} > ART_DISPLAY {ART_DISPLAY}"
 
 
 # ── 版式比例：图为主 ────────────────────────────────────────

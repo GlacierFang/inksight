@@ -91,14 +91,22 @@ async def generate_and_render(
     screen_w: int = SCREEN_WIDTH,
     screen_h: int = SCREEN_HEIGHT,
     mac: str = "",
-    album_bucket: str = "",
+    owner_account: str = "",
     colors: int = 2,
     archive_screen: bool = False,
+    use_daily_cache: bool = True,
 ) -> tuple[Image.Image, dict | None]:
     """Generate content for a persona and render to an e-ink image.
 
     Dispatches to either a builtin Python mode or a JSON-defined mode
     via the mode registry.
+
+    每日内容缓存（use_daily_cache=True，默认）
+    ------------------------------------------
+    一个（模式 + 参数指纹 + 日期 + 画幅）只生成一次，所有设备共享。
+    命中就完全不调模型。参数指纹只含城市/坐标/时区/语言；时段在生成时
+    取一次并冻结进内容，不进指纹 —— 否则早晚各成一份，「一天一张」就破了。
+    保留 7 天：当天没有就下发最近一次成功的，屏上永远有东西。
 
     archive_screen=True 时，把刚渲染出来的整屏图存档到画廊位置
     （runtime_cache/<state>/screens/<日期>.png）。这是「生成即存」的唯一落点：
@@ -107,6 +115,65 @@ async def generate_and_render(
 
     Returns:
         Tuple of (rendered image, content dict).
+        命中每日缓存时 content 为 None —— 那张图是之前生成的，内容不在本次手里。
+    """
+    # ── 订阅闸门 ──────────────────────────────────────────────
+    # 未勾选的模式不许调模型，也不许下发缓存里的旧图。
+    from .subscription import ensure_allowed
+
+    await ensure_allowed(persona, source="generate_and_render")
+
+    if not use_daily_cache:
+        return await _generate_and_render_uncached(
+            persona, config, date_ctx, weather, battery_pct,
+            screen_w=screen_w, screen_h=screen_h, mac=mac,
+            owner_account=owner_account, colors=colors,
+            archive_screen=archive_screen,
+        )
+
+    from .daily_cache import get_or_generate, param_fingerprint
+
+    cfg = get_effective_mode_config(config, persona)
+    fingerprint = param_fingerprint(cfg, persona)
+    day = _date_key(date_ctx)
+
+    async def _generate():
+        return await _generate_and_render_uncached(
+            persona, config, date_ctx, weather, battery_pct,
+            screen_w=screen_w, screen_h=screen_h, mac=mac,
+            owner_account=owner_account, colors=colors,
+            archive_screen=archive_screen,
+        )
+
+    img, content, fresh = await get_or_generate(
+        persona, fingerprint, day, screen_w, screen_h, _generate
+    )
+    if img is None:
+        raise RuntimeError(f"每日内容不可用: {persona}")
+    if archive_screen and not fresh:
+        # 命中缓存时也落一次画廊（新鲜生成的那次已经落过了）
+        _archive_screen(persona, img, date_ctx)
+    # 命中缓存时 content 是 None —— 那张图是之前生成的，内容不在本次手里。
+    return img, content
+
+
+async def _generate_and_render_uncached(
+    persona: str,
+    config: dict | None,
+    date_ctx: dict,
+    weather: dict,
+    battery_pct: float,
+    screen_w: int = SCREEN_WIDTH,
+    screen_h: int = SCREEN_HEIGHT,
+    mac: str = "",
+    owner_account: str = "",
+    colors: int = 2,
+    archive_screen: bool = False,
+) -> tuple[Image.Image, dict | None]:
+    """真正出图：内容生成 + 渲染。
+
+    每日内容缓存由调用方（generate_and_render）负责 —— 这里不写缓存，
+    免得「带临时覆盖的预览」把脏内容写进当天的缓存。
     """
     time_str = date_ctx.get("time_str", "")
     weather_str = weather["weather_str"]
@@ -119,7 +186,7 @@ async def generate_and_render(
         date_ctx,
         weather_str,
         mac=mac,
-        album_bucket=album_bucket,
+        owner_account=owner_account,
         screen_w=screen_w,
         screen_h=screen_h,
         weather_code=weather_code,
@@ -157,22 +224,62 @@ async def generate_content_only(
     weather: dict,
     *,
     mac: str = "",
-    album_bucket: str = "",
+    owner_account: str = "",
     screen_w: int = SCREEN_WIDTH,
     screen_h: int = SCREEN_HEIGHT,
+    use_daily_cache: bool = True,
 ) -> dict:
+    """只生成文字内容（不出图）。
+
+    按天固定：当天同一份（模式 + 参数指纹）只生成一次，之后直接读缓存。
+    手机 App 的「今日内容」和小组件都走这里 —— 用户开 App 不该每次都烧模型。
+
+    闸门在 _generate_content_for_persona 里，未勾选的模式照样被拒。
+    """
+    # ── 订阅闸门 ──────────────────────────────────────────────
+    # 未勾选的模式不许调模型。手机 App、小组件、预览全走这一个判断，
+    # 不留后门 —— 这是「未勾选不调用 LLM」的唯一落点。
+    from .subscription import ensure_allowed
+
+    await ensure_allowed(persona, source="generate_content_only")
+
     cfg = get_effective_mode_config(config, persona)
-    return await _generate_content_for_persona(
-        persona,
-        cfg,
-        date_ctx,
-        weather.get("weather_str", ""),
-        mac=mac,
-        album_bucket=album_bucket,
-        screen_w=screen_w,
-        screen_h=screen_h,
-        weather_code=weather.get("weather_code", -1),
-    )
+
+    if not use_daily_cache:
+        return await _generate_content_for_persona(
+            persona,
+            cfg,
+            date_ctx,
+            weather.get("weather_str", ""),
+            mac=mac,
+            owner_account=owner_account,
+            screen_w=screen_w,
+            screen_h=screen_h,
+            weather_code=weather.get("weather_code", -1),
+        )
+
+    from .daily_cache import get_text_or_generate, param_fingerprint
+
+    fingerprint = param_fingerprint(cfg, persona)
+    day = _date_key(date_ctx)
+
+    async def _generate():
+        return await _generate_content_for_persona(
+            persona,
+            cfg,
+            date_ctx,
+            weather.get("weather_str", ""),
+            mac=mac,
+            owner_account=owner_account,
+            screen_w=screen_w,
+            screen_h=screen_h,
+            weather_code=weather.get("weather_code", -1),
+        )
+
+    content, _fresh = await get_text_or_generate(persona, fingerprint, day, _generate)
+    if content is None:
+        raise RuntimeError(f"文字内容不可用: {persona}")
+    return content
 
 
 async def _generate_content_for_persona(
@@ -181,13 +288,17 @@ async def _generate_content_for_persona(
     date_ctx: dict,
     weather_str: str,
     mac: str = "",
-    album_bucket: str = "",
+    owner_account: str = "",
     screen_w: int = SCREEN_WIDTH,
     screen_h: int = SCREEN_HEIGHT,
     weather_code: int = -1,
     colors: int = 2,
 ) -> dict:
-    """Dispatch content generation to the appropriate handler."""
+    """Dispatch content generation to the appropriate handler.
+
+    内部实现，不做订阅检查 —— 闸门在外层入口
+    （generate_and_render / generate_content_only）统一把关。
+    """
     from .mode_registry import ContentContext, get_registry
 
     registry = get_registry()
@@ -276,7 +387,7 @@ async def _generate_content_for_persona(
             image_provider=cfg.get("image_provider", DEFAULT_IMAGE_PROVIDER),
             image_model=cfg.get("image_model", DEFAULT_IMAGE_MODEL),
             mac=mac,
-            album_bucket=album_bucket,
+            owner_account=owner_account,
             screen_w=screen_w,
             screen_h=screen_h,
             weather_code=weather_code,
@@ -368,6 +479,17 @@ def _archive_screen(persona: str, img, date_ctx: dict) -> None:
         save_screen(state_key, day, img)
     except Exception as exc:  # pragma: no cover - 存档不该打断出图
         logger.warning("[Pipeline] 整屏存档失败 %s: %s", persona, exc)
+
+
+def _date_key(date_ctx: dict | None) -> str:
+    """date_ctx → YYYY-MM-DD。取不到就退回今天。"""
+    ctx = date_ctx or {}
+    y, m, d = ctx.get("year"), ctx.get("month"), ctx.get("day")
+    if isinstance(y, int) and isinstance(m, int) and isinstance(d, int):
+        return f"{y:04d}-{m:02d}-{d:02d}"
+    from .daily_cache import today_str
+
+    return today_str()
 
 
 def _target_day(date_ctx: dict | None) -> str:

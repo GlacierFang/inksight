@@ -1,0 +1,72 @@
+{
+  "mode_id": "CUSTOM_WEATHER",
+  "display_name": "天气看板",
+  "icon": "sunny",
+  "cacheable": false,
+  "description": "整屏天气图：左上大字温度与实况，右上三天预报，下半屏逐小时气温曲线与降水概率柱。逐小时数据，每小时换一次。",
+  "settings_schema": [
+    {
+      "key": "city",
+      "label": "城市",
+      "type": "location",
+      "description": "留空则使用设备位置"
+    }
+  ],
+  "content": {
+    "type": "computed",
+    "provider": "weather_dashboard",
+    "fallback": {
+      "page_url": "",
+      "has_image": "no",
+      "city": ""
+    }
+  },
+  "layout": {
+    "status_bar": {
+      "hidden": true
+    },
+    "footer": {
+      "hidden": true
+    },
+    "body": [
+      {
+        "type": "conditional",
+        "field": "has_image",
+        "conditions": [
+          {
+            "op": "eq",
+            "value": "yes",
+            "children": [
+              {
+                "type": "image",
+                "field": "page_url",
+                "x": 0,
+                "y": 0,
+                "width": 400,
+                "height": 300,
+                "fit": "fill",
+                "align_x": "center",
+                "align_y": "center",
+                "margin_bottom": 0
+              }
+            ]
+          },
+          {
+            "op": "eq",
+            "value": "no",
+            "children": [
+              {
+                "type": "text",
+                "template": "天气数据暂不可用",
+                "align": "center",
+                "font_size": 14,
+                "margin_x": 0,
+                "max_lines": 1
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
