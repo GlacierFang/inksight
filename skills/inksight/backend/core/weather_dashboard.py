@@ -17,6 +17,8 @@ import io
 import json
 import logging
 import math
+
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -226,7 +228,27 @@ def _font(name: str, size: int):
 
 
 def _text(draw, xy, s: str, font, fill=BLACK, anchor=None):
-    draw.text(xy, s, font=font, fill=fill, anchor=anchor)
+    """画文字：用 1 位掩膜渲染，笔画硬边、无灰阶。
+
+    墨水屏上文字要实心。直接画 RGB 抗锯齿字会留下中灰边，而四色量化
+    会把中灰判给金黄（比黑白混合更近），字口就长出金黄点。
+    用「抗锯齿 + 固定阈值」自己砍灰阶也不行 —— 小字号的笔画覆盖率本
+    来就低，阈值一刀切下去笔画就断了。
+
+    PIL 的 ImageDraw.Draw(im, "1") 直接出 1 位掩膜：字体 hinting 自己
+    把笔画落到像素网格上，笔画完整且没有灰阶，量化时误差为 0。
+    """
+    img = getattr(draw, "_image", None)
+    if img is None or not s:
+        draw.text(xy, s, font=font, fill=fill, anchor=anchor)
+        return
+    mask = Image.new("1", img.size, 0)
+    ImageDraw.Draw(mask, "1").text(xy, s, font=font, fill=1, anchor=anchor)
+    ink = mask.getbbox()
+    if not ink:
+        return
+    region = mask.crop(ink)
+    img.paste(Image.new("RGB", region.size, fill), ink[:2], region)
 
 
 def _text_w(draw, s: str, font) -> int:
@@ -241,84 +263,194 @@ def _dotted_vline(draw, x: int, y0: int, y1: int, fill=BLACK, step: int = 4):
         y += step
 
 
-def _draw_sun(draw, cx: float, cy: float, r: float, rays: int = 8, ray_len: float = 0.45):
-    """金黄日面 + 朱红光芒。"""
+# ── 图标：四色网点 ────────────────────────────────────────
+# 参考图（479×321 实拍屏）的太阳是金黄↔朱红网点、云是白底黑点，
+# 质感来自「四色抖动」本身。
+#
+# 做法：不用连续调交给管线抖动 —— 管线是 Atkinson 误差扩散，误差会随机
+# 偏色（金黄与朱红之间只按距离选），网点不可控且中灰会被判给金黄。
+# 这里自己按 8×8 有序抖动算好网点，直接用四个物理色原色落笔：
+# 量化时像素到调色板距离为 0、误差为 0，图案原样保留。
+#
+# 纯 PIL 实现：服务 venv 里没有 numpy，不能引入。
+
+_BAYER8 = (
+    (0, 32, 8, 40, 2, 34, 10, 42),
+    (48, 16, 56, 24, 50, 18, 58, 26),
+    (12, 44, 4, 36, 14, 46, 6, 38),
+    (60, 28, 52, 20, 62, 30, 54, 22),
+    (3, 35, 11, 43, 1, 33, 9, 41),
+    (51, 19, 59, 27, 49, 17, 57, 25),
+    (15, 47, 7, 39, 13, 45, 5, 37),
+    (63, 31, 55, 23, 61, 29, 53, 21),
+)
+
+
+def _clamp(v, lo, hi):
+    return lo if v < lo else (hi if v > hi else v)
+
+
+def _capsule(draw, x0, y0, x1, y1, w, fill):
+    """圆头粗线段（PIL 的 line 是平头，这里补两个圆头）。"""
+    draw.line([(x0, y0), (x1, y1)], fill=fill, width=w)
+    r = w / 2.0
+    for px, py in ((x0, y0), (x1, y1)):
+        draw.ellipse([px - r, py - r, px + r, py + r], fill=fill)
+
+
+def _draw_sun(img, cx, cy, r, rays=8, ray_len=0.45):
+    """日面：金黄↔朱红网点（中心偏金黄、越靠边越朱红）+ 黑描边；光芒：朱红圆头胶囊。"""
+    d = ImageDraw.Draw(img)
     for i in range(rays):
-        ang = math.radians(i * 360 / rays + 22.5)
-        r0 = r * 1.28
-        r1 = r * (1.28 + ray_len)
-        draw.line(
-            [
-                (cx + r0 * math.cos(ang), cy + r0 * math.sin(ang)),
-                (cx + r1 * math.cos(ang), cy + r1 * math.sin(ang)),
-            ],
-            fill=RED,
-            width=max(2, int(r * 0.16)),
+        ang = math.radians(i * 360.0 / rays)
+        r0 = r * 1.30
+        r1 = r * (1.30 + ray_len)
+        _capsule(
+            d,
+            cx + r0 * math.cos(ang), cy + r0 * math.sin(ang),
+            cx + r1 * math.cos(ang), cy + r1 * math.sin(ang),
+            max(2, int(r * 0.16)), RED,
         )
-    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=GOLD)
+
+    R = int(math.ceil(r))
+    pad = 2
+    size = 2 * R + 1 + 2 * pad
+    ox = int(round(cx)) - R - pad
+    oy = int(round(cy)) - R - pad
+    edge = 0.985
+    ring_w = 1.6 / max(r, 0.001)
+    lim = edge + ring_w
+    region = Image.new("RGB", (size, size))
+    mask = Image.new("L", (size, size))
+    px = region.load()
+    mp = mask.load()
+    for y in range(size):
+        row = _BAYER8[y % 8]
+        for x in range(size):
+            rr = math.hypot(x + ox - cx, y + oy - cy) / max(r, 0.001)
+            if rr > lim:
+                continue
+            mp[x, y] = 255
+            if rr > edge:
+                px[x, y] = BLACK
+                continue
+            gold_d = _clamp((0.92 - rr) * 1.12, 0.0, 0.88)
+            px[x, y] = RED if gold_d > row[x % 8] / 64.0 else GOLD
+    img.paste(region, (ox, oy), mask)
 
 
-def _draw_cloud(draw, cx: float, cy: float, w: float):
-    """线描云朵。"""
+def _draw_cloud(img, cx, cy, w, base=0.10, top=0.50):
+    """云：白底黑点网点（上疏下密）+ 黑描边。"""
+    x0 = int(math.floor(cx - 0.55 * w))
+    y0 = int(math.floor(cy - 0.50 * w))
+    x1 = int(math.ceil(cx + 0.55 * w))
+    y1 = int(math.ceil(cy + 0.30 * w))
+    bw = max(1, x1 - x0)
+    bh = max(1, y1 - y0)
+    shape = Image.new("L", (bw, bh), 0)
+    sd = ImageDraw.Draw(shape)
     for dx, dy, rr in ((-0.28, 0.06, 0.26), (0.06, -0.10, 0.32), (0.30, 0.08, 0.22)):
-        draw.ellipse(
-            [cx + dx * w - rr * w, cy + dy * w - rr * w,
-             cx + dx * w + rr * w, cy + dy * w + rr * w],
-            outline=BLACK,
-            width=max(1, int(w * 0.05)),
+        sd.ellipse(
+            [cx + dx * w - rr * w - x0, cy + dy * w - rr * w - y0,
+             cx + dx * w + rr * w - x0, cy + dy * w + rr * w - y0],
+            fill=255,
         )
-    draw.line(
-        [(cx - 0.48 * w, cy + 0.26 * w), (cx + 0.46 * w, cy + 0.26 * w)],
-        fill=BLACK,
-        width=max(1, int(w * 0.05)),
+    sd.rectangle(
+        [cx - 0.47 * w - x0, cy + 0.02 * w - y0,
+         cx + 0.46 * w - x0, cy + 0.26 * w - y0],
+        fill=255,
     )
+    region = Image.new("RGB", (bw, bh), WHITE)
+    px = region.load()
+    for y in range(bh):
+        row = _BAYER8[y % 8]
+        dens = _clamp(base + (top - base) * (y / max(1, bh - 1)), 0.0, 0.62)
+        for x in range(bw):
+            if dens > row[x % 8] / 64.0:
+                px[x, y] = BLACK
+    img.paste(region, (x0, y0), shape)
+    # 描边：轮廓内缩 1px 求差集
+    edge_m = ImageChops.subtract(shape, shape.filter(ImageFilter.MinFilter(3)))
+    img.paste(Image.new("RGB", (bw, bh), BLACK), (x0, y0), edge_m)
 
 
-def _draw_weather_icon(draw, code, cx: float, cy: float, size: float):
-    """按天气代码画图标：晴=金黄太阳，多云=太阳+云，阴=云，雨=云+红雨线。"""
+def _draw_weather_icon(img, code, cx, cy, size):
+    """按天气代码画图标：晴=日面，多云=日面+云，阴=云，雨=云+雨丝。"""
     try:
         code = int(code)
     except (TypeError, ValueError):
         code = -1
     if code == 0:
-        _draw_sun(draw, cx, cy, size * 0.34)
+        _draw_sun(img, cx, cy, size * 0.34)
         return
     if code == 1:
-        _draw_sun(draw, cx - size * 0.12, cy - size * 0.10, size * 0.26, rays=8, ray_len=0.36)
-        _draw_cloud(draw, cx + size * 0.06, cy + size * 0.12, size * 0.62)
+        _draw_sun(img, cx - size * 0.12, cy - size * 0.10, size * 0.26, rays=8, ray_len=0.36)
+        _draw_cloud(img, cx + size * 0.06, cy + size * 0.12, size * 0.62)
         return
     if code == 2:
-        _draw_sun(draw, cx - size * 0.18, cy - size * 0.14, size * 0.24, rays=8, ray_len=0.34)
-        _draw_cloud(draw, cx + size * 0.06, cy + size * 0.10, size * 0.66)
+        _draw_sun(img, cx - size * 0.18, cy - size * 0.14, size * 0.24, rays=8, ray_len=0.34)
+        _draw_cloud(img, cx + size * 0.06, cy + size * 0.10, size * 0.66)
         return
+    d = ImageDraw.Draw(img)
     if code in (95, 96, 99):
-        _draw_cloud(draw, cx, cy - size * 0.06, size * 0.7)
+        _draw_cloud(img, cx, cy - size * 0.06, size * 0.7)
         for dx in (-0.22, 0.0, 0.22):
-            draw.line(
-                [(cx + dx * size, cy + size * 0.24), (cx + dx * size - size * 0.05, cy + size * 0.42)],
-                fill=RED,
-                width=max(1, int(size * 0.06)),
+            _capsule(
+                d,
+                cx + dx * size, cy + size * 0.24,
+                cx + dx * size - size * 0.05, cy + size * 0.42,
+                max(1, int(size * 0.06)), RED,
             )
         return
     if 71 <= code <= 77 or code in (85, 86):
-        _draw_cloud(draw, cx, cy - size * 0.06, size * 0.7)
+        _draw_cloud(img, cx, cy - size * 0.06, size * 0.7)
         for dx in (-0.2, 0.0, 0.2):
-            draw.ellipse(
+            d.ellipse(
                 [cx + dx * size - size * 0.04, cy + size * 0.24,
                  cx + dx * size + size * 0.04, cy + size * 0.32],
                 fill=BLACK,
             )
         return
     if 51 <= code <= 67 or 80 <= code <= 82:
-        _draw_cloud(draw, cx, cy - size * 0.08, size * 0.72)
+        _draw_cloud(img, cx, cy - size * 0.08, size * 0.72)
         for dx in (-0.2, 0.02, 0.24):
-            draw.line(
-                [(cx + dx * size, cy + size * 0.22), (cx + dx * size - size * 0.05, cy + size * 0.40)],
-                fill=RED,
-                width=max(1, int(size * 0.055)),
+            _capsule(
+                d,
+                cx + dx * size, cy + size * 0.22,
+                cx + dx * size - size * 0.05, cy + size * 0.40,
+                max(1, int(size * 0.055)), RED,
             )
         return
-    _draw_cloud(draw, cx, cy, size * 0.76)
+    _draw_cloud(img, cx, cy, size * 0.76)
+
+
+def _draw_swatch(img, x0, y0, x1, y1):
+    """图例色块：金黄→朱红网点渐变（参考图里那个橙红小方块）。"""
+    w = max(1, int(x1 - x0))
+    h = max(1, int(y1 - y0))
+    region = Image.new("RGB", (w, h))
+    px = region.load()
+    for y in range(h):
+        row = _BAYER8[y % 8]
+        for x in range(w):
+            d = x / max(1, w - 1)
+            px[x, y] = RED if d > row[x % 8] / 64.0 else GOLD
+    img.paste(region, (int(x0), int(y0)))
+
+
+def _draw_precip_bar(img, x0, y0, x1, y1, pv):
+    """降水概率柱：底色金黄，朱红网点密度随概率升高（= 参考图色阶块）。"""
+    w = max(1, int(x1 - x0))
+    h = max(1, int(y1 - y0))
+    frac = _clamp(float(pv), 0.0, 100.0) / 100.0
+    region = Image.new("RGB", (w, h))
+    px = region.load()
+    for y in range(h):
+        row = _BAYER8[y % 8]
+        for x in range(w):
+            d = (x / max(1, w - 1)) * frac
+            px[x, y] = RED if d > row[x % 8] / 64.0 else GOLD
+    img.paste(region, (int(x0), int(y0)))
 
 
 def _draw_seg_digits(draw, text: str, x: int, y: int, digit_w: int, digit_h: int,
@@ -348,6 +480,17 @@ def _draw_seg_digits(draw, text: str, x: int, y: int, digit_w: int, digit_h: int
     for ch in text:
         if ch == " ":
             cx += digit_w // 2
+            continue
+        if ch == "1":
+            # 参考图里的「1」是一根连续的圆头竖条。
+            # 走通用 b+c 分支的话两段在中间留 2px 断口，看起来像断开的。
+            bw = t + 1
+            draw.rounded_rectangle(
+                (cx + digit_w - bw, y, cx + digit_w, y + digit_h),
+                radius=max(1, bw // 2),
+                fill=color,
+            )
+            cx += digit_w + t
             continue
         lit = _SEGMENTS.get(ch, "")
         for seg in "abcdefg":
@@ -399,6 +542,8 @@ def _render_page(data: dict, city: str):
     f_cn = _font("NotoSerifSC-Regular.ttf", 11)
     f_cn_b = _font("NotoSerifSC-Bold.ttf", 12)
     f_num = _font("Inter_24pt-Medium.ttf", 8)
+    # 轴标签是中文（「现在」「12时」），Inter 没有中文字形，会回退成方块。
+    f_axis = _font("NotoSerifSC-Regular.ttf", 9)
     f_desc = _font("NotoSerifSC-Bold.ttf", 13)
     f_unit = _font("NotoSerifSC-Regular.ttf", 9)
 
@@ -416,15 +561,15 @@ def _render_page(data: dict, city: str):
     # ── 左上：图标 + 七段温度 ─────────────────────────────
     icon_cx, icon_cy = 42.0, 40.0
     if code == 0:
-        _draw_sun(draw, icon_cx, icon_cy, 24)
+        _draw_sun(img, icon_cx, icon_cy, 24)
     elif code == 1:
-        _draw_sun(draw, icon_cx - 5, icon_cy - 4, 13, rays=8, ray_len=0.36)
-        _draw_cloud(draw, icon_cx + 3, icon_cy + 6, 34)
+        _draw_sun(img, icon_cx - 5, icon_cy - 4, 13, rays=8, ray_len=0.36)
+        _draw_cloud(img, icon_cx + 3, icon_cy + 6, 34)
     elif code == 2:
-        _draw_sun(draw, icon_cx - 7, icon_cy - 6, 13, rays=8, ray_len=0.34)
-        _draw_cloud(draw, icon_cx + 3, icon_cy + 6, 36)
+        _draw_sun(img, icon_cx - 7, icon_cy - 6, 13, rays=8, ray_len=0.34)
+        _draw_cloud(img, icon_cx + 3, icon_cy + 6, 36)
     else:
-        _draw_weather_icon(draw, code, icon_cx, icon_cy, 46)
+        _draw_weather_icon(img, code, icon_cx, icon_cy, 46)
 
     temp_str = "--"
     try:
@@ -496,7 +641,7 @@ def _render_page(data: dict, city: str):
         cx = col_x0 + i * (col_w + gap)
         ccx = cx + col_w / 2
         _text(draw, (ccx, 5), col["label"], f_cn_b, BLACK, anchor="ma")
-        _draw_weather_icon(draw, col["code"], ccx, 26, 21)
+        _draw_weather_icon(img, col["code"], ccx, 26, 21)
         if col["hi"] is not None:
             _text(draw, (ccx, 40), f"{col['lo']}~{col['hi']}°C", f_cn, BLACK, anchor="ma")
         _text(draw, (ccx, 56), col["desc"], f_cn, BLACK, anchor="ma")
@@ -516,7 +661,7 @@ def _render_page(data: dict, city: str):
     pl = "降水概率(%)"
     pw = _text_w(draw, pl, f_cn)
     px = chart_r - pw
-    draw.rectangle([px - 12, legend_y + 1, px - 4, legend_y + 9], fill=GOLD)
+    _draw_swatch(img, px - 12, legend_y + 1, px - 4, legend_y + 9)
     _text(draw, (px, legend_y), pl, f_cn, BLACK)
     gl = "气温(°C)"
     gw = _text_w(draw, gl, f_cn)
@@ -550,8 +695,12 @@ def _render_page(data: dict, city: str):
         coords = [(px_of(i), py_of(t)) for i, t in pts]
         draw.line(coords, fill=BLACK, width=1)
         prev_t = None
-        for (i, tv), (cx, cy) in zip(pts, coords):
-            draw.ellipse([cx - 2, cy - 2, cx + 2, cy + 2], fill=BLACK)
+        for n, ((i, tv), (cx, cy)) in enumerate(zip(pts, coords)):
+            if n == 0:
+                # 起点（现在）：空心圈，和后面的实心点区分开
+                draw.ellipse([cx - 3, cy - 3, cx + 3, cy + 3], outline=BLACK, width=1)
+            else:
+                draw.ellipse([cx - 2, cy - 2, cx + 2, cy + 2], fill=BLACK)
             label = f"{int(round(tv))}°"
             above = prev_t is None or tv >= prev_t
             ly = cy - 12 if above else cy + 3
@@ -561,12 +710,12 @@ def _render_page(data: dict, city: str):
             prev_t = tv
         # 曲线横轴：现在 + 每三小时的钟点
         axis_y = 212
-        _text(draw, (px_of(pts[0][0]), axis_y), "现在", f_num, BLACK, anchor="ma")
+        _text(draw, (px_of(pts[0][0]), axis_y), "现在", f_axis, BLACK, anchor="ma")
         for i, _t in pts[1:]:
             dt = parsed[i] if i < len(parsed) else None
             if dt is None:
                 continue
-            _text(draw, (px_of(i), axis_y), dt.strftime("%H时"), f_num, BLACK, anchor="ma")
+            _text(draw, (px_of(i), axis_y), dt.strftime("%H时"), f_axis, BLACK, anchor="ma")
 
     # 逐小时降水概率：金黄柱（从基线往上长）
     base_y = 262.0
@@ -581,9 +730,9 @@ def _render_page(data: dict, city: str):
             continue
         cx = chart_l + (k + 0.5) * col_w2
         h = min(bar_max_h, pv / 100.0 * bar_max_h)
-        draw.rectangle(
-            [cx - col_w2 * 0.28, base_y - h, cx + col_w2 * 0.28, base_y],
-            fill=GOLD,
+        _draw_precip_bar(
+            img,
+            cx - col_w2 * 0.28, base_y - h, cx + col_w2 * 0.28, base_y, pv,
         )
 
     # 降水概率数值行

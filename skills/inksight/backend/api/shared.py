@@ -589,7 +589,9 @@ async def build_image(
                 ) from exc
 
             _fp = param_fingerprint(get_effective_mode_config(config, persona), persona)
-            _daily_img = await get_today(persona, _fp, today_str(), screen_w, screen_h)
+            _daily_img = await get_today(
+                persona, _fp, today_str(), screen_w, screen_h, colors=colors
+            )
             if _daily_img is not None:
                 cache_hit = True
                 img = _daily_img
