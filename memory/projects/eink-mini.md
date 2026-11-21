@@ -51,6 +51,20 @@ SCK=6, MOSI=7, MISO=8, CS=1（CS2 与 CS1 短接）, DC=4, RST=10, BUSY=3, KEY_A
 模块根本没引出来，配成 16 固件连烧都烧不进去。只焊了一颗外接微动开关（A 键 GPIO5），
 其余只买不焊留储备。想接第二颗外接开关用 GPIO2。<!-- project: path:/home/open/.openclaw/workspace -->
 
+## 赛博木鱼页（2026-11-19）
+
+- 新增第 7 页「赛博木鱼」（manifest 顺序：clock -> **merit** -> timer -> weather -> hourly -> calendar -> almanac）。
+- **固件零改动**：木鱼页是普通 bitmap 页，设备用现有「B 短按 = 刷新当前页」来敲。
+- 服务端新增 `server/merit.py`：计数只增不减，落盘 `server/data/merit.json`（flock + 原子替换）。
+- 素材 `eink-mini/images/{1,2,3}.png` 是三帧动作（抬槌 / 击打 / 挥过），冰河大人自制。
+- 端点：`GET /api/merit`、`POST /api/merit/tap`、`GET /images/<n>.png`。
+- 设备端敲击判定（不改固件的服务端推断）：固件稳态请求序列是「manifest -> 位图」，
+  按 B 键会多出一次没有 manifest 兜底的位图请求。判定条件 = 上一次请求也是木鱼页位图
+  且距上次拉取 < 29 秒（29 秒卡掉 manifest 拉失败时固件自己补拉的那一次）。<!-- project: path:/home/open/.openclaw/workspace -->
+- 渲染：素材 120x120 -> 372 实际像素（124 逻辑像素）贴左上，右侧「功德」+ 大数字；
+  数字按位数自动降档（52 -> 20）。挥过帧的残影虚线用阈值 190，其余帧 165。<!-- project: path:/home/open/.openclaw/workspace -->
+- 控制台有可点的木鱼（CSS 三帧动画 + WebAudio 合成木鱼音），点一下 POST /api/merit/tap。
+
 ## 许可
 
 仓库 MIT；`firmware/lib/GxEPD2/` 是 vendored 的 GxEPD2 最小子集，沿用上游 GPL-3.0。
@@ -620,4 +634,209 @@ GitHub 直接拒绝，**不是 token 权限问题**。传分支名就正常。<!
 ### 工具改动
 
 `scripts/gh-push.sh` 加了 `FORCE=1` 支持 `--force-with-lease`（重写历史用）。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 刷完固件必须重新配网（2026-11-19）
+
+用 esptool 重新刷写固件后，设备开机是**白屏**。
+原因不是固件逻辑错：ESP32 的 WiFi 凭据在 flash 后没了，设备没连上网络，
+所以服务端看不到它、日志里也没有它的请求。重新配网后就正常了。
+
+排查时的判据：设备还活着但服务端 `online=false`，且没有任何 `?f=` 请求，
+说明它根本没联网，别急着改固件代码。
+
+刷写产物已持久化到 `/home/open/eink-mini-fw/`，`sudo ./flash.sh` 会自动
+探测 `/dev/ttyACM*` 或 `/dev/ttyUSB*` 并按 flash_args.txt 的四个偏移写入。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 发固件必须显式传 release_tag（2026-11-19）
+
+仓库 Release 编号惯例是语义化版本（v0.1.0）。`gh workflow run build.yml`
+不传 `-f release_tag=` 时，build.yml 会用默认值 `fw-<短SHA>`，生成一串
+不符合惯例的临时 Release（作者是 github-actions[bot]，不是手打的）。
+正式发布一律显式传 `-f release_tag=v0.2.0` 这样的版本号。
+
+附件下载/上传在本地不通：`release-assets.githubusercontent.com` 被出口代理挡成
+403，所以建 Release 和传附件只能交给 CI 的 runner（build.yml 里已注明）。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 心跳与位图拉取模型重构（2026-11-21）
+
+**在线/离线徽章保留**（冰河大人明确：不删在线结论），但推导依据换了。
+
+之前：设备每 30 秒拉一次清单 + 位图，「3 分钟没拉取算离线」。
+现在：清单拉取就是心跳，每 60 秒一次；位图改成**按版本号拉**。
+
+- 固件新增 `INK_HEARTBEAT_PERIOD_MS`（60s）、`INK_STATE_REPORT_PERIOD_MS`（60s）
+- `InkPageEntry` 多了 `version` / `appliedVersion` / `hasApplied`
+- `InkClient::fetchManifest` 解析 version，并按 id 继承「已上屏版本」
+  —— 清单每 60 秒来一次，不继承就等于每分钟重拉一次位图
+- 服务端 `device_state.py` 拆成两条线：`last_seen`（存活，徽章看这个）
+  和 `last_content_seen`（内容新鲜度）
+- 离线阈值不再是魔数 180，是 `心跳周期 × 2 + HTTP 超时 + 余量`
+  = 60×2 + 15 + 45 = 180。**固件与服务端两边常量必须同步改。**
+- 连带效果：天气页从「每 30 秒拉一次位图」变成「内容变了才拉」
+  （天气缓存 30 分钟一换，实际一天拉不了几次）
+
+**顺带修掉的真问题**：固件的 `g_timer.tick()` 原来只在停在计时器页时才跑，
+离开页面倒计时不推进、状态卡在 RUNNING。现在每轮 loop 都推进。
+
+### 计时器修复（2026-11-21）
+
+- **归零被暂停覆盖**：`toggle()` 里 `tick()` 刚把状态置 DONE，紧接着
+  `state_ = PAUSED` 把它盖了 → 屏上出现「PAUSE 00:00」，归零全刷提醒也丢。
+  修法：`if (tick()) return;`（tick() 返回 true = 刚归零，保持 DONE）。
+- **`doneAnnounced_` 是死字段**：只写不读，删掉。归零信号用 tick() 的返回值。
+- **预设注释说谎**：注释写「默认指向 25」，代码 `presetIndex_ = 4` 是 15 分钟
+  （25 在下标 5）。按代码为准，注释改了。
+- 预设循环实际顺序：15 → 25 → 30 → 45 → 1 → 3 → 5 → 10 → 15（数组升序轮转）。
+
+### 主机渲染器编译断链（2026-11-21）
+
+`firmware/tools/render_host.sh` 的源文件列表漏了 `src/ink_font_state.cpp`，
+链接报 `undefined reference to 'inkStateGlyph(char, int*)'`。
+`server/native_render.py` 早就改成了用 `SRC_FILES` 一份列表，render_host.sh
+还手抄着 —— 同一个坑两处。**CI 现在加了 host-render job**（编主机渲染器 +
+出预览图 + 传 artifact），这类漏项以后会被 CI 拦住。
+
+### 设备状态上报（2026-11-21）
+
+计时器状态只存在设备 RAM 里，服务端以前只能给一张**假的代表性预览图**。
+现在设备主动上报：`GET /api/device/state?page=&state=&remain=&preset=`
+（固件 `InkClient::reportDeviceState`，状态变化时立刻报 + 每 60 秒报一次）。
+服务端存进 `device_state.json` 的 `report` 字段，
+`device_state.timer_state()` 按上报时刻推算实时剩余（设备端倒计时是匀速的）。
+控制台显示「设备实时状态」并每 5 秒轮询 `/api/device` 刷新。
+
+### 刷固件由冰河大人自己做（2026-11-21）
+
+明确要求：**不要用本机（树莓派）的 USB 给 eink-mini 刷固件**。
+刷写是冰河大人自己的操作。我这边只负责把代码和产物准备好：
+commit → push → CI 编译 → Release 附件里的 `eink-mini-merged.bin` + `flash_args.txt`。
+
+`/home/open/eink-mini-fw/flash.sh` 是 Pi 上留的脚本，**不要主动执行**。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 局刷 vs 全刷：切页必须全刷（2026-11-21）
+
+`doFull` 从 1ab6a88（修「切页不刷新」那次）引入起**只用于计时器归零** ——
+切页一直是局刷。局刷只重写脏矩形，窗口外的上一页内容留在屏上，
+翻页钟 <-> 位图页尤其明显，切页残影一次次叠加。
+**现在切页做一次全刷。** <!-- project: path:/home/open/.openclaw/workspace -->
+
+### 按键采样有空洞：轻点会被判成长按（2026-11-21）
+
+**坑**：loop 只要阻塞一次（网络请求、面板刷新），按键就有一段时间没被采样。
+这段空洞里两种后果：
+- 轻点被整个吞掉（按下和松开都没采到）—— 用户看到「按了没反应」
+- **按下采到了、松开没采到** → `s.down` 还是旧的 true →
+  长按判定 `now - pressedAt >= 600ms` 成立 → 轻点被判成长按 →
+  计时器页的长按是 reset → **倒计时被自己的手指重置**
+  （真机日志里 `remain=791 → 883` 就是这么来的：重置回 900 后跑了 17 秒）
+
+**修法（三条一起，缺一不可）**：
+1. `ink_keys.cpp` 判长按时**直接读引脚**，引脚已经松开就不判长按。
+2. **绝不在按键处理里发网络请求** —— 上报挪到 loop 末尾并延后 2 秒；
+   周期上报遇到用户刚按过键也让路（3 秒内让路）。
+3. 小请求用短超时：状态上报 3 秒；`fetchText` 加了 `timeoutMs` 参数，
+   连接超时 ≤ 请求超时的一半 —— 阻塞 loop 的代价全记在用户按键头上。
+
+**教训**：在 ESP32 上，任何在 loop 里做的阻塞操作都会开一个「按键采样空洞」。
+加了网络功能之后必须重看按键判定的健壮性。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 操控逻辑改版：双击废除，选择与执行分到两个键（2026-11-21）
+
+**问题不是双击判不准，是结构性的**：双击必须等第二次松开才能判定，
+而那时第一次轻按的副作用已经发生。所以「短按=开始倒计时、双击=换预设」
+永远不可能同时成立 —— 第一下轻点已经把计时器启动，双击到达时它在跑，
+「运行中忽略换预设」这条规则又把双击吃掉。整条路径走不通。
+之前在双击判定上打的补丁（引脚复查）只能救「轻点被判成长按」，
+救不了「双击被短按抢跑」。
+
+**新逻辑（只有两个键，四条路径两两不重叠）**：
+
+| 手势 | 动作 |
+|---|---|
+| A 短按 | 下一页 |
+| A 长按 | 计时器页：换下一个预设 / 其它页：立即全刷 |
+| B 短按 | 开始 / 暂停 / 继续 |
+| B 长按 | 重置回满 |
+
+- 选预设挪到 A 键长按 → 选择（A）和执行（B）分属两个键。
+- 双击从 `ink_keys.cpp` 里彻底删除（枚举 `INK_EV_DOUBLE` 也没了）。
+- 短按不再有 250ms 确认窗，松开即刻生效。
+- 换预设在任何状态都生效，剩余按新预设满值重算；DONE 后换预设回 READY。
+- 屏上加了可发现性：顶部右当前预设（5x7 放大一倍），底部一条预设条、
+  当前项反白标出。5x7 ASCII 和 13px 大写字母是两套字模，后者没有数字。
+
+**教训**：任何时候两个手势共享同一个按键、且其中一个有立即副作用，
+就一定会打架 —— 动手前先问「这两条路径在时间上互斥吗」。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 最终按键映射：每条手势只对应一个动作（2026-11-21，v0.5.0）
+
+上一节的映射被冰河大人否掉了两处（「给按键赋了太多能力」），v0.5.0 定稿：
+
+| 手势 | 计时器页 | 木鱼页 | 其它页 |
+|---|---|---|---|
+| A 短按 | 下一页 | 下一页 | 下一页 |
+| A 长按 | 换下一个预设 | 无动作 | 无动作 |
+| B 短按 | 开始 / 暂停 / 继续 | 敲一下 | 无动作 |
+| B 长按 | 回满（重置到当前预设满值） | 配网 | 配网 |
+
+- 删掉「其它页 B 短按 = 强制重拉当前页」：位图内容本来就按 manifest 的
+  `version` 自动比对更新，手动重拉是冗余的第二条路径。
+- 删掉「其它页 A 长按 = 立即全刷」：切页全刷 + 每 10 分钟周期全刷已经够
+  清残影，手动全刷是第三份能力。
+- 连带下线 `InkDisplay::forceFullRefresh()`（无调用者）和
+  `InkClient::fetchPageFrameAt()`（被多帧版取代）。
+- 双击彻底没有，250ms 确认窗也没有；短按松开即发。
+
+**教训**：按键职责要按「每条手势在自己的上下文里只有一个含义」来分配。
+把动作塞进「别的键别的页」里，用户得记一张表 —— 表一复杂就会错，
+不如把没人用的格子留空。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 木鱼连播加速：2.9s → 1.6s（2026-11-21，v0.5.0）
+
+**慢在哪**：一次敲击串行做 3 次公网 HTTP（设备走 frp 隧道，单次约 300ms）
++ 3 次局刷（GxEPD2_290 `partial_refresh_time` = 420ms）+ 2 次 120ms 帧间隔
+≈ 2.9 秒。而且整段塞在按键处理里同步做完 —— 那 2.9 秒 loop 不跑、
+按键不采样，敲第二下直接被吞。
+
+**改法**：
+
+1. **服务端一次返回三帧**：`/api/page/merit.bin?f=1,2,0` 把击打/挥过/静息
+   三帧拼成 14208 字节（3 × 4736）返回，一次往返拿完。旧单帧 `?f=1`
+   仍然兼容（4736 字节）。
+2. **帧间隔 120ms 去掉**：局刷本身 420ms，三帧至少 1.26 秒 —— 面板的
+   物理下限，软件省不掉。
+3. **连播改成状态机**（`FETCH → PLAY`）：按键只置标志，loop 里一帧一帧
+   推进；动画期间又敲一下排队，播完再来一轮；切离木鱼页取消动画。
+4. **服务端 PNG 解码加缓存**（`lru_cache(maxsize=16)`，LANCZOS 缩放
+   36ms → 0）。
+
+新耗时：1 次公网往返（约 300ms）+ 3 × 420ms 局刷 ≈ **1.6 秒**。
+
+**功德计数语义不变**：一次敲击（带 `f=1`）只 +1，三帧是一次敲击的三个
+画面。实测批量请求后计数 25 → 26，不是 +3。批量帧由
+`note_page_explicit_batch` 处理。
+
+**教训**：先把耗时分项列出来（网络往返 × 次数、刷屏 × 次数、间隔 × 次数），
+再决定砍哪一项。盲目加并发或加缓存是浪费 —— 这里真正的大头是「次数」，
+不是「单次耗时」。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+### v0.5.0 发布（2026-11-21）
+
+- commit `456e4e2`（按键精简 + 木鱼加速），已推 `main`
+- CI run `44900533961` success，Release `v0.5.0`
+- 产物：`eink-mini-merged.bin`（1086048 字节）+ `flash_args.txt` + `SHA256SUMS`
+- 刷写仍由冰河大人自己做（本机不碰设备 USB）
+
+**待办（还没做）**：真机验证 A 切页全刷、计时器三种操作、木鱼播放速度、
+动画期间连敲手感。另有跟进项 `task_42d00587-aab1-4878-a05f-b6bcff5ee143`
+评估设备优先直连局域网地址（192.168.31.193/197），失败再回落 ruohan.site
+—— 局域网 34ms vs 公网 310ms，木鱼播放还能再快一截。
 <!-- project: path:/home/open/.openclaw/workspace -->
