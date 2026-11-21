@@ -1019,3 +1019,9 @@ gateway-owner 刷完 v0.6.0 后反馈：**真机验收通过**。离线木鱼这
 - B 长按清零当前功德，累计 strike 保留
 
 验收标准是用户可观察行为，不是与服务端渲染逐字节一致 —— 后者从来不是需求。
+
+## 插件与仓库收尾（2026-11-21）
+
+- read-guard 插件（~/.openclaw/policies/read-guard.ts）已在 Gateway 里生效：R1 只读熔断、R2 禁拉 CI 日志都实测拦住了我自己的调用。
+- 修正 WRITE_CMD 正则：重定向 ">>" 前不能带 \\b（词边界在 ">" 前不成立），否则 "cat >> file" 被误判成读操作、计数不清零。
+- workspace 仓库推送失败：GlacierFang/inksight 的 deploy key 拒绝写入（两把密钥都试过），本地提交未上远端。eink-mini 仓库推送正常。
