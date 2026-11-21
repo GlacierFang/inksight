@@ -1023,5 +1023,5 @@ gateway-owner 刷完 v0.6.0 后反馈：**真机验收通过**。离线木鱼这
 ## 插件与仓库收尾（2026-11-21）
 
 - read-guard 插件（~/.openclaw/policies/read-guard.ts）已在 Gateway 里生效：R1 只读熔断、R2 禁拉 CI 日志都实测拦住了我自己的调用。
-- 修正 WRITE_CMD 正则：重定向 ">>" 前不能带 \\b（词边界在 ">" 前不成立），否则 "cat >> file" 被误判成读操作、计数不清零。
-- workspace 仓库推送失败：GlacierFang/inksight 的 deploy key 拒绝写入（两把密钥都试过），本地提交未上远端。eink-mini 仓库推送正常。
+- 修正 WRITE_CMD 正则：重定向 ">>" 前不能带 \\b（词边界在 ">" 前不成立），否则 "cat >> file" 被误判成读操作、计数不清零。**这个修正已在磁盘上但尚未加载**：`openclaw plugins reload` 对该插件一直只报通用失败（"The CLI command failed."），Gateway 重启又被本会话的活跃 run 延后，下次重启会自动加载新源码。生效前的实际行为：shell 里 `cat >> file` 追加 heredoc 算「读」，会占只读额度；write / edit / git commit / tee 这类真写入能清零。
+- workspace 仓库已推上远端：用第三把钥匙 ~/.ssh/id_ed25519_inksight（指纹与远端 deploy key 一致；scripts/gh-push.sh 只试两把，所以之前失败）。远端新建 master 分支，fdb6029 的 main 未动。eink-mini README 推送正常（commit ca0cf06 → main）。
