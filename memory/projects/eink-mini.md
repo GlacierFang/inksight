@@ -994,3 +994,28 @@ host 渲染器只编 `ink_merit*.cpp`，编不到 `ink_client.cpp`。
 交付标准是「断网能敲、动画看得出来、数字看得清」，不是「和服务端渲染
 逐像素一致」。**别拿自己加的细节去质疑用户拍板的方向。**
 <!-- project: path:/home/open/.openclaw/workspace -->
+
+## 自我约束闸门 read-guard（2026-11-21 已生效）
+
+用 OpenClaw 插件钩子 `before_tool_call` 强制执行 AGENTS.md 的纪律，**已确认真的在拦截**。
+教训：首次实测"不生效"是因为只加了 `plugins.load.paths`，漏了 `plugins.entries.read-guard.enabled`，且改完源码要 rebuild/reload 才会生效。两者补齐后钩子开始拦截（证据：R2 规则直接拦下了我自己一条 exec）。
+
+三条规则：
+- **R1 只读熔断**：连续 3 次只读后第 4 次被拒。按 sessionKey 计数，120s 窗口；write / edit / apply_patch / 写类 shell 命令会清零。
+- **R2 禁拉 CI 日志**：shell 里取 GitHub Actions 的 logs / artifacts 一律拒（本机被出口代理挡成 403，拉了纯浪费）。
+- **R3 禁 shell 直连外网**：curl / wget 外部域名拒；取外部数据用 web_fetch 工具，本机地址放行。
+
+配置：`~/.openclaw/openclaw.json` → `plugins.load.paths` + `plugins.entries.read-guard.enabled=true`；源码 `~/.openclaw/policies/read-guard.ts`。
+待办卡 task_20577065 撤销时写的"已放弃"结论是错的，**以本节为准**。
+
+## v0.6.0 真机验收通过（2026-11-21 23:06）
+
+gateway-owner 刷完 v0.6.0 后反馈：**真机验收通过**。离线木鱼这条线到此收尾。
+
+用户实机确认的行为：
+- 断网状态下木鱼页仍可打开、播放动画、敲击、计数、清零
+- 一次敲击只增加 1
+- 动画期间连续敲击不丢事件
+- B 长按清零当前功德，累计 strike 保留
+
+验收标准是用户可观察行为，不是与服务端渲染逐字节一致 —— 后者从来不是需求。
