@@ -896,3 +896,61 @@ commit → push → CI 编译 → Release 附件里的 `eink-mini-merged.bin` + 
 我的实现选择，不该出现在他面前让他点头，更不该做成跟进卡。
 用户的方案通常比我想的简单；先按他的做，别自己加层。
 <!-- project: path:/home/open/.openclaw/workspace -->
+
+### v0.6.0：木鱼页离线化（2026-11-21，commit f9ae6a3 / dab1e07）
+
+冰河大人定的方案：**「直接写到固件」**。木鱼页整页在设备本地渲染 ——
+不拉位图、不断网也能敲。
+
+**固件侧**（新增文件）：
+
+- `firmware/src/ink_merit_assets.h/.cpp` —— 三帧整屏位图（296x128，4736
+  字节，1=黑）**离线烘焙**进固件。素材还是 `images/1.png`（抬槌）/
+  `2.png`（击打）/ `3.png`（挥过），版式还是原来那套：木鱼占满屏高，
+  右边「功德」+ 大号数字。
+- `firmware/src/ink_merit.cpp` —— 画整页：烘焙帧 + 当前功德数字。
+  数字用 ASCII 字模（`ink_merit_assets.cpp` 里），字号阶梯 52→20，
+  从大到小取第一个放得下的。
+- `firmware/src/ink_merit_store.h/.cpp` —— 功德计数存 **NVS**
+  （命名空间 `merit`）。掉电不丢，只增不减。设备是唯一权威。
+- `firmware/tools/gen_merit_assets.py` —— 生成上面两个素材文件的脚本。
+  改素材或字号就重跑它，别手改生成物。
+
+**按键**：木鱼页 B 短按 = 敲一下（+1）；**木鱼页 B 长按 = 清零**
+（只清功德，累计敲击次数保留）。其它页 B 长按仍是配网。
+
+**服务端**：只读镜像。
+- `server/merit.py` 整个重写：删掉那套「靠请求间隔猜用户敲了没」的
+  启发式（显式上报 + 启发式并行命中同一次敲击，正是「一次敲击被算成
+  两次」的根源）。现在只有一个写入路径 `report()`，调用方是设备上报。
+- 设备通过 `GET /api/device/state?...&merit=N&merit_strike=M` 报绝对值。
+- manifest 里 merit 的 type 从 `bitmap` 改成 `native`。
+- 网页端**不再能敲**（`/api/merit/tap` 和 `/images/<n>.png` 都删了），
+  控制台只读显示设备上报的数。两边各算一份只会越算越乱。
+- 设备首次开机时拉一次 `/api/merit` 把服务器上已有的数**接过来**
+  （`inkMeritSeed`），否则第一次上报就把历史清成 0。
+
+**发布**：commit `f9ae6a3`（实现）+ `dab1e07`（修 `g_net` 指针 bug）。
+CI run `44914572017` success，Release `v0.6.0`。
+产物 `eink-mini-merged.bin` 1109280 字节 / `firmware.bin` 1043744 字节。
+
+**踩的坑**：`g_net` 是 `InkNet*`，写 `g_net.connected()` 编不过，
+要用 `->`。CI 第一次跑挂了就是这个（host-render job 过了，ESP32 job
+没过）。**固件改动要靠 CI 编，host 端编过不代表固件编得过** ——
+host 渲染器只编 `ink_merit*.cpp`，编不到 `ink_client.cpp`。
+<!-- project: path:/home/open/.openclaw/workspace -->
+
+### 教训：别把用户已经拍板的事当成可以推翻的东西（2026-11-21）
+
+离线木鱼是冰河大人早就定的方案（「直接写到固件」）。我做着做着开始
+纠结像素级细节（数字墨迹右缘对齐到 x=284、字号阶梯口径），然后
+**差点把整个离线木鱼方案当成「我的实现偏好」给砍掉**，还问他「留还是
+砍」。
+
+他直接叫停：「离线木鱼就是要做的事情，只不过你自己跑偏去纠结像素级别
+的区别了而已！」
+
+**判据**：像素级对齐这种细节，是我自己加的完美主义，不是用户的要求。
+交付标准是「断网能敲、动画看得出来、数字看得清」，不是「和服务端渲染
+逐像素一致」。**别拿自己加的细节去质疑用户拍板的方向。**
+<!-- project: path:/home/open/.openclaw/workspace -->
