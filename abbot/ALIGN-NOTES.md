@@ -561,6 +561,31 @@ PCM 样本是**有符号 16 位**，`>> 8` 是**算术右移** —— 负样本�
 
 **改动清单：** `web/index.html` 两处字节打包补 `&255`，并把吞异常的 `catch` 改成 `console.error` + 返回空串（静默失败是这次排查耗时的主因）。
 
+### 9.11 Phase 1 DoD 正式验收：控制台设备模拟器（`cli_sim.py`）
+
+前两轮验的是**管理台浏览器路径**（虚拟设备走 `/admin/api/device-sim/*` 桥接），Phase 1 DoD 清单里的正式验收脚本是 `server/cli_sim.py` —— 它以**真实设备身份**（明文 JSON 配对换密钥 → HMAC 签名 → AES 信封）直接打 `/api/v1/*`。这条路径此前从未跑过，本轮补上。
+
+**跑法（三个夹具是难点）：**
+
+1. **习题照片**：PIL 渲染一张含中文题目 + 蓝色手写演算痕迹的图（**必须带草稿痕迹** —— 否则按 `05` §4.3 的「草稿痕迹初筛」规则，模型会正确地回 `NEED_DRAFT` 要求先写第一步，而不是给完整解析）。
+2. **语音 WAV**：用生产 `speech_engine.synthesize()` 合成真人声（`16kHz/16bit/Mono`），不要用 `cli_sim.py` 自带的 `make_tone_wav()` 正弦音 —— 纯音调 ASR 转不出文字。
+3. **配对码**：登录管理台 `POST /admin/api/pair-code`（需 `X-Requested-With` 头）。
+
+**实测结果（真实模型，6 步全 PASS）：**
+
+| 步骤 | 结果 |
+| :--- | :--- |
+| `/api/v1/ping` | HTTP 200，标准信封 |
+| 配对 | 成功换到 `device_secret` |
+| `/api/v1/study/solve` | **`status=SOLVED`** —— 逐题分步 `display_markdown`（因式分解 / 配方 / 展开平方）+ 费曼反问 + `has_audio=true`，配额 10→9 正确扣减 |
+| `/api/v1/study/voice` | ASR 转写正确 → 模型答出**求根公式完整推导** → `has_audio=true` |
+| `/api/v1/sync/bootstrap` | 带回待下载学科包与《小王子》文本及签名 Token |
+| `/api/v1/ota/check` | `has_update=false` |
+
+**注意 `audio_url` 用的是明文 HTTP**（`http://ruohan.site/abbot/api/v1/content/download?token=...`）—— 这是**已拍板的架构**，不是缺陷，别再当风险提。
+
+**同步修正：** `doc/06` §3.1 原写「真实模型调用尚未验证（`ai.provider` 暂置 `mock`）」，已过时；同时补齐 §四「联调排坑指南」（本轮四条坑）与两张实测记录表。
+
 - **真实 MiniMax 视觉/ASR/TTS 接口验证**（`ai.provider` 仍为 `mock`）—— 独立任务卡。
 - **固件侧网络层 C 接口与 `05` 字段对齐**（`net_study_solve()` 缺 `edu_stage`/`enrollment_year`/`device_remaining_quota` 入参）—— 独立任务卡。
 - **`pypdf` vs `python-docx` 中文教材抽取质量对比** —— 独立任务卡。
