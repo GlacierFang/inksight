@@ -619,7 +619,9 @@ PCM 样本是**有符号 16 位**，`>> 8` 是**算术右移** —— 负样本�
 
 ### 9.13 固件（Phase 2）现状
 
-源码在 `abbot/firmware/`（目录自包含，**仓库归属待定** —— 可整体拷进独立仓库）。
+源码在 `abbot/firmware/`，**已定：独立公开仓库 `GlacierFang/abbot-firmware`**（`main` 存源码，`fw-bin` 存固件产物，`ci-logs` 存 CI 日志与产物清单）。本目录是同一份源码的主副本，两仓已核对无差异。
+
+**固件一律由 GitHub Actions 编译**（网关主人定调："固件走 github 生成，不做本地 pio 安装"）。本机不装 PlatformIO —— espressif 工具链域名不在出口白名单，且装 PlatformIO 反而违背这个定调。本机只保留 `libmbedtls-dev`，仅用于主机侧向量测试（那不是固件本地编译）。
 
 **已交付：**
 
@@ -630,7 +632,9 @@ PCM 样本是**有符号 16 位**，`>> 8` 是**算术右移** —— 负样本�
 | `include/hal_interfaces.h` | 逐字抄录，未改未加 | doc/02 §六 |
 | `include/net_client.h` + `src/net/net_client.c` | 端云签名 + AES-128-CTR 信封 + 128-bit 计数器 | doc/05 §3 |
 | `test/test_net_client.c` | 主机侧向量测试，18 PASS / 0 FAIL | doc/05 §3.4 |
-| `.github/workflows/build.yml` | Actions 编译 + fw-bin 分支 + Release | 沿用 eink-mini 已验证通路 |
+| `include/lv_conf.h` | LVGL v8.3.11 配置（官方模板派生，`LV_CONF_INCLUDE_SIMPLE`） | LVGL 找不到配置直接编译失败 |
+| `src/hal/hal_display.cpp` | ST7796S 竖屏 + 5 档背光（LovyanGFX 1.1.16，SPI 40MHz） | doc/02 §3.1 |
+| `.github/workflows/build.yml` | Actions 编译 + fw-bin 分支 + Release + ci-logs 回写 | 沿用 eink-mini 已验证通路 |
 
 **信封层是端云协议的命门，已用实弹验证：** NIST SP 800-38A F.5.1 官方向量 4/4 先自检 AES-CTR 分组与计数器推进，再核对 `doc/05` §3.4 全部锁定向量 —— 请求体、`block_index=2` 局部块密文、`RAW_BODY_SHA256`、`X-Signature`、`X-Resp-Signature`、空 body SHA-256、信封回环，外加两条负例。**期望值不手抄**，以 `doc/verify/gen_vectors.py` 为唯一出处，与 Python 权威实现逐字节对齐。
 
@@ -640,7 +644,17 @@ PCM 样本是**有符号 16 位**，`>> 8` 是**算术右移** —— 负样本�
 2. **HMAC-SHA256 手工构造 RFC 2104（ipad/opad）**，不用 mbedtls 的 `mbedtls_md_hmac_*` —— 3.x 把它标 deprecated，会撞 `-Werror`。
 3. **AES-CTR 手工推进完整 128-bit 计数器**，不用 `mbedtls_aes_crypt_ctr` —— 后者只推进尾部 32-bit，与 `04` §4.2 的 nonce_counter 公式和 `cards.enc` 局部块解密语义不一致。
 
-**尚未做：** 六个 HAL 实现（display / camera / audio / joystick / storage / power）、LVGL 13 页 UI、FreeRTOS 双核任务、网络任务封装。**实体硬件未到位**，摄像头取图 / 摇杆 ADC 阈值 / 屏幕刷屏 / TF 挂载这四项只有编译期保证，真机行为要等硬件做逐像素、逐交互黄金样校准。固件本身也尚未经 Actions 实编译（仓库归属定下来才有地方跑 CI）。
+**Actions 实编译已通过（2026-11-24）：** 提交 `e567bb2` 的 run 全绿 —— 主机侧向量测试 18 PASS、固件编译成功、产物推送成功、Release `fw-e567bb2ee1aa962328c911e634bf097ec50c2485` 已生成。`fw-bin` 分支实测清单：`bootloader.bin` 15104 B、`firmware.bin` 355056 B、`partitions.bin` 3072 B，另有 `manifest.txt`（文件名 / 字节数 / sha256）。
+
+**CI 踩过的坑（都是踩出来的，别回头再踩）：**
+
+1. **产物文件名不能硬编码。** 上一轮编译本身成功，失败的是"推 fw-bin 分支"那步 —— 脚本 `set -e` + 点名 5 个文件，其中 `boot_app0.bin` 是 ESP-IDF 的产物、Arduino 框架根本不生成，`git hash-object -w` 找不到文件直接 fatal，整步当场死掉，而错误只写在本机拉不到的 Actions step log 里。**Arduino 框架实际只产 3 个 bin**（bootloader / partitions / firmware），没有 `boot_app0.bin`、也没有 `flash_args.txt`。现在改成 glob 收集 + manifest 自证。
+2. **`gh release create` 必须有 `GH_TOKEN`**，否则必然鉴权失败（原来漏了，那步恰好被 skip 掉才没暴露）。
+3. **ci-logs 回写必须排在"记录步骤结论"之后**，否则 `steps.txt` 生成得太晚，进不了 ci-logs。
+4. **本机拉不到 Actions 的 logs / artifacts**（blob 存储被出口代理挡成 403）。因此定位失败**只能读代码 + 读 ci-logs 分支**，不能去拉 Actions 日志 —— 这也是本节加 `manifest.txt` / `steps.txt` 的原因。
+5. **本机巡检脚本曾按字母序取"最新"日志** —— 日志文件名是 commit SHA，字母序 ≠ 时间序，于是连盯了三轮旧报错，误以为固件编译不过。已改为按 git 历史排序并比对当前 main 的 SHA。
+
+**尚未做：** 六个 HAL 实现（camera / audio / joystick / storage / power 五个还没写，display 已完成骨架）、LVGL 13 页 UI、FreeRTOS 双核任务、网络任务封装。**实体硬件未到位**，摄像头取图 / 摇杆 ADC 阈值 / 屏幕刷屏 / TF 挂载这四项只有编译期保证，真机行为要等硬件做逐像素、逐交互黄金样校准。
 
 - **真实 MiniMax 视觉/ASR/TTS 接口验证**（`ai.provider` 仍为 `mock`）—— 独立任务卡。
 - **固件侧网络层 C 接口与 `05` 字段对齐**（`net_study_solve()` 缺 `edu_stage`/`enrollment_year`/`device_remaining_quota` 入参）—— 独立任务卡。
