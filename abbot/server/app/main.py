@@ -32,6 +32,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from app import security
 from app.book_cleaner import BookCleanError, clean_book
 from app.config import settings
+from app.device_bridge import BridgeError, DeviceBridge, read_pack_cards, scan_wifi
 from app.ota_manager import OtaError, OtaManager
 from app.pack_builder import PackBuildError, build_pack, parse_source_text
 from app.router_ai import (
@@ -560,6 +561,96 @@ async def admin_rotate_secret(req: Request):
     devices.pop(device_id)
     get_storage().write_devices(devices)
     return JSONResponse({"ok": True, "msg": "旧密钥已吊销，请重新配对"})
+
+
+# ================================================================ 真机画面（虚拟设备）
+def _bridge(device_id: str) -> DeviceBridge:
+    """虚拟设备的网络层：回环打本机真实设备 API（签名 + 加密信封全走生产实现）。"""
+    return DeviceBridge(
+        f"http://{settings.host}:{settings.port}",
+        device_id,
+        lambda: _device_secret(device_id),
+    )
+
+
+@app.post("/admin/api/device-sim/pair")
+async def admin_device_sim_pair(req: Request):
+    """虚拟设备绑定：用管理台生成的配对码，走真实 `/api/v1/pair` 换密钥。
+
+    密钥**不回传浏览器** —— 浏览器跑在明文 HTTP 上，算不了签名；密钥留在服务端，
+    浏览器只管发意图。
+    """
+    if (fail := _require_session(req)):
+        return fail
+    if (fail := _require_csrf(req)):
+        return fail
+    data = await _admin_json(req)
+    device_id = str(data.get("device_id") or "").strip()
+    pair_code = str(data.get("pair_code") or "").strip()
+    if not device_id or not pair_code:
+        return JSONResponse({"ok": False, "msg": "请填写设备标识和配对码"}, status_code=400)
+    try:
+        info = await _bridge(device_id).pair(pair_code)
+    except BridgeError as exc:
+        return JSONResponse({"ok": False, "msg": str(exc)}, status_code=400)
+    return JSONResponse(
+        {
+            "ok": True,
+            "msg": "已绑定",
+            "data": {"device_id": device_id, "server_time": info.get("server_time")},
+        }
+    )
+
+
+@app.post("/admin/api/device-sim/call")
+async def admin_device_sim_call(req: Request):
+    """虚拟设备发起一次真实设备端请求。
+
+    签名、信封加密、响应验签全部在服务端按 05 §3.2 执行；浏览器只收到解密后的
+    业务数据与调试层信息（时间戳 / 签名 / 验签结果）。
+    """
+    if (fail := _require_session(req)):
+        return fail
+    if (fail := _require_csrf(req)):
+        return fail
+    data = await _admin_json(req)
+    device_id = str(data.get("device_id") or "").strip()
+    method = str(data.get("method") or "POST").upper()
+    path = str(data.get("path") or "").strip()
+    payload = data.get("payload") or {}
+    if not device_id or not path:
+        return JSONResponse({"ok": False, "msg": "参数不全"}, status_code=400)
+    try:
+        result = await _bridge(device_id).call(method, path, payload)
+    except BridgeError as exc:
+        return JSONResponse({"ok": False, "msg": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True, "msg": "ok", "data": result})
+
+
+@app.get("/admin/api/device-sim/wifi")
+async def admin_device_sim_wifi(req: Request):
+    """扫周边热点（真实调用 `iw` / `nmcli`）。"""
+    if (fail := _require_session(req)):
+        return fail
+    aps = await scan_wifi()
+    return JSONResponse({"ok": True, "msg": "ok", "data": {"aps": aps}})
+
+
+@app.get("/admin/api/device-sim/pack-cards")
+async def admin_device_sim_pack_cards(req: Request):
+    """解出学科包卡片正文（设备侧用 `device_secret[0:16]` 解密 `cards.enc`）。"""
+    if (fail := _require_session(req)):
+        return fail
+    device_id = req.query_params.get("device_id", "")
+    pack_id = req.query_params.get("pack_id", "")
+    secret = _device_secret(device_id)
+    if not secret:
+        return JSONResponse({"ok": False, "msg": "设备还没配对"}, status_code=400)
+    try:
+        cards = read_pack_cards(get_storage().root, pack_id, secret)
+    except (FileNotFoundError, ValueError) as exc:
+        return JSONResponse({"ok": False, "msg": str(exc)}, status_code=404)
+    return JSONResponse({"ok": True, "msg": "ok", "data": {"cards": cards}})
 
 
 @app.post("/admin/api/quota/reset")

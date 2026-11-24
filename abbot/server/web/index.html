@@ -45,6 +45,18 @@
   .kv span:first-child{color:var(--mut)}
   .hide{display:none}
   code{background:#eef1f5;padding:1px 5px;border-radius:4px;font-size:12.5px}
+  /* ===== 真机画面（320×480 竖屏复现） ===== */
+  .dsrow{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+  .dsscreenwrap{width:480px;height:720px;overflow:hidden;border:1px solid var(--line);border-radius:8px;background:#f4f6f8;flex:0 0 auto}
+  .dsscreenwrap canvas{display:block;transform-origin:top left}
+  .dsside{flex:1 1 260px;min-width:240px}
+  .dsdpad{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px}
+  .dsacts{display:flex;gap:6px;margin-bottom:10px}
+  .dsacts .dsbtn{flex:1}
+  .dsbtn{padding:8px 6px;font-size:13px}
+  .dsbtn.hit{background:#2559c4}
+  details{margin-top:12px}
+  summary{cursor:pointer;font-size:13.5px;color:var(--mut)}
 </style>
 </head>
 <body>
@@ -77,6 +89,7 @@
       <div class="tab" data-t="packs">学科包</div>
       <div class="tab" data-t="books">电子书</div>
       <div class="tab" data-t="ota">固件</div>
+      <div class="tab" data-t="dscreen">真机画面</div>
     </div>
 
     <div class="msg" id="globalMsg"></div>
@@ -188,6 +201,48 @@
       <div class="row" style="margin-top:12px"><button onclick="saveOtaPolicy()">保存策略</button></div>
       <label style="margin-top:16px">已发布版本</label>
       <table id="otaTable"><thead><tr><th>版本</th><th>大小</th><th>时间</th></tr></thead><tbody></tbody></table>
+    </div>
+
+    <!-- 真机画面 -->
+    <div class="card pane hide" data-p="dscreen">
+      <h2>真机画面 · 320×480 竖屏复现</h2>
+      <p class="sub" style="margin:0 0 12px">依据 <code>03-竖屏界面布局与交互规范</code> 复现设备屏显。摇杆输入按 03 §3.2 仲裁表执行；拍题与语音走真实设备 API，不是前端假动画。</p>
+      <div class="dsrow">
+        <div class="dsscreenwrap" id="dsWrap"><canvas id="dsCanvas" width="320" height="480"></canvas></div>
+        <div class="dsside">
+          <div class="dsdpad">
+            <button class="dsbtn sec" data-g="UP">▲ 上</button>
+            <button class="dsbtn sec" data-g="DOWN">▼ 下</button>
+            <button class="dsbtn sec" data-g="LEFT">◀ 左</button>
+            <button class="dsbtn sec" data-g="RIGHT">右 ▶</button>
+          </div>
+          <div class="dsacts">
+            <button class="dsbtn sec" data-g="CLICK">短按</button>
+            <button class="dsbtn sec" data-g="DBL_CLICK">双击</button>
+            <button class="dsbtn sec" data-g="LONG_PRESS">长按</button>
+          </div>
+          <div class="kv"><span>键盘</span><span>方向键 / 回车 / Esc</span></div>
+          <div class="kv"><span>长按</span><span>按住空格 ≥600ms</span></div>
+          <label>虚拟设备 ID</label>
+          <input id="dsDevId" value="esp32s3_web0001" autocomplete="off">
+          <label>配对码（在「设备」页生成）</label>
+          <input id="dsPairCode" placeholder="6 位数字" autocomplete="off">
+          <div class="row" style="margin-top:8px">
+            <button onclick="DS.pair()">绑定虚拟设备</button>
+            <button class="sec" onclick="DS.reset()">重置画面</button>
+          </div>
+          <label>注入画面（拍题用）</label>
+          <input type="file" id="dsPhoto" accept="image/*">
+          <label>注入语音（提问用）</label>
+          <input type="file" id="dsAudio" accept="audio/*">
+          <label>口述内容（ASR 未启用时走这条）</label>
+          <input id="dsVoiceText" placeholder="例如：这题的第二步为什么这样做">
+          <div class="row" style="margin-top:8px">
+            <select id="dsZoom" style="width:auto;flex:0 0 auto"><option value="1">1×</option><option value="1.5" selected>1.5×</option><option value="2">2×</option></select>
+          </div>
+        </div>
+      </div>
+      <details style="margin-top:12px"><summary>调试层 · 原始信封 / 签名 / 时间戳</summary><pre id="dsDebug">—</pre></details>
     </div>
 
   </div>
@@ -341,6 +396,715 @@ async function saveOtaPolicy(){
 }
 
 $('pwd').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+</script>
+
+<script>
+/* ============================================================
+ * 真机画面：320×480 竖屏复现
+ * 依据 doc/03-竖屏界面布局与交互规范.md
+ *   - 三区骨架：状态栏 y=0~24 / 内容区 y=24~448 / 提示栏 y=448~480
+ *   - 摇杆手势按 03 §3.2 仲裁表派发（上下左右 + 短按/双击/长按）
+ *   - 云端数据全部走真实设备 API（服务端回环做签名与信封加密）
+ * 浏览器不自己算签名：管理台跑在明文 HTTP 上，crypto.subtle 不可用。
+ * ============================================================ */
+const DS = (function(){
+  const W=320, H=480, TOP=24, BOT=448;
+  const COL={bg:'#F4F6F8',card:'#FFFFFF',fg:'#1E293B',mut:'#64748B',acc:'#2563EB',warn:'#DC2626',line:'#E2E8F0'};
+  const st={
+    page:'PAGE_HOME', prev:null, sel:0,
+    overlay:null, toast:null, toastT:0,
+    battery:85, wifi:'强', weather:null,
+    quota:{used:0,total:10},
+    schedule:null, packs:[], books:[], outbox:[],
+    solve:null, sid:null, hint:0,
+    photo:null, photoB64:null, audioPcm:null,
+    kb:{buf:'',upper:false,target:'配对码',cur:0},
+    wifiList:[], wifiSel:0,
+    pom:{running:false,remain:1500},
+    reader:{title:'',lines:[],page:0,bytes:0},
+    cards:[], cardIdx:0, cardFlip:false, ota:null,
+    devId:'', paired:false, busy:false, lastRaw:null, booted:false, wifiScanned:false,
+    backlight:3, volume:3, voiceText:'',
+  };
+  let cv=null, cx=null, dpr=1;
+
+  // ------------------------------------------------------------ 绘制基元
+  function F(size,bold){ return (bold?'600 ':'')+size+'px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif'; }
+  function text(s,x,y,o){
+    o=o||{}; cx.font=F(o.size||12,o.bold); cx.fillStyle=o.color||COL.fg;
+    cx.textAlign=o.align||'left'; cx.fillText(String(s==null?'':s),x,y); cx.textAlign='left';
+  }
+  function rrect(x,y,w,h,r){
+    cx.beginPath();
+    cx.moveTo(x+r,y); cx.arcTo(x+w,y,x+w,y+h,r); cx.arcTo(x+w,y+h,x,y+h,r);
+    cx.arcTo(x,y+h,x,y,r); cx.arcTo(x,y,x+w,y,r); cx.closePath();
+  }
+  function card(x,y,w,h){ rrect(x,y,w,h,6); cx.fillStyle=COL.card; cx.fill(); cx.strokeStyle=COL.line; cx.lineWidth=1; cx.stroke(); }
+  function fitText(s,maxW,size){
+    cx.font=F(size||12,false);
+    let out=String(s==null?'':s), i=0;
+    while(cx.measureText(out).width>maxW && i<out.length){ out=out.slice(0,out.length-1); i++; }
+    if(i<out.length) out=out.slice(0,out.length-1)+'…';
+    return out;
+  }
+  function menu(x,y,w,items,sel,rowH){
+    rowH=rowH||30;
+    items.forEach((it,i)=>{
+      const yy=y+i*rowH, on=(i===sel);
+      text(on?'▶':' ',x,yy+16,{color:COL.acc});
+      text(it.label,x+16,yy+16,{color:on?COL.acc:COL.fg,bold:on});
+      if(it.right) text(it.right,x+w,yy+16,{align:'right',color:COL.mut,size:11.5});
+    });
+  }
+  function statusBar(){
+    cx.fillStyle=COL.bg; cx.fillRect(0,0,W,H);
+    const wtxt=st.weather&&st.weather.text?st.weather.text+' '+(st.weather.temp!=null?st.weather.temp+'°C':''):'--°C';
+    text(wtxt,6,17,{size:12});
+    text('WiFi:'+st.wifi,120,17,{size:12});
+    text('['+st.battery+'%]',W-6,17,{size:12,align:'right',color:st.battery<15?COL.warn:COL.fg});
+  }
+  function hintBar(t){
+    text(t||'',W/2,H-11,{size:11,align:'center',color:COL.mut});
+  }
+  function toast(msg){
+    st.toast=msg; st.toastT=Date.now()+2000;
+  }
+
+  // ------------------------------------------------------------ 设备端调用
+  async function devCall(method,path,payload){
+    if(!st.paired){ toast('还没绑定虚拟设备'); return null; }
+    st.busy=true;
+    const r=await api('/admin/api/device-sim/call',{method:'POST',body:{device_id:st.devId,method:method,path:path,payload:payload||{}}});
+    st.busy=false;
+    if(!r.j.ok){ toast(r.j.msg||'调用失败'); return null; }
+    st.lastRaw=r.j.data.raw;
+    debugShow(r.j.data);
+    if(r.j.data.code!==0 && r.j.data.code!==undefined) toast(r.j.data.msg||'出了点问题');
+    return r.j.data;
+  }
+  function debugShow(d){
+    const el=document.getElementById('dsDebug'); if(!el) return;
+    const raw=d.raw||{};
+    el.textContent=[
+      'METHOD  '+raw.method+' '+raw.path+(raw.query?'?'+raw.query:''),
+      'TS      '+raw.ts,
+      'X-Signature  '+raw.req_sig,
+      'X-Resp-Sig  '+(raw.resp_sig_present?(raw.resp_sig||'(空)'):'(该响应按契约不带签名)'),
+      '响应验签  '+(raw.resp_sig_present?(raw.resp_verified?'通过':'未通过'):'不适用'),
+      '响应体  '+raw.body_len+' 字节  sha256='+(raw.body_sha256||'').slice(0,16)+'…',
+      '业务码  '+(d.code===null?'—':d.code)+'  '+JSON.stringify(d.data).slice(0,300),
+    ].join('\n');
+  }
+
+  // ------------------------------------------------------------ 启动流程
+  async function boot(){
+    // WiFi 只扫一次，但数据每次都要刷 —— 绑定后必须能拉到数据，
+    // 所以不能拿 booted 把整个 boot 短路掉。
+    if(!st.wifiScanned){
+      st.wifiScanned=true;
+      const r=await api('/admin/api/device-sim/wifi');
+      if(r.j.ok) st.wifiList=r.j.data.aps||[];
+    }
+    await refresh();
+  }
+  async function refresh(){
+    const d=await devCall('POST','/api/v1/sync/bootstrap',{
+      device_id:st.devId, fw_version:'v1.0.3', battery_pct:st.battery,
+      schedule_updated_at:st.schedule?st.schedule.updated_at:0, local_packs:[], local_books:[],
+    });
+    if(!d) return;
+    if(d.data&&d.data.weather) st.weather=d.data.weather;
+    if(d.data&&typeof d.data.effective_remaining_quota==='number'){
+      st.quota.total=10; st.quota.used=10-d.data.effective_remaining_quota;
+    }
+    // 课表：走真实下载通道拿
+    if(d.data&&d.data.schedule_download&&d.data.schedule_download.token){
+      const sd=await devCall('GET','/api/v1/content/download?token='+encodeURIComponent(d.data.schedule_download.token));
+      if(sd&&sd.data&&sd.data.text){ try{ st.schedule=JSON.parse(sd.data.text); }catch(e){} }
+    }
+    // 待更新学科包 / 电子书
+    if(d.data&&d.data.pending_packs){
+      st.packs=d.data.pending_packs.map(function(p){
+        return {id:(p.rel_path||'').split('/')[1]||p.pack_id, token:p.token||''};
+      });
+    }
+    if(d.data&&d.data.pending_books){
+      st.books=d.data.pending_books.map(function(b){
+        return {id:(b.rel_path||'').split('/')[1]||b.book_id, token:b.token||''};
+      });
+    }
+  }
+
+  // ------------------------------------------------------------ 页面
+  const PAGES={};
+
+  PAGES.PAGE_HOME={hint:'上下移动 | 短按进入 | 长按提问',draw:function(){
+    const days=st.schedule&&st.schedule.days?st.schedule.days:{};
+    const wk=['周日','周一','周二','周三','周四','周五','周六'][new Date().getDay()];
+    const today=days[wk]||days['周一']||[];
+    card(8,TOP+8,304,72);
+    text('今日课程 ('+wk+')',18,TOP+28,{bold:true,size:13});
+    if(today.length){
+      text(today.slice(0,4).map(function(x){return x.subject||'';}).join(' '),18,TOP+48,{size:12,color:COL.mut});
+      text(today.slice(4,8).map(function(x){return x.subject||'';}).join(' '),18,TOP+65,{size:12,color:COL.mut});
+    } else {
+      text('还没排课 —— 去管理台「课表」页生成',18,TOP+50,{size:12,color:COL.mut});
+    }
+    const items=[
+      {label:'拍题导学', right:'剩余 '+st.quota.total-st.quota.used+' / 共 '+st.quota.total, go:'PAGE_CAMERA'},
+      {label:'学科卡片', right:'已收录 '+st.packs.length+' 个包', go:'PAGE_SUBJECT_LIST'},
+      {label:'电子书架', right:'今日剩 45 分钟', go:'PAGE_BOOKSHELF'},
+      {label:'专注番茄', right:'25分钟倒计时', go:'PAGE_POMODORO'},
+      {label:'待问队列', right:st.outbox.length+' 条待同步', go:'PAGE_OUTBOX'},
+      {label:'系统设置', right:'WiFi/音量/OTA', go:'PAGE_SETTINGS'},
+    ];
+    menu(14,TOP+104,292,items,st.sel);
+  },onKey:function(g){
+    const items=[
+      {go:'PAGE_CAMERA'},{go:'PAGE_SUBJECT_LIST'},{go:'PAGE_BOOKSHELF'},
+      {go:'PAGE_POMODORO'},{go:'PAGE_OUTBOX'},{go:'PAGE_SETTINGS'},
+    ];
+    if(g==='UP') st.sel=(st.sel+items.length-1)%items.length;
+    else if(g==='DOWN') st.sel=(st.sel+1)%items.length;
+    else if(g==='CLICK'){ st.prev=st.page; st.page=items[st.sel].go; st.sel=0; }
+    else if(g==='DBL'){ st.page='PAGE_HOME'; st.sel=0; }
+    else if(g==='LONG') startRecording();
+  }};
+
+  PAGES.PAGE_CAMERA={hint:'短按拍照 | 长按边说边拍 | 双击退',draw:function(){
+    text('拍题导学',8,TOP+18,{bold:true,size:13});
+    text('['+st.battery+'%]',W-8,TOP+18,{size:12,align:'right',color:COL.mut});
+    const fx=8, fy=TOP+28, fw=304, fh=228;
+    rrect(fx,fy,fw,fh,6); cx.fillStyle='#1F2937'; cx.fill();
+    cx.save(); rrect(fx,fy,fw,fh,6); cx.clip();
+    if(st.photo){ cx.drawImage(st.photo,fx,fy,fw,fh); }
+    else {
+      text('还没有画面',fx+fw/2,fy+fh/2-6,{size:13,align:'center',color:'#9CA3AF'});
+      text('在右侧「注入画面」选一张图',fx+fw/2,fy+fh/2+12,{size:11,align:'center',color:'#6B7280'});
+    }
+    cx.restore();
+    rrect(fx,fy,fw,fh,6); cx.strokeStyle=COL.line; cx.stroke();
+    rrect(fx+112,fy+80,80,60,4); cx.strokeStyle='#93C5FD'; cx.lineWidth=2; cx.stroke();
+    text('提示: 请确保题目旁留有手写草稿',8,TOP+276,{size:11,color:COL.mut});
+    text('长按摇杆可边拍边口述你的解题思路',8,TOP+294,{size:11,color:COL.mut});
+  },onKey:function(g){
+    if(g==='CLICK'){ doSolve(false); }
+    else if(g==='LONG'){ doSolve(true); }
+    else if(g==='DBL'){ back(); }
+  }};
+
+  PAGES.PAGE_SOLVE_RESULT={hint:'上下滚动 | 短按选择 | 双击返回',draw:function(){
+    const s=st.solve;
+    if(!s){ text('还没有解析结果',8,TOP+30,{size:13,color:COL.mut}); return; }
+    const lvl=st.hint;
+    text((s.status==='NEED_DRAFT'?'先写出第一步':'阶梯提示 ('+(lvl+1)+'/2)')+'   ['+st.battery+'%]',8,TOP+18,{bold:true,size:13});
+    let y=TOP+40;
+    if(s.status==='NEED_DRAFT'){
+      card(8,y,304,56); text('AI 引导',18,y+20,{bold:true,size:12,color:COL.acc});
+      text(fitText(s.speech_text||'',276,11.5),18,y+38,{size:11.5,color:COL.mut});
+      y+=68;
+    } else {
+      const blocks=String(s.display_markdown||'').split('\n').filter(function(x){return x.trim();});
+      blocks.slice(0,6).forEach(function(b,i){
+        const isTitle=/^[\[【]/.test(b.trim());
+        const lines=wrapText(b,280,11.5);
+        lines.forEach(function(ln){
+          if(y>BOT-20) return;
+          text(ln,12,y+12,{size:isTitle?12:11.5,bold:isTitle,color:isTitle?COL.acc:COL.fg});
+          y+=isTitle?20:16;
+        });
+      });
+      if(s.feynman_question){ y+=6; text('反问: '+fitText(s.feynman_question,270,11.5),12,y+12,{size:11.5,color:COL.acc}); y+=18; }
+    }
+    const items=[
+      {label:'按住摇杆说出你的答案', right:''},
+      {label:'请求下一步提示 ('+(2-Math.max(0,lvl))+'/2)', right:''},
+      {label:'收入错题本', right:''},
+    ];
+    menu(14,Math.max(y,BOT-96),288,items,st.sel);
+  },onKey:function(g){
+    const items=['voice','hint','wrongbook'];
+    if(g==='UP') st.sel=(st.sel+items.length-1)%items.length;
+    else if(g==='DOWN') st.sel=(st.sel+1)%items.length;
+    else if(g==='CLICK'){
+      if(items[st.sel]==='hint') doSolve(false,true);
+      else if(items[st.sel]==='voice') startRecording();
+    }
+    else if(g==='DBL') back();
+  }};
+
+  PAGES.PAGE_SUBJECT_LIST={hint:'上下选择 | 短按进入 | 双击返回',draw:function(){
+    text('学科卡片',8,TOP+18,{bold:true,size:13});
+    if(!st.packs.length){ text('还没有学科包',8,TOP+46,{size:12,color:COL.mut}); text('去管理台「学科包」页生成',8,TOP+64,{size:11,color:COL.mut}); return; }
+    st.packs.forEach(function(p,i){
+      const yy=TOP+40+i*34;
+      text((i===st.sel?'▶':' ')+' '+p.id,14,yy+18,{size:12,bold:i===st.sel,color:i===st.sel?COL.acc:COL.fg});
+      text('0%',W-14,yy+18,{size:11,align:'right',color:COL.mut});
+    });
+  },onKey:function(g){
+    if(g==='UP') st.sel=(st.sel+st.packs.length-1)%st.packs.length;
+    else if(g==='DOWN') st.sel=(st.sel+1)%st.packs.length;
+    else if(g==='CLICK'){ st.prev=st.page; st.page='PAGE_CARD_STUDY'; loadCards(); }
+    else if(g==='DBL') back();
+  }};
+
+  PAGES.PAGE_CARD_STUDY={hint:'短按翻转 | 左右切题 | 长按追问',draw:function(){
+    const c=st.cards[st.cardIdx];
+    if(!c){ text('正在取卡片…',8,TOP+30,{size:12,color:COL.mut}); return; }
+    text('学科卡片  '+((st.cardIdx+1)+'/'+Math.max(1,st.cards.length)),8,TOP+18,{bold:true,size:13});
+    card(8,TOP+30,304,180);
+    text(fitText(c.q||'',280,13),18,TOP+60,{size:13,bold:true});
+    text(fitText(c.subject||'',280,11),18,TOP+78,{size:11,color:COL.mut});
+    if(st.cardFlip){
+      text(fitText(c.h1||'',280,11.5),18,TOP+110,{size:11.5});
+      text(fitText(c.h2||'',280,11.5),18,TOP+132,{size:11.5});
+      text(fitText(c.ans||'',280,11.5),18,TOP+154,{size:11.5,color:COL.acc});
+    } else {
+      text('短按摇杆翻面看提示',18,TOP+120,{size:11.5,color:COL.mut});
+    }
+    text('长按摇杆可针对这题语音追问',8,TOP+240,{size:11,color:COL.mut});
+  },onKey:function(g){
+    if(g==='CLICK') st.cardFlip=!st.cardFlip;
+    else if(g==='LEFT'){ st.cardIdx=(st.cardIdx+st.cards.length-1)%st.cards.length; st.cardFlip=false; }
+    else if(g==='RIGHT'){ st.cardIdx=(st.cardIdx+1)%st.cards.length; st.cardFlip=false; }
+    else if(g==='LONG') startRecording();
+    else if(g==='DBL') back();
+  }};
+
+  PAGES.PAGE_BOOKSHELF={hint:'上下选择 | 短按打开 | 双击返回',draw:function(){
+    text('电子书架',8,TOP+18,{bold:true,size:13});
+    if(!st.books.length){ text('书架是空的',8,TOP+46,{size:12,color:COL.mut}); text('去管理台「电子书」页上传一本',8,TOP+64,{size:11,color:COL.mut}); return; }
+    st.books.forEach(function(b,i){
+      const yy=TOP+40+i*34;
+      text((i===st.sel?'▶':' ')+' '+b.id,14,yy+18,{size:12,bold:i===st.sel,color:i===st.sel?COL.acc:COL.fg});
+      text('未读',W-14,yy+18,{size:11,align:'right',color:COL.mut});
+    });
+  },onKey:function(g){
+    if(g==='UP') st.sel=(st.sel+st.books.length-1)%st.books.length;
+    else if(g==='DOWN') st.sel=(st.sel+1)%st.books.length;
+    else if(g==='CLICK'){ st.prev=st.page; st.page='PAGE_READER'; loadBook(); }
+    else if(g==='DBL') back();
+  }};
+
+  PAGES.PAGE_READER={hint:'左右翻页 | 上下调背光 | 双击退回书架',draw:function(){
+    const r=st.reader;
+    text(r.title||'阅读',8,20,{size:11,color:COL.mut});
+    const lines=r.lines.slice(r.page*14,r.page*14+14);
+    let y=TOP+18;
+    lines.forEach(function(ln){
+      text(fitText(ln,300,12),8,y+12,{size:12}); y+=30;
+    });
+    if(!lines.length) text('这本书还没有内容',8,TOP+30,{size:12,color:COL.mut});
+    text('第 '+(r.page+1)+' 页',W-8,H-42,{size:11,align:'right',color:COL.mut});
+  },onKey:function(g){
+    const r=st.reader;
+    if(g==='LEFT') r.page=Math.min(r.page+1,Math.max(0,Math.ceil(r.lines.length/14)-1)); // 03/07: 左推=后翻
+    else if(g==='RIGHT') r.page=Math.max(0,r.page-1);                                   // 右推=前翻
+    else if(g==='UP') st.backlight=Math.min(5,st.backlight+1);   // 03: 阅读页上推=背光+1
+    else if(g==='DOWN') st.backlight=Math.max(1,st.backlight-1); // 03: 阅读页下推=背光-1
+    else if(g==='DBL'){ st.prev=st.page; st.page='PAGE_BOOKSHELF'; st.sel=0; }
+  }};
+
+  PAGES.PAGE_POMODORO={hint:'短按暂停/继续 | 双击结束退出',draw:function(){
+    text('专注计时',8,TOP+18,{bold:true,size:13});
+    text('['+st.battery+'%]',W-8,TOP+18,{size:12,align:'right',color:COL.mut});
+    const mm=String(Math.floor(st.pom.remain/60)).padStart(2,'0');
+    const ss=String(st.pom.remain%60).padStart(2,'0');
+    text(mm+' : '+ss,W/2,TOP+120,{size:44,bold:true,align:'center',color:COL.fg});
+    text(st.pom.running?'专注进行中':'已暂停',W/2,TOP+146,{size:12,align:'center',color:COL.mut});
+    text('目标: 完成数学几何练习',W/2,TOP+196,{size:11.5,align:'center',color:COL.mut});
+  },onKey:function(g){
+    if(g==='CLICK') st.pom.running=!st.pom.running;
+    else if(g==='DBL'){ st.pom.running=false; st.pom.remain=1500; back(); }
+  }};
+
+  PAGES.PAGE_OUTBOX={hint:'上下选择 | 短按同步 | 双击返回',draw:function(){
+    text('待问收件箱',8,TOP+18,{bold:true,size:13});
+    text('最多 10 条',W-8,TOP+18,{size:11,align:'right',color:COL.mut});
+    if(!st.outbox.length){
+      text('没有待同步的内容',8,TOP+46,{size:12,color:COL.mut});
+      text('断网时拍题与语音会先存到这里',8,TOP+64,{size:11,color:COL.mut});
+      return;
+    }
+    st.outbox.forEach(function(o,i){
+      const yy=TOP+40+i*30;
+      text((i===st.sel?'▶':' ')+' '+o.label,14,yy+18,{size:12,bold:i===st.sel});
+    });
+  },onKey:function(g){
+    if(g==='UP') st.sel=(st.sel+st.outbox.length-1)%st.outbox.length;
+    else if(g==='DOWN') st.sel=(st.sel+1)%st.outbox.length;
+    else if(g==='CLICK'){ st.outbox.splice(st.sel,1); st.sel=0; toast('已同步一条'); }
+    else if(g==='DBL') back();
+  }};
+
+  PAGES.PAGE_SETTINGS={hint:'上下选择 | 短按进入 | 双击返回',draw:function(){
+    text('系统设置',8,TOP+18,{bold:true,size:13});
+    const items=[
+      {label:'无线网络配置', right:st.wifiList.length+' 个热点', go:'PAGE_WIFI_SCAN'},
+      {label:'设备配对绑定', right:'重新配对', go:'PAGE_KEYBOARD'},
+      {label:'播报音量调节', right:st.volume+' / 5 档'},
+      {label:'屏幕背光亮度', right:st.backlight+' / 5 档'},
+      {label:'离线手动校时', right:'已校准'},
+      {label:'固件版本与 OTA', right:'v1.0.3', go:'PAGE_OTA'},
+    ];
+    menu(14,TOP+40,292,items,st.sel);
+  },onKey:function(g){
+    const items=[{go:'PAGE_WIFI_SCAN'},{go:'PAGE_KEYBOARD'},{},{},{},{go:'PAGE_OTA'}];
+    if(g==='UP') st.sel=(st.sel+items.length-1)%items.length;
+    else if(g==='DOWN') st.sel=(st.sel+1)%items.length;
+    else if(g==='LEFT'||g==='RIGHT'){
+      const d=(g==='LEFT'?-1:1);
+      if(st.sel===2) st.volume=Math.max(1,Math.min(5,st.volume+d));
+      else if(st.sel===3) st.backlight=Math.max(1,Math.min(5,st.backlight+d));
+    }
+    else if(g==='CLICK'){ if(items[st.sel].go){ st.prev=st.page; st.page=items[st.sel].go; st.sel=0; } else toast('这个设置项不用配真机也能改'); }
+    else if(g==='DBL') back();
+  }};
+
+  PAGES.PAGE_WIFI_SCAN={hint:'上下选网 | 短按连接 | 双击返回',draw:function(){
+    text('选择无线网络',8,TOP+18,{bold:true,size:13});
+    const list=st.wifiList.length?st.wifiList:[{ssid:'（没扫到热点）',level:'',rssi:null}];
+    list.slice(0,8).forEach(function(ap,i){
+      const yy=TOP+40+i*30;
+      text((i===st.wifiSel?'▶':' ')+' '+ap.ssid,14,yy+18,{size:12,bold:i===st.wifiSel,color:i===st.wifiSel?COL.acc:COL.fg});
+      text(ap.level||'',W-14,yy+18,{size:11,align:'right',color:COL.mut});
+    });
+    text('（真实扫描本机周边热点）',8,BOT-6,{size:10.5,color:COL.mut});
+  },onKey:function(g){
+    const n=Math.max(1,st.wifiList.length);
+    if(g==='UP') st.wifiSel=(st.wifiSel+n-1)%n;
+    else if(g==='DOWN') st.wifiSel=(st.wifiSel+1)%n;
+    else if(g==='CLICK') toast('这是模拟画面，不会真的去连热点');
+    else if(g==='DBL') back();
+  }};
+
+  PAGES.PAGE_KEYBOARD={hint:'摇杆选键 | 短按输入 | 60s无操作退',draw:function(){
+    text('输入'+(st.kb.target==='配对码'?'配对码':'密码'),8,TOP+18,{bold:true,size:13});
+    text(st.kb.target==='配对码'?'Home_WiFi_5G':'Home_WiFi_5G',8,TOP+38,{size:11.5,color:COL.mut});
+    card(8,TOP+46,304,28);
+    text(st.kb.buf||' ',16,TOP+65,{size:12});
+    const rows=[
+      'abcdefghij'.split(''),
+      'klmnopqrst'.split(''),
+      'uvwxyz0123'.split(''),
+      '456789_-.@'.split(''),
+    ];
+    const kw=27, kh=24;
+    rows.forEach(function(row,r){
+      row.forEach(function(ch,c){
+        const x=10+c*kw, y=TOP+88+r*(kh+4);
+        const on=(st.kb.cur===r*10+c);
+        rrect(x,y,kw-2,kh,4);
+        cx.fillStyle=on?COL.acc:'#EEF2F6'; cx.fill();
+        text(ch,x+(kw-2)/2,y+16,{size:11.5,align:'center',color:on?'#fff':COL.fg});
+      });
+    });
+    const fns=[{t:'大小写'},{t:'退格'},{t:'确认'}];
+    fns.forEach(function(f,i){
+      const x=10+i*100, y=TOP+88+4*(kh+4);
+      rrect(x,y,96,kh,4); cx.fillStyle=i===2?COL.acc:'#EEF2F6'; cx.fill();
+      text(f.t,x+48,y+16,{size:11.5,align:'center',color:i===2?'#fff':COL.fg});
+    });
+  },onKey:function(g){
+    // 字符区 4×10 = 40 格，功能键 3 个（40=大小写 41=退格 42=确认）。
+    // 功能键必须在字符区之外也能被摇杆选中 —— 上下推要能跨行、左右推要能跨行不跨区。
+    const GRID=40;
+    if(g==='LEFT'){
+      if(st.kb.cur<GRID){ const r=Math.floor(st.kb.cur/10),c=st.kb.cur%10; st.kb.cur=r*10+(c+9)%10; }
+      else st.kb.cur=40+((st.kb.cur-40+2)%3);
+    }
+    else if(g==='RIGHT'){
+      if(st.kb.cur<GRID){ const r=Math.floor(st.kb.cur/10),c=st.kb.cur%10; st.kb.cur=r*10+(c+1)%10; }
+      else st.kb.cur=40+((st.kb.cur-40+1)%3);
+    }
+    else if(g==='UP'){
+      if(st.kb.cur>=GRID) st.kb.cur=30+Math.min(9,(st.kb.cur-40)*3);
+      else if(st.kb.cur<10) st.kb.cur=40+1;          // 首行上推 → 功能行
+      else st.kb.cur-=10;
+    }
+    else if(g==='DOWN'){
+      if(st.kb.cur>=GRID){ /* 已在功能行 */ }
+      else if(st.kb.cur>=30) st.kb.cur=40+Math.min(2,Math.floor((st.kb.cur-30)/3));
+      else st.kb.cur+=10;
+    }
+    else if(g==='CLICK'){
+      if(st.kb.cur<GRID){
+        const row=Math.floor(st.kb.cur/10), col=st.kb.cur%10;
+        const rows=['abcdefghij','klmnopqrst','uvwxyz0123','456789_-.@'];
+        let ch=rows[row][col];
+        if(st.kb.upper) ch=ch.toUpperCase();
+        st.kb.buf+=ch;
+      } else if(st.kb.cur===40){ st.kb.upper=!st.kb.upper; toast(st.kb.upper?'已切到大写':'已切到小写'); }
+      else if(st.kb.cur===41){ st.kb.buf=st.kb.buf.slice(0,-1); }
+      else if(st.kb.cur===42){ toast('配对码已填：'+st.kb.buf); back(); }
+    }
+    else if(g==='DBL') back();
+  }};
+
+  PAGES.PAGE_OTA={hint:'短按检查更新 | 双击返回',draw:function(){
+    text('固件版本与 OTA',8,TOP+18,{bold:true,size:13});
+    text('当前版本  v1.0.3',8,TOP+44,{size:12});
+    text('设备 ID   '+st.devId,8,TOP+64,{size:11.5,color:COL.mut});
+    if(st.ota){
+      text(st.ota.has_update?('发现新版本 '+st.ota.latest_ver):'已是最新版本',8,TOP+92,{size:12,color:st.ota.has_update?COL.acc:COL.mut});
+      if(st.ota.changelog) text(fitText(st.ota.changelog,290,11),8,TOP+112,{size:11,color:COL.mut});
+    } else {
+      text('短按摇杆检查更新',8,TOP+92,{size:11.5,color:COL.mut});
+    }
+  },onKey:function(g){
+    if(g==='CLICK'){
+      devCall('GET','/api/v1/ota/check?device_id='+encodeURIComponent(st.devId)+'&current_ver=v1.0.3')
+        .then(function(d){ if(d){ st.ota=d.data; toast(d.data.has_update?'有新版固件':'已是最新'); } });
+    }
+    else if(g==='DBL') back();
+  }};
+
+  // ------------------------------------------------------------ 动作
+  function back(){ if(st.prev){ const p=st.prev; st.prev=null; st.page=p; st.sel=0; } else st.page='PAGE_HOME'; }
+  function startRecording(){
+    if(!st.audioPcm && !st.voiceText){
+      toast('先注入音频，或填「口述内容」');
+      return;
+    }
+    st.overlay={kind:'recording',t0:Date.now()};
+    setTimeout(function(){
+      if(st.overlay&&st.overlay.kind==='recording'&&!st.overlay.done){
+        st.overlay.done=true;
+        doVoice();
+      }
+    },600);
+  }
+  function cancelRecording(){ st.overlay=null; toast('已取消录音'); }
+  async function doVoice(){
+    st.overlay=null;
+    // 有 PCM → 走真实 ASR 通道（/api/v1/study/voice）；
+    // 只有文字 → 走 05 明确列出的 solve 兼容字段 voice_text（ASR 未启用时也能用）。
+    if(st.audioPcm){
+      const d=await devCall('POST','/api/v1/study/voice',{
+        context_page:st.page, context:{pack_id:(st.packs[st.sel]||{}).id||'',card_id:String(st.cardIdx)},
+        pcm_base64:st.audioPcm, edu_stage:'JUNIOR', enrollment_year:2026, local_time:new Date().toISOString(),
+      });
+      if(d&&d.data&&d.data.reply_text){
+        toast(d.data.reply_text.slice(0,40));
+        st.solve={status:'HINTING',display_markdown:d.data.reply_text,speech_text:d.data.reply_text};
+        st.page='PAGE_SOLVE_RESULT'; st.prev='PAGE_HOME'; st.sel=0;
+      }
+      return;
+    }
+    await doSolve(false,false,true);
+  }
+  async function doSolve(withVoice,isHint,textOnly){
+    if(!textOnly && !st.photoB64){ toast('先在右侧注入一张画面'); return; }
+    if(!st.sid) st.sid='web_'+Date.now();
+    const hint=isHint?st.hint+1:st.hint;
+    if(isHint) st.hint=hint;
+    const d=await devCall('POST','/api/v1/study/solve',{
+      solve_session_id:st.sid, image_b64:st.photoB64||'',
+      pcm_base64:(withVoice&&st.audioPcm)?st.audioPcm:'',
+      voice_text:st.voiceText||'', edu_stage:'JUNIOR', enrollment_year:2026,
+      hint_level:hint, device_remaining_quota:st.quota.total-st.quota.used,
+    });
+    if(!d||!d.data||!d.data.status) return;
+    st.solve=d.data;
+    if(typeof d.data.effective_remaining_quota==='number'){
+      st.quota.total=10; st.quota.used=10-d.data.effective_remaining_quota;
+    }
+    st.page='PAGE_SOLVE_RESULT'; st.prev='PAGE_CAMERA'; st.sel=0;
+  }
+  async function loadCards(){
+    const p=st.packs[st.sel]; if(!p) return;
+    const r=await api('/admin/api/device-sim/pack-cards?device_id='+encodeURIComponent(st.devId)+'&pack_id='+encodeURIComponent(p.id));
+    st.cards=(r.j.ok&&r.j.data)?r.j.data.cards:[];
+    st.cardIdx=0; st.cardFlip=false;
+  }
+  async function loadBook(){
+    const b=st.books[st.sel]; if(!b) return;
+    const d=await devCall('GET','/api/v1/content/download?token='+encodeURIComponent(b.token));
+    if(!d||!d.data) return;
+    st.reader={title:b.id,lines:String(d.data.text||'').split('\n'),page:0,bytes:d.data.size};
+  }
+  function wrapText(s,maxW,size){
+    cx.font=F(size||12,false);
+    const out=[]; let line='';
+    String(s).split(/\n/).forEach(function(seg){
+      let cur='';
+      for(let i=0;i<seg.length;i++){
+        const ch=seg[i];
+        if(cx.measureText(cur+ch).width>maxW){ out.push(cur); cur=ch; }
+        else cur+=ch;
+      }
+      line+=cur;
+    });
+    if(line) out.push(line);
+    return out;
+  }
+
+  // ------------------------------------------------------------ 绘制主循环
+  function draw(){
+    if(!cx) return;
+    statusBar();
+    const p=PAGES[st.page];
+    if(p) p.draw();
+    // 浮层：REMINDER > RECORDING > TOAST
+    if(st.overlay&&st.overlay.kind==='recording'){
+      cx.fillStyle='rgba(15,23,42,.72)'; cx.fillRect(0,0,W,H);
+      const el=Math.min(10,Math.round((Date.now()-st.overlay.t0)/100));
+      rrect(40,170,240,140,10); cx.fillStyle='rgba(255,255,255,.97)'; cx.fill();
+      text('正在录音…',W/2,206,{size:15,bold:true,align:'center'});
+      for(let i=0;i<24;i++){
+        const h=8+Math.abs(Math.sin(i*0.9+Date.now()/160))*26;
+        cx.fillStyle=COL.acc; cx.fillRect(62+i*8,240-h/2,4,h);
+      }
+      text('最多 10 秒，上推取消',W/2,292,{size:11,align:'center',color:COL.mut});
+    }
+    if(st.toast&&Date.now()<st.toastT){
+      cx.fillStyle='rgba(30,41,59,.92)';
+      rrect(16,BOT-56,288,30,6); cx.fill();
+      text(fitText(st.toast,272,11.5),W/2,BOT-36,{size:11.5,align:'center',color:'#fff'});
+    }
+    hintBar(p&&p.hint);
+  }
+  function loop(){ draw(); requestAnimationFrame(loop); }
+
+  // ------------------------------------------------------------ 手势
+  function onKey(g){
+    if(st.overlay&&st.overlay.kind==='recording'){
+      if(g==='UP'){ cancelRecording(); return; }
+      if(g==='CLICK'){ st.overlay=null; doVoice(); return; }
+      return;
+    }
+    const p=PAGES[st.page];
+    if(p&&p.onKey) p.onKey(g);
+    draw();
+  }
+  function bindButtons(){
+    document.querySelectorAll('.dsbtn[data-g]').forEach(function(b){
+      b.addEventListener('click',function(){ onKey(b.getAttribute('data-g')); });
+    });
+  }
+  function bindKeys(){
+    const map={ArrowUp:'UP',ArrowDown:'DOWN',ArrowLeft:'LEFT',ArrowRight:'RIGHT'};
+    document.addEventListener('keydown',function(e){
+      if(st.page==='PAGE_HOME'&&!st.paired&&e.key!=='Tab') { /* 仍允许操作 */ }
+      if(map[e.key]){ e.preventDefault(); onKey(map[e.key]); }
+      else if(e.key==='Enter'){ e.preventDefault(); onKey('CLICK'); }
+      else if(e.key===' '){ e.preventDefault(); onKey('LONG'); }
+      else if(e.key==='Backspace'){ e.preventDefault(); onKey('DBL'); }
+    });
+  }
+
+  // ------------------------------------------------------------ 对外
+  function init(){
+    cv=document.getElementById('dsCanvas');
+    if(!cv) return;
+    dpr=Math.min(window.devicePixelRatio||1,2);
+    cv.width=W*dpr; cv.height=H*dpr;
+    cx=cv.getContext('2d'); cx.setTransform(dpr,0,0,dpr,0,0);
+    cv.style.width=W+'px'; cv.style.height=H+'px';
+    st.devId=(document.getElementById('dsDevId')||{}).value||'esp32s3_web0001';
+    bindButtons(); bindKeys();
+    const z=document.getElementById('dsZoom');
+    if(z) z.addEventListener('change',setZoom);
+    setZoom();
+    draw();
+    if(!st.looped){ st.looped=true; requestAnimationFrame(loop); }
+  }
+  function setZoom(){
+    const z=parseFloat((document.getElementById('dsZoom')||{}).value)||1.5;
+    const wrap=document.getElementById('dsWrap');
+    if(wrap){ wrap.style.width=(W*z)+'px'; wrap.style.height=(H*z)+'px'; }
+    if(cv) cv.style.transform='scale('+z+')';
+  }
+  async function pair(){
+    const code=(document.getElementById('dsPairCode')||{}).value.trim();
+    const id=(document.getElementById('dsDevId')||{}).value.trim()||'esp32s3_web0001';
+    if(!code){ toast('先在「设备」页生成配对码'); return; }
+    st.devId=id;
+    const r=await api('/admin/api/device-sim/pair',{method:'POST',body:{device_id:id,pair_code:code}});
+    if(!r.j.ok){ toast(r.j.msg||'绑定失败'); return; }
+    st.paired=true;
+    document.getElementById('dsPairCode').value='';
+    toast('虚拟设备已绑定');
+    await boot();
+    draw();
+  }
+  function reset(){
+    st.page='PAGE_HOME'; st.prev=null; st.sel=0; st.solve=null; st.sid=null; st.hint=0;
+    st.overlay=null; st.toast=null; st.photo=null; st.photoB64=null; st.cards=[]; st.reader={title:'',lines:[],page:0,bytes:0};
+    draw();
+  }
+  function bindFile(id,handler){
+    const el=document.getElementById(id);
+    if(el) el.addEventListener('change',function(){ handler(el.files[0]); });
+  }
+  function initFiles(){
+    const vt=document.getElementById('dsVoiceText');
+    if(vt) vt.addEventListener('input',function(){ st.voiceText=vt.value.trim(); });
+    bindFile('dsPhoto',function(f){
+      if(!f) return;
+      const fr=new FileReader();
+      fr.onload=function(){
+        const img=new Image();
+        img.onload=function(){ st.photo=img; st.photoB64=String(fr.result).split(',')[1]||''; draw(); };
+        img.src=fr.result;
+      };
+      fr.readAsDataURL(f);
+    });
+    bindFile('dsAudio',function(f){
+      if(!f) return;
+      const fr=new FileReader();
+      fr.onload=function(){
+        const bytes=new Uint8Array(String(fr.result).split(',')[1]?atob(String(fr.result).split(',')[1]):'');
+        st.audioPcm=wavToPcm16k(bytes); toast('语音已载入');
+      };
+      fr.readAsDataURL(f);
+    });
+  }
+  function wavToPcm16k(u8){
+    try{
+      const dv=new DataView(u8.buffer);
+      let pos=12, fmt=null, dataOff=-1, dataLen=0;
+      while(pos+8<=u8.length){
+        const id=String.fromCharCode(u8[pos],u8[pos+1],u8[pos+2],u8[pos+3]);
+        const size=dv.getUint32(pos+4,true);
+        if(id==='fmt '){ fmt={ch:dv.getUint16(pos+10,true),rate:dv.getUint32(pos+12,true),bits:dv.getUint16(pos+22,true)}; }
+        else if(id==='data'){ dataOff=pos+8; dataLen=Math.min(size,u8.length-dataOff); break; }
+        pos+=8+size+(size&1);
+      }
+      if(!fmt||dataOff<0||fmt.bits!==16) return '';
+      const frames=Math.floor(dataLen/(2*fmt.ch));
+      const mono=new Float32Array(frames);
+      for(let i=0;i<frames;i++){
+        let sum=0;
+        for(let c=0;c<fmt.ch;c++) sum+=dv.getInt16(dataOff+(i*fmt.ch+c)*2,true);
+        mono[i]=sum/fmt.ch/32768;
+      }
+      const ratio=fmt.rate/16000, outLen=Math.floor(frames/ratio);
+      const out=new Int16Array(outLen);
+      for(let i=0;i<outLen;i++){
+        const p=i*ratio, i0=Math.floor(p), i1=Math.min(frames-1,i0+1), f=p-i0;
+        let v=mono[i0]*(1-f)+mono[i1]*f; v=Math.max(-1,Math.min(1,v));
+        out[i]=v<0?v*32768:v*32767;
+      }
+      let bin=''; for(let i=0;i<out.length;i++) bin+=String.fromCharCode(out[i]&255,out[i]>>8);
+      return btoa(bin);
+    }catch(e){ return ''; }
+  }
+
+  return {
+    init:function(){ init(); initFiles(); },
+    pair:pair, reset:reset, boot:boot, state:st,
+    pages:Object.keys(PAGES),
+  };
+})();
+
+document.addEventListener('DOMContentLoaded',function(){
+  DS.init();
+  document.getElementById('tabs').addEventListener('click',function(e){
+    const t=e.target.closest('.tab'); if(!t) return;
+    if(t.dataset.t==='dscreen'){ DS.boot(); }
+  });
+});
 </script>
 </body>
 </html>
