@@ -470,7 +470,7 @@ env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u AL
 | 能力 | 端点 | 模型 | 备注 |
 | :--- | :--- | :--- | :--- |
 | 文本 | `/v1/text/chatcompletion_v2` | `MiniMax-M2.5` | 也可用 `/v1/chat/completions` |
-| 视觉 | `/v1/text/chatcompletion_v2` | `MiniMax-M3` | **该服务商没有独立视觉模型**（VL 系列已下架），视觉能力由 M3 原生承担 |
+| 视觉 | `/v1/text/chatcompletion_v2` | `MiniMax-M3` | **该服务商没有独立视觉模型**（VL 系列已下架），视觉能力由 M3 / M3.1-Flash 原生承担 |
 | ASR | `/v1/speech_to_text` | `asr-1.0` | **下划线**，不是斜杠；`multipart/form-data`，语言提示走 `language` 请求头 |
 | TTS | `/v1/t2a_v2` | `speech-02-hd` + `male-qn-qingse` | 返回 Hex 字符串，按 `response_format: hex` 解码 |
 
@@ -480,6 +480,20 @@ env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u AL
 2. **上游不支持裸 PCM**。ASR 只收带容器的 wav/mp3 等，裸 PCM 直接拒。网关已在 `speech_engine.pcm_to_wav()` 里统一封装 44 字节 WAV 头再上传，设备端仍只传裸 PCM。
 3. **「红图答红色」是假象**。最初用一张 294 字节的纯色几何图测视觉，M3 答「红色」看起来像通了 —— 实际上**那张图触发了内容审核，图像被静默剥离**，模型是猜的。换真实照片后立刻暴露：所有模型回「我没有看到图片」。**图片被审核拦下时上游返回 200 + 正常回复，不会报错** —— 这是最容易误判为「格式不对」或「模型不支持」的一种失败。
 4. **视觉模型守卫写反了**（本项目自己的 bug）。`_vision_call` 里判断「模型是否已配置」写成 `not model.startswith("<")`，本意是拦占位符 `<按服务商填写...>`，实际把**真实模型名也拦了**。改成 `model.startswith("<")` 才对。同类判断要注意方向：占位符以尖括号开头，已配置的值**不以**尖括号开头。
+
+**视觉能力到底归谁（四个模型逐一实测，2026-11-24）：**
+
+| 模型 | 带**真实照片**实测 | 结论 |
+| :--- | :--- | :--- |
+| `MiniMax-M3` | ✅ 拍题端到端（照片 → 严格 JSON → `NEED_DRAFT`） | **生产在用** |
+| `MiniMax-M3.1-Flash` | ✅ HTTP 200 / `base_resp.status_code=0`，描述具体到画面位置，与原图核对**完全吻合** | 可用备选 |
+| `MiniMax-M2.5` / `MiniMax-M2.7` | ❌ 一律回「我没有看到图片。」 | 纯文本模型，**对图片是瞎的** |
+| `MiniMax-VL-01` 等 VL 系列 | `base_resp.status_code=2069` | 已下架 |
+
+两条路径纪律：
+
+- **视觉必须走 `/v1/text/chatcompletion_v2`**。`/v1/chat/completions` 带图直接 `invalid params, 400 (2013)`（纯文本正常），**别把 2013 当成「模型不支持图片」** —— 那条路径压根不收图。
+- **测视觉只能用真实照片**。纯色小图会被内容审核静默剥离，模型靠猜仍能答出一个像样的颜色词，**看起来像通了其实没有**。
 
 **改了什么：**
 
