@@ -1183,9 +1183,11 @@ const DS = (function(){
         let v=all[i0]*(1-f)+all[i1]*f; v=Math.max(-1,Math.min(1,v));
         out[i]=v<0?v*32768:v*32767;
       }
-      let bin=''; for(let i=0;i<out.length;i++) bin+=String.fromCharCode(out[i]&255,out[i]>>8);
+      // 高字节必须再 &255：PCM 是有符号 16 位，>>8 是算术右移（负样本右移后仍为负），
+      // 直接丢给 String.fromCharCode 会抛 RangeError，被 catch 吞成空串 → 「没录到声音」。
+      let bin=''; for(let i=0;i<out.length;i++) bin+=String.fromCharCode(out[i]&255,(out[i]>>8)&255);
       return btoa(bin);
-    }catch(e){ return ''; }
+    }catch(e){ console.error('PCM 打包失败', e); return ''; }
   }
   function micToggle(){ if(mic.recording) micStop(); else micStart(); }
 
@@ -1215,7 +1217,9 @@ const DS = (function(){
         let v=mono[i0]*(1-f)+mono[i1]*f; v=Math.max(-1,Math.min(1,v));
         out[i]=v<0?v*32768:v*32767;
       }
-      let bin=''; for(let i=0;i<out.length;i++) bin+=String.fromCharCode(out[i]&255,out[i]>>8);
+      // 高字节必须再 &255：PCM 是有符号 16 位，>>8 是算术右移（负样本右移后仍为负），
+      // 直接丢给 String.fromCharCode 会抛 RangeError，被 catch 吞成空串 → 「没录到声音」。
+      let bin=''; for(let i=0;i<out.length;i++) bin+=String.fromCharCode(out[i]&255,(out[i]>>8)&255);
       return btoa(bin);
     }catch(e){ return ''; }
   }

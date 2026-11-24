@@ -504,6 +504,49 @@ env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u AL
 - 「无照片纯语音提问」现已走 `study/voice` 的 `voice_text` 兼容字段，**绕过了 ASR**；真正的「说一句话 → ASR → 回答」链路在管理台靠注入音频文件验证过，**浏览器麦克风实采未在 headless 下测**（headless 无真实麦克风设备）。
 - 真实 MiniMax 多模态接口的**计费与限流**行为未压测。
 
+### 9.10 浏览器麦克风采集曾 100% 失败（signed 16-bit 字节打包 bug）
+
+上一条「浏览器麦克风实采未在 headless 下测」后来补上了 —— headless 没有麦克风，但 **Chromium 的假音频设备可以喂真音频**，一测就抓出一个致命 bug。
+
+**Bug 本身（一行代码）：**
+
+```js
+// 错
+bin += String.fromCharCode(out[i] & 255, out[i] >> 8);
+// 对
+bin += String.fromCharCode(out[i] & 255, (out[i] >> 8) & 255);
+```
+
+PCM 样本是**有符号 16 位**，`>> 8` 是**算术右移** —— 负样本右移后仍为负（-1000 → -4）。`String.fromCharCode(-4)` 抛 `RangeError`，而打包函数外面包着 `catch{ return '' }` → 返回空串 → 界面显示「没录到声音」。**任何含负样本的真实音频必然失败**，只有纯静音才会「成功」（静音样本全是 0，不触发异常）。麦克风采集与 WAV 注入两条路各有一份同样的代码，都中招。
+
+**为什么之前没发现：** 注入 WAV 走的是 `wavToPcm16k()`（另一份解析代码），而上一轮的语音验收用的是「口述内容」纯文字路径 —— **两条路都绕开了会崩的那一行**。真实设备走设备端固件上传裸 PCM，浏览器只是管理台镜像，所以这个 bug 一直躲在测试盲区里。
+
+**怎么定位的（方法比结论值钱）：**
+
+1. 用 Chromium 假音频设备喂一段真实中文语音：`--use-fake-device-for-media-stream --use-file-for-fake-audio-capture=<wav> --use-fake-ui-for-media-stream --autoplay-policy=no-user-gesture-required`。
+2. **在同一个页面里做「应用路径 vs 裸写法」对照**：裸写法（自己建 AudioContext + ScriptProcessor）拿到 35 块信号，应用自己的 `DS.mic()` 拿到 **0 块** → 立刻排除「假设备不出声」，锁定应用代码。
+3. 直接把浏览器实采的 PCM 喂给生产代码 `speech_engine.transcribe()` —— **拿到逐字正确的转写**，证明采集与 ASR 都没问题，锅在字节打包。
+
+**踩到的三个环境坑：**
+
+- **headless 下 `navigator.mediaDevices` 是 undefined** —— `about:blank` 不是安全上下文，必须先导航到 `127.0.0.1`（localhost 才算安全上下文）再测。
+- **chromium 不能用 `setsid nohup ... &` 跨 exec 存活** —— 前一个 exec 结束就被杀（表现为 `ECONNREFUSED`）。**让验收脚本自己 spawn chromium、自己收尾**，一次调用搞定。
+- **CDP 的 `Network.getResponseBody` 在本场景返回 null** —— 抓响应体不可靠。改用 **CDP `Network.requestWillBeSent` 拿请求体**（能确证 `pcm_base64` 长度与 `voice_text` 是否为空），响应内容改从**服务端侧**取证（TTS 缓存是否新增文件、生产 `transcribe()` 的转写结果）。
+
+**修完的验收证据（真实麦克风路径，16 PASS / 0 FAIL）：**
+
+| 环节 | 证据 |
+| :--- | :--- |
+| 浏览器采集 | PCM **234837 字节 ≈ 7.34 秒 @16kHz/16bit**（由 `AudioContext` 48kHz 重采样而来，误差 < 25%） |
+| 发往设备端 | 桥接请求体 `pcm_len=313116`、`voice_text=""` —— **只送了音频，没夹带文字** |
+| ASR | 生产 `transcribe()` 对这份 PCM 转写 **逐字正确**（与喂入的音频内容完全一致） |
+| 模型 | 结果页显示真实模型回复，非 mock |
+| TTS | 测试窗口内 TTS 缓存新增音频文件（`has_audio=true` 落盘为实） |
+
+**判定逻辑值得记住：** 浏览器只送音频、不送文字，**回复若与音频内容相关，就只能是 ASR 转写 + 模型作答的产物** —— 这比"看到一段回复"强得多。同样地，「`voice_text` 为空」必须作为断言写进脚本，否则测的其实是另一条路径。
+
+**改动清单：** `web/index.html` 两处字节打包补 `&255`，并把吞异常的 `catch` 改成 `console.error` + 返回空串（静默失败是这次排查耗时的主因）。
+
 - **真实 MiniMax 视觉/ASR/TTS 接口验证**（`ai.provider` 仍为 `mock`）—— 独立任务卡。
 - **固件侧网络层 C 接口与 `05` 字段对齐**（`net_study_solve()` 缺 `edu_stage`/`enrollment_year`/`device_remaining_quota` 入参）—— 独立任务卡。
 - **`pypdf` vs `python-docx` 中文教材抽取质量对比** —— 独立任务卡。
