@@ -17,7 +17,7 @@ Phase 1 端到端链路测试（对着**真实运行中的网关**跑）。
   8. 响应验签：成功信封与错误信封都验
 
 用法（从 abbot/ 目录，网关需已启动）：
-    ./.venv/bin/python server/tests/test_e2e_flow.py --base http://127.0.0.1:18770
+    ./.venv/bin/python server/tests/test_e2e_flow.py --base http://127.0.0.1:18843
 """
 
 import argparse
@@ -58,6 +58,9 @@ class Sim:
         self.base = base.rstrip("/")
         self.device_id = device_id
         self.secret: Optional[bytes] = None
+        # 本次请求实际发出的时间戳 —— 响应签名要用**请求时**的 ts 校验，
+        # 不能拿校验时刻的当前时间，否则会差 1~2 秒导致误判。
+        self.last_ts: str = ""
         # 本机回环必须绕开出口代理，否则 403
         self.client = httpx.Client(timeout=90.0, trust_env=False)
 
@@ -87,6 +90,7 @@ class Sim:
             f"POST\n{path}\n{ts}\n{hashlib.sha256(body).hexdigest()}".encode(),
             hashlib.sha256,
         ).hexdigest()
+        self.last_ts = ts
         resp = self.client.post(
             f"{self.base}{path}",
             content=body,
@@ -107,6 +111,7 @@ class Sim:
             f"GET\n{pure}\n{ts}\n{hashlib.sha256(b'').hexdigest()}".encode(),
             hashlib.sha256,
         ).hexdigest()
+        self.last_ts = ts
         resp = self.client.get(
             f"{self.base}{path}",
             headers={"X-Device-Id": self.device_id, "X-Timestamp": ts, "X-Signature": sig},
@@ -126,7 +131,7 @@ def verify_resp_sig(resp: httpx.Response, ts: str, secret: bytes) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base", default="http://127.0.0.1:18770")
+    ap.add_argument("--base", default="http://127.0.0.1:18843")
     ap.add_argument("--password", default=os.environ.get("ADMIN_PASSWORD", "abbot2026"))
     ap.add_argument("--device-id", default="esp32s3_e2e0001")
     args = ap.parse_args()
@@ -169,6 +174,16 @@ def main() -> int:
     sim.secret = bytes.fromhex(json.loads(env["payload"])["device_secret"])
     check("拿到 32 字节 device_secret", len(sim.secret) == 32)
 
+    # 幂等化：清零该设备的当日配额账本。
+    # 账本是**跨轮次持久化**的，而测试断言「草稿后 used_count 仍为 0」——
+    # 上一轮跑过的扣费会残留（实测 used_count=3），导致配额三项断言全假失败。
+    r = admin.post(
+        f"{args.base}/admin/api/quota/reset",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+        json={"device_id": sim.device_id},
+    )
+    check("配额账本已清零（测试幂等）", r.status_code == 200, r.text[:160])
+
     # 用一个设备专属的会话标识，便于核对配额
     session_id = f"e2e_{int(time.time())}"
     image_b64 = base64.b64encode(b"\xff\xd8\xff\xe0fake-jpeg-for-e2e").decode()
@@ -185,7 +200,11 @@ def main() -> int:
             "device_remaining_quota": 10,
         },
     )
-    check("响应验签通过", verify_resp_sig(resp, str(int(time.time())), sim.secret) or resp.headers.get("X-Resp-Signature") != "")
+    check(
+        "响应验签通过",
+        verify_resp_sig(resp, sim.last_ts, sim.secret),
+        f"X-Resp-Signature={resp.headers.get('X-Resp-Signature', '')[:16]}",
+    )
     check("HTTP 200", resp.status_code == 200)
     check("code=0", env.get("code") == 0, resp.text[:200])
     if env.get("code") == 0:

@@ -238,6 +238,7 @@ Markdown
 | 18840  | sanxia             | /sanxia/        | 伞下 App 后端（情绪庇护 LLM 代理，后端桩已起）                                                    |
 | 18841  | little-prince      | /little-prince/ | 小王子の日历 App 后端（每日生图 + 台词）                                                        |
 | 18842  | eink-mini           | /eink-mini/      | eink-mini 墨水屏服务端（页面清单/1bpp 位图/留言板）                                                |
+| 18843  | abbot               | /abbot/          | abbot 学科盒子网关（FastAPI，设备端拍题/语音/OTA + 零构建单文件管理台）                          |
 | 18888  | ai-assistant       | /ai-ass-v/      | AI Assistant 发行版（Dashboard + Gallery + Library + Nature + Knowledge + Creative） |
 | 18899  | tangping           | /tangping/      | 躺平巴拉 App 后端（沉浸式水豚养成游戏）                                                          |
 | 5173   | my-island-vite     | /my-island-web/ | my-island Vite dev 前端（nginx `/my-island-web/` 转这里）                              |

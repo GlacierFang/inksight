@@ -18,7 +18,7 @@
 * 响应先验 `X-Resp-Signature` 再解密（05 §3.2）。
 
 用法（从 abbot/ 目录）：
-    ./.venv/bin/python server/cli_sim.py --base http://127.0.0.1:18770
+    ./.venv/bin/python server/cli_sim.py --base http://127.0.0.1:18843
     ./.venv/bin/python server/cli_sim.py --all
 """
 
@@ -247,7 +247,7 @@ def make_tone_wav(path: Path, seconds: float = 1.0) -> Path:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="abbot 控制台设备模拟器")
-    ap.add_argument("--base", default="http://127.0.0.1:18770", help="网关地址")
+    ap.add_argument("--base", default="http://127.0.0.1:18843", help="网关地址")
     ap.add_argument("--device-id", default="esp32s3_sim0001")
     ap.add_argument("--pair-code", default="", help="6 位配对码")
     ap.add_argument("--image", default="", help="题目照片路径")
@@ -272,7 +272,7 @@ def main() -> int:
 
     if not args.pair_code:
         print("\n[!] 需要 --pair-code。先在管理台生成 6 位配对码，再回来运行。")
-        print("    生成方式：打开 http://127.0.0.1:18770/ → 登录 → 「生成配对码」")
+        print("    生成方式：打开 http://127.0.0.1:18843/ → 登录 → 「生成配对码」")
         return 2
 
     print("\n[1] 配对")

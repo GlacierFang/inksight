@@ -90,6 +90,16 @@ class Settings:
     def port(self) -> int:
         return int(self._server.get("port", 18770))
 
+    @property
+    def public_base_url(self) -> str:
+        """
+        对外基址（含 nginx 挂载前缀），用于拼接下发给设备的绝对下载 URL。
+
+        设备端不能自己拼 base —— 挂载前缀一变，设备侧就会拿到打不开的地址。
+        未配置时返回空串，此时下发的 URL 退化为纯路径（本地直连调试用）。
+        """
+        return (self._server.get("public_base_url", "") or "").rstrip("/")
+
     # ------------------------------------------------------------ 常用取值
     @property
     def daily_quota(self) -> int:

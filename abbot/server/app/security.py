@@ -155,7 +155,7 @@ def issue_token(device_id: str, rel_path: str, secret_hex: str, ttl: int = TOKEN
     sig = hmac.new(
         secret_bytes(secret_hex), raw_token.encode("utf-8"), hashlib.sha256
     ).hexdigest()
-    return urlsafe_b64encode(f"{raw_token}|{sig}".encode("utf-8")).decode("ascii")
+    return base64.urlsafe_b64encode(f"{raw_token}|{sig}".encode("utf-8")).decode("ascii")
 
 
 def verify_token(token: str, device_id: str, secret_hex: str) -> str:
@@ -175,7 +175,7 @@ def verify_token(token: str, device_id: str, secret_hex: str) -> str:
         raise SecurityError(f"Token 解码失败：{exc}", 4001)
     # decoded = "{device_id}|{expire_ts}|{rel_path}|{sig}"
     # 用 rsplit 切最后一次 `|` 拿签名，其余按 maxsplit=2 拆 —— rel_path 自身含 `|` 也不会被误拆
-    raw_token, _, sig = decoded.rsplit("|", 1)
+    raw_token, sig = decoded.rsplit("|", 1)
     parts = raw_token.split("|", 2)
     if len(parts) != 3:
         raise SecurityError("Token 格式错误", 4001)

@@ -28,7 +28,6 @@ from typing import Any, Dict, Optional, Tuple
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
-from fastapi.staticfiles import StaticFiles
 
 from app import security
 from app.book_cleaner import BookCleanError, clean_book
@@ -382,9 +381,11 @@ async def api_ota_check(req: Request, device_id: str = "", current_ver: str = ""
     ota = _ota_manager()
     data = ota.check_update(device_id, current_ver)
     if data.get("has_update"):
-        rel_path = f"ota/{data['latest_ver']}.bin"
+        rel_path = ota.latest_rel_path()
+        token = security.issue_token(device_id, rel_path, secret)
+        # 绝对地址：设备端不能自己拼 base（挂载前缀会变），拿到即可直接下载
         data["bin_url"] = (
-            f"/api/v1/content/download?token={security.issue_token(device_id, rel_path, secret)}"
+            f"{settings.public_base_url}/api/v1/content/download?token={token}"
         )
     return encrypted_response(secret, timestamp, data)
 
@@ -981,9 +982,6 @@ async def global_exception_handler(req: Request, exc: Exception):
 
 
 WEB_DIR = settings.web_dir
-if WEB_DIR.exists():
-    app.mount("/app", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
-
 
 @app.get("/")
 async def index():

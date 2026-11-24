@@ -25,6 +25,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import httpx
 
+from app import security
 from app.config import settings
 from app.speech_engine import get_speech_engine
 
@@ -134,12 +135,15 @@ class RouterAI:
     """三级意图分流 + 配额仲裁 + Prompt 注入。"""
 
     def __init__(self, storage=None):
-        self._storage = storage
+        # 属性名与方法名 `storage()` 不同名 —— 实例属性一旦与方法同名，
+        # 调用处就变成「拿 Storage 对象当函数调」，直接 TypeError。
+        # 与 SpeechEngine._storage_ref 同一处治法。
+        self._storage_ref = storage
         self._locks: Dict[str, asyncio.Lock] = {}
 
     def storage(self):
-        if self._storage is not None:
-            return self._storage
+        if self._storage_ref is not None:
+            return self._storage_ref
         from app.storage import get_storage
 
         return get_storage()
@@ -433,7 +437,7 @@ class RouterAI:
             "feynman_question": feyman,
             "has_audio": has_audio,
             "tts_cache_key": tts_key or "",
-            "audio_url": "",
+            "audio_url": self._audio_download_url(device_id, tts_key or ""),
             "effective_remaining_quota": self.effective_remaining(device_id),
         }
 
@@ -508,8 +512,30 @@ class RouterAI:
             "reply_text": answer,
             "has_audio": audio is not None,
             "tts_cache_key": tts_key or "",
-            "audio_url": "",
+            "audio_url": self._audio_download_url(device_id, tts_key or ""),
         }
+
+    def _audio_download_url(self, device_id: str, tts_key: str) -> str:
+        """
+        TTS 音频的绝对下载地址（走 05 §3.3 的统一签名下载通道）。
+
+        缓存文件落在 `storage/cache/tts/<key>.wav`，相对 storage 根的路径是
+        `cache/tts/<key>.wav` —— 与下载端点的 `rel_path` 口径一致。
+
+        """
+        if not tts_key:
+            return ""
+        # 只有音频真的落盘才给地址 —— TTS 静默降级时 `tts_cache_key` 仍有值，
+        # 但文件不存在，设备照着地址下载只会拿到 404。
+        if not self.storage().tts_cache_path(tts_key).exists():
+            return ""
+        device = self.storage().get_device(device_id)
+        secret = (device or {}).get("device_secret_hex", "")
+        if not secret:
+            return ""
+        rel_path = f"cache/tts/{tts_key}.wav"
+        token = security.issue_token(device_id, rel_path, secret)
+        return f"{settings.public_base_url}/api/v1/content/download?token={token}"
 
     def _local_intent(self, text: str) -> Optional[Dict[str, Any]]:
         """第一级：本地规则（音量/亮度/课表/天气）。"""

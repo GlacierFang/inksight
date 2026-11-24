@@ -1,0 +1,17 @@
+[Unit]
+Description=abbot 学科盒子网关（树莓派端云服务端）
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/open/.openclaw/workspace/abbot/server
+# 只监听 127.0.0.1：对外入口统一走 nginx 的 /abbot/ 前缀，不直接暴露端口。
+# --env-file 注入 .env（管理员密码、模型密钥），文件权限 0600。
+ExecStart=/home/open/.openclaw/workspace/abbot/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 18843 --env-file .env --log-level warning
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

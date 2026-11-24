@@ -9,6 +9,9 @@
 ### 1.2 首次 6 位配对码握手鉴权
 * **零预烧录密钥**：固件出厂或重刷后不硬编码任何服务器密钥。用户在树莓派 Web 控制台生成 **6 位一次性数字配对码**（有效期 `5 分钟`），在设备 `PAGE_OOBE` 或 `PAGE_SETTINGS -> 设备配对绑定` 中输入后，设备携带芯片唯一 `device_id`（格式 `esp32s3_<chip_mac_hex8>`）请求 `POST /api/v1/pair`。
 * **密钥落盘**：握手成功后，设备将网关下发的 `device_secret`（**64 位小写十六进制字符串，解码后为 32 字节原始密钥**）与目标网关域名存入板载 `NVS`（`auth_cfg` 命名空间），并同步更新 TF 卡 `profile.json` 中的 `paired: true`。
+* **网关基址配置**：固件的网关基址（`host` + `base_path`）是可配置项，默认 **`http://ruohan.site/abbot`**（本机 frp 只绑定 `ruohan.site` 这一个 Host，子域名不可用；`443` 无证书，只能走 `80`）。请求 URL = 基址 + 纯 API 路径（如 `http://ruohan.site/abbot/api/v1/pair`）。
+* **签名路径口径**：固件计算 `X-Signature` 时，`PATH` **只取纯 API 路径**（如 `/api/v1/study/solve`），**不含基址、不含 `/abbot` 前缀** —— 口径以 `05` 第 3.2 节为准，本节不重复定义。网关侧由反代剥前缀后按同一路径验签，故同一套签名在公网与本地直连下都成立。
+* **下载地址为绝对 URL**：网关下发的固件/音频下载链接是**带挂载前缀的绝对地址**（如 `http://ruohan.site/abbot/api/v1/content/download?token=...`），设备**直接使用即可，不得自行拼接基址** —— 基址会随部署变更，自行拼接会拿到打不开的地址。
 
 ### 1.3 北京时间（UTC+8）校时、低磨损检查点与时钟超窗熔断
 * **在线 NTP 校时**：每次 Wi-Fi 连接成功后，自动向国内公共 NTP 服务器（`ntp.aliyun.com`、`cn.pool.ntp.org`）同步 `UTC+8` 北京时间并写入 ESP32 内部 RTC，同时更新 `profile.json` 的 `last_ntp_ts`。

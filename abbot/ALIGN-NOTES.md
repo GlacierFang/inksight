@@ -331,4 +331,60 @@ env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u AL
 - **`cli_sim.py` 的语音链路只验证了错误路径** —— ASR 未启用（`speech.asr.enabled: false`），本地规则分流（音量/亮度/课表）因无真实 ASR 转写文本而无法触发。
 - **`admin/api/schedule/parse` 与 `packs/preview` 依赖真实模型**，mock 下只能返回占位回复。
 - **固件编译属 Phase 2**，本机无 PlatformIO。
-- 服务以 `127.0.0.1:18770` 启动验证，**未做 systemd 注册**（05 §2.1 要求 `study-gateway.service`，属部署环节）。
+- 服务以 `127.0.0.1:18770` 启动验证，**未做 systemd 注册**（05 §2.1 要求 `study-gateway.service`，属部署环节）。—— **已在第四轮完成，见第九节。**
+
+---
+
+## 九、第四轮：后台挂载域名（对外部署）
+
+冰河大人指示：「先把后台整理好，挂载域名，而不是内部ip地址，这个可以参考其他几个项目。」
+
+### 9.1 参照同机惯例选定的部署形态
+
+| 决策 | 取值 | 依据 |
+| :--- | :--- | :--- |
+| 域名 | `ruohan.site`（**只能用这一个**） | frpc 只绑了 `custom_domains = ruohan.site`；子域名一律 503 |
+| 暴露方式 | **路径前缀** `/abbot/` | 同机既有项目（`/eink-mini/`、`/ink/api/`、`/ai-agent-pet/`）全走路径前缀 |
+| 传输 | HTTP（**只有 80 可用**） | `443` 未在 frp 边缘节点配证书，TLS 握手报 `tlsv1 unrecognized name` |
+| 后端监听 | `127.0.0.1:18843`（user scope systemd） | 端口落在 skills 段 `18790-18899`；对外只经 nginx |
+| 服务名 | `openclaw-abbot.service` | 端口登记表按 `openclaw-<service>.service` 扫 unit，与既有惯例一致 |
+
+**挂载前缀与签名路径的关系（本轮最关键的判断）**：nginx `proxy_pass http://127.0.0.1:18843/`（带尾斜杠）会**剥掉** `/abbot` 前缀，网关收到的永远是**纯 API 路径**。因此 `05` §3.4 的基准向量（`PATH="/api/v1/ping"`）在公网与本地直连下**完全一致**，无需另立一套向量 —— 已在 `05` §3.2 与 `04` §1.2 写死该口径（固件签名的 `PATH` 只取纯 API 路径，不含基址与 `/abbot`）。
+
+### 9.2 顺带修掉的 4 个潜伏 bug（全部是本轮新代码路径叫醒的）
+
+| # | 位置 | 现象 | 根因 | 性质 |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | `router_ai.py` | 拍题返回 `5001` | 新加的 `self._storage()` —— 该类方法名是 `storage()`，`_storage` 是实例属性 | **本轮自己引入** |
+| 2 | `security.py` | 下载 Token 签发 `NameError` | `issue_token` 用了裸 `urlsafe_b64encode` 却没导入 | **Phase 1 遗留**（OTA 无 manifest → `has_update` 恒 false → 从未调用） |
+| 3 | `security.py` | 下载 Token 校验 `ValueError` | `decoded.rsplit("|", 1)` 只返回 2 段却被解包成 3 个名字 | **Phase 1 遗留**（同上，从未真实下载） |
+| 4 | `main.py` + `ota_manager.py` | OTA 下发 `bin_url` 下载 404 | token 指向 `ota/{ver}.bin`，固件实际落盘为 `ota/fw_{ver}.bin` | **Phase 1 遗留**（同上） |
+
+第 2/3/4 条同源：**下载链路从未被真实调用过**，所以三个 bug 一起藏着。教训 —— 「从未跑过的分支」不是「没有 bug」。
+
+### 9.3 另一个必须收回的说法
+
+上一轮报的「35 项全 PASS」**只在全新账本时成立**：测试断言「草稿后 `used_count` 仍为 0」，而配额账本是跨轮次持久化的，上一轮跑过的扣费会残留（实测 `used_count=3`），导致配额三项断言假失败。已把测试改为**幂等**（配对后调 `/admin/api/quota/reset` 清零账本），并把「响应验签通过」断言从 `verify(...) or header != ""`（只要头非空就过）改成**用请求时的时间戳真校验** —— 原来那条断言没有推翻力。
+
+### 9.4 本轮实际验证（真实跑）
+
+| 验证项 | 结果 |
+| :--- | :--- |
+| E2E 直连 `127.0.0.1:18843` | **36 项全 PASS** |
+| E2E 经 nginx `/abbot/` 前缀 | **36 项全 PASS**（含签名穿前缀、配额仲裁三态） |
+| 公网 `http://ruohan.site/abbot/` | HTTP 200，管理台页面完整 |
+| `/abbot/admin/api/status` | HTTP 401（路由通、仅未登录，符合预期） |
+| OTA 固件发布 → 检查 → 下载 | `bin_url` 为**绝对公网地址**；下载 `X-File-Sha256`、`Content-Length` 齐备；内容与 manifest 声明的 sha256 **三方一致** |
+| 探针残留清理 | 假固件 `9.9.9`、临时设备、临时账本已删；复查 `has_update=False` |
+
+### 9.5 安全面处理
+
+- **管理台口令已轮换**（原为上轮我设的测试弱口令 `abbot2026`，现在公网可达），新口令写入 `server/.env`（权限 `0600`，未入 Git）。
+- **管理台仅靠会话 Cookie + CSRF 头**保护，与同机其它项目同一档（未加 `auth_basic`）。
+- `nginx` `location /abbot/` 的 `client_max_body_size` 对齐 server 级 `100m`（电子书/固件上传体积大）。
+
+### 9.6 未做 / 待办（不属本轮范围）
+
+- **真实 MiniMax 视觉/ASR/TTS 接口验证**（`ai.provider` 仍为 `mock`）—— 独立任务卡。
+- **固件侧网络层 C 接口与 `05` 字段对齐**（`net_study_solve()` 缺 `edu_stage`/`enrollment_year`/`device_remaining_quota` 入参）—— 独立任务卡。
+- **`pypdf` vs `python-docx` 中文教材抽取质量对比** —— 独立任务卡。

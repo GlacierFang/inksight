@@ -121,6 +121,22 @@ class OtaManager:
             raise OtaError("清单写入失败")
         return versions[version]
 
+    def latest_rel_path(self) -> str:
+        """
+        最新固件相对 `storage/` 根的下载路径（如 `ota/fw_1.2.3.bin`）。
+
+        文件名取自 manifest 的 `file` 字段 —— **不能**自行用 `{version}.bin` 拼：
+        上传时落盘名是 `fw_{version}.bin`，两者对不上会让设备下载到 404。
+        """
+        manifest = self.load_manifest()
+        versions = manifest.get("versions") or {}
+        if not versions:
+            return ""
+        latest = manifest.get("latest") or self._pick_latest(versions)
+        info = versions.get(latest) or {}
+        name = info.get("file") or f"fw_{latest}.bin"
+        return f"ota/{name}"
+
     def _pick_latest(self, versions: Dict[str, Any]) -> str:
         if not versions:
             return ""

@@ -3,8 +3,12 @@
 # 敏感信息（API Key、管理员密码）放同目录 .env，不写在本文件。
 
 server:
-  host: "0.0.0.0"
-  port: 18770
+  # 只监听本机：对外只经 nginx 反代（/abbot/ 前缀），不直接暴露到局域网
+  host: "127.0.0.1"
+  port: 18843
+  # 对外可达基址（含挂载前缀）。设备端拿到的下载地址必须是绝对 URL，
+  # 否则设备端要自己拼 base，容易出错。域名与前缀一律由此文件驱动，禁止硬编码。
+  public_base_url: "http://ruohan.site/abbot"
   # 静态管理台挂载点（零构建单文件 web/index.html）
   web_dir: "web"
   # storage/ 持久化目录（相对路径按 server/ 解析）

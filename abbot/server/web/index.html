@@ -202,7 +202,9 @@ async function api(path, opts){
   opts = opts || {};
   const init = {method: opts.method || 'GET', headers: {'X-Requested-With':'XMLHttpRequest'}, credentials:'same-origin'};
   if (opts.body !== undefined){ init.method = opts.method || 'POST'; init.headers['Content-Type']='application/json'; init.body = JSON.stringify(opts.body); }
-  const r = await fetch(path, init);
+  // 相对路径：管理台入口可能是 /（本地直连）也可能是 /abbot/（经 nginx 挂载），
+  // 相对路径在两种入口下都落在同一个后端路由上，写死 /admin/api 会打到别的服务。
+  const r = await fetch(path.replace(/^\//, ''), init);
   let j = null;
   try { j = await r.json(); } catch(e) { j = {ok:false, msg:'服务器返回异常'}; }
   return {status:r.status, j:j};
@@ -317,7 +319,7 @@ async function cleanBook(){
   const f = $('bkFile').files[0];
   if(!f){ show($('bkMsg'),'先选一个文件','warn'); return; }
   const fd = new FormData(); fd.append('file', f);
-  const r = await fetch('/admin/api/books/clean', {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:fd, credentials:'same-origin'});
+  const r = await fetch('admin/api/books/clean', {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:fd, credentials:'same-origin'});
   const j = await r.json();
   show($('bkMsg'), j.ok ? ('清洗完成：'+(j.data.sections||0)+' 个章节，'+(j.data.chars||0)+' 字') : (j.msg||'清洗失败'), j.ok?'ok':'err');
 }
@@ -327,7 +329,7 @@ async function uploadOta(){
   const f = $('otaFile').files[0];
   if(!f){ show($('otaMsg'),'先选一个固件文件','warn'); return; }
   const fd = new FormData(); fd.append('file', f); fd.append('version', $('otaVer').value.trim());
-  const r = await fetch('/admin/api/ota/upload', {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:fd, credentials:'same-origin'});
+  const r = await fetch('admin/api/ota/upload', {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:fd, credentials:'same-origin'});
   const j = await r.json();
   show($('otaMsg'), j.ok ? '固件已发布' : (j.msg||'发布失败'), j.ok?'ok':'err');
   if(j.ok) loadStatus();
