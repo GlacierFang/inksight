@@ -203,6 +203,7 @@ class SpeechEngine:
             raise SpeechError("语音识别服务尚未启用", 4003)
         provider = cfg.get("provider", "")
         base_url = (cfg.get("base_url") or "").rstrip("/")
+        path = cfg.get("path") or "/v1/audio/transcriptions"
         model = cfg.get("model", "")
         if not base_url or not model:
             raise SpeechError("语音识别服务配置不完整", 4003)
@@ -219,13 +220,17 @@ class SpeechEngine:
 
         wav = pcm_to_wav(pcm)
         timeout = float(cfg.get("timeout_seconds", ASR_TIMEOUT))
+        headers = {"Authorization": f"Bearer {api_key}"}
+        language = (cfg.get("language") or "").strip()
+        if language:
+            headers["language"] = language
         try:
             with httpx.Client(timeout=timeout, trust_env=False) as client:
                 resp = client.post(
-                    f"{base_url}/v1/audio/transcriptions",
-                    headers={"Authorization": f"Bearer {api_key}"},
+                    f"{base_url}{path}",
+                    headers=headers,
                     files={"file": ("audio.wav", wav, "audio/wav")},
-                    data={"model": model},
+                    data={"model": model, "response_format": "json"},
                 )
         except httpx.TimeoutException:
             raise SpeechError("语音识别超时了", 4003) from None
@@ -238,6 +243,9 @@ class SpeechEngine:
             data = resp.json()
         except ValueError:
             raise SpeechError("语音识别返回内容无法解析", 4003) from None
+        base = data.get("base_resp") or {}
+        if base.get("status_code") not in (None, 0):
+            raise SpeechError("语音识别服务暂时不可用", 4003)
         text = (data.get("text") or "").strip()
         if not text:
             raise SpeechError("没有听清，再说一次好吗", 4003)
@@ -288,15 +296,16 @@ class SpeechEngine:
             },
             "audio_setting": {
                 "sample_rate": SAMPLE_RATE,
-                "bitrate": 25600,
+                "bitrate": 32000,
                 "format": "wav",
                 "channel": CHANNELS,
             },
         }
+        tts_path = cfg.get("path") or "/v1/t2a_v2"
         try:
             with httpx.Client(timeout=TTS_HARD_TIMEOUT, trust_env=False) as client:
                 resp = client.post(
-                    f"{base_url}/v1/t2a_v2",
+                    f"{base_url}{tts_path}",
                     headers={"Authorization": f"Bearer {api_key}"},
                     json=body,
                 )

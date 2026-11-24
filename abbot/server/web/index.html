@@ -235,7 +235,12 @@
           <input type="file" id="dsPhoto" accept="image/*">
           <label>注入语音（提问用）</label>
           <input type="file" id="dsAudio" accept="audio/*">
-          <label>口述内容（ASR 未启用时走这条）</label>
+          <label>麦克风录音（提问用）</label>
+          <div class="row" style="margin-top:6px">
+            <button id="dsMicBtn" onclick="DS.mic()">开始录音</button>
+            <span class="pill" id="dsMicState">未录音</span>
+          </div>
+          <label>口述内容（不想说话时直接打字）</label>
           <input id="dsVoiceText" placeholder="例如：这题的第二步为什么这样做">
           <div class="row" style="margin-top:8px">
             <select id="dsZoom" style="width:auto;flex:0 0 auto"><option value="1">1×</option><option value="1.5" selected>1.5×</option><option value="2">2×</option></select>
@@ -886,21 +891,21 @@ const DS = (function(){
   function finishRecording(){ st.overlay=null; doVoice(); }
   async function doVoice(){
     st.overlay=null;
-    // 有 PCM → 走真实 ASR 通道（/api/v1/study/voice）；
-    // 只有文字 → 走 05 明确列出的 solve 兼容字段 voice_text（ASR 未启用时也能用）。
-    if(st.audioPcm){
-      const d=await devCall('POST','/api/v1/study/voice',{
-        context_page:st.page, context:{pack_id:(st.packs[st.sel]||{}).id||'',card_id:String(st.cardIdx)},
-        pcm_base64:st.audioPcm, edu_stage:'JUNIOR', enrollment_year:2026, local_time:new Date().toISOString(),
-      });
-      if(d&&d.data&&d.data.reply_text){
-        toast(d.data.reply_text.slice(0,40));
-        st.solve={status:'HINTING',display_markdown:d.data.reply_text,speech_text:d.data.reply_text};
-        st.page='PAGE_SOLVE_RESULT'; st.prev='PAGE_HOME'; st.sel=0;
-      }
-      return;
+    // 有 PCM → 走真实 ASR 通道（/api/v1/study/voice，模型转写后再回答）；
+    // 只有文字 → 同一端点的 voice_text 兼容字段（免一次 ASR 往返）。
+    // 两条都不走 solve：solve 是拍题端点，必须带 image_b64。
+    const hasPcm=!!st.audioPcm, hasText=!!st.voiceText;
+    if(!hasPcm && !hasText){ toast('先录一段语音，或写一句口述内容'); return; }
+    const d=await devCall('POST','/api/v1/study/voice',{
+      context_page:st.page, context:{pack_id:(st.packs[st.sel]||{}).id||'',card_id:String(st.cardIdx)},
+      pcm_base64:hasPcm?st.audioPcm:'', voice_text:hasText?st.voiceText:'',
+      edu_stage:'JUNIOR', enrollment_year:2026, local_time:new Date().toISOString(),
+    });
+    if(d&&d.data&&d.data.reply_text){
+      toast(d.data.reply_text.slice(0,40));
+      st.solve={status:'HINTING',display_markdown:d.data.reply_text,speech_text:d.data.reply_text};
+      st.page='PAGE_SOLVE_RESULT'; st.prev='PAGE_HOME'; st.sel=0;
     }
-    await doSolve(false,false,true);
   }
   async function doSolve(withVoice,isHint,textOnly){
     if(!textOnly && !st.photoB64){ toast('先在右侧注入一张画面'); return; }
@@ -1112,6 +1117,78 @@ const DS = (function(){
       fr.readAsDataURL(f);
     });
   }
+  // ------------------------------------------------------------ 麦克风采集
+  //
+  // 浏览器端把麦克风录下的音频重采样成设备端约定的
+  // `16kHz / 16bit / Mono` 裸 PCM，与设备上传格式完全一致。
+  // 录到的内容写进 st.audioPcm，走 /api/v1/study/voice 的真实 ASR 通道。
+  const mic={stream:null,ctx:null,proc:null,chunks:[],recording:false,t0:0};
+  function micState(msg){
+    const el=document.getElementById('dsMicState');
+    if(el) el.textContent=msg;
+    const btn=document.getElementById('dsMicBtn');
+    if(btn) btn.textContent=mic.recording?'停止并提交':'开始录音';
+  }
+  async function micStart(){
+    if(mic.recording) return;
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+      micState('浏览器不支持麦克风');
+      return;
+    }
+    try{
+      mic.stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    }catch(e){
+      micState('麦克风没授权');
+      return;
+    }
+    mic.ctx=new (window.AudioContext||window.webkitAudioContext)();
+    const src=mic.ctx.createMediaStreamSource(mic.stream);
+    mic.proc=mic.ctx.createScriptProcessor(4096,1,1);
+    mic.chunks=[];
+    mic.proc.onaudioprocess=function(ev){
+      if(!mic.recording) return;
+      mic.chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+    };
+    src.connect(mic.proc);
+    mic.proc.connect(mic.ctx.destination);
+    mic.recording=true; mic.t0=Date.now();
+    micState('录音中…（最长 10 秒）');
+    setTimeout(function(){ if(mic.recording) micStop(); },10000);
+  }
+  function micStop(){
+    if(!mic.recording) return;
+    mic.recording=false;
+    try{ if(mic.proc) mic.proc.disconnect(); }catch(e){}
+    try{ if(mic.stream) mic.stream.getTracks().forEach(function(t){t.stop();}); }catch(e){}
+    let rate=16000;
+    try{ rate=mic.ctx?mic.ctx.sampleRate:16000; }catch(e){}
+    try{ if(mic.ctx) mic.ctx.close(); }catch(e){}
+    const chunks=mic.chunks; mic.chunks=[];
+    const pcm=f32ToPcm16k(chunks,rate);
+    if(!pcm){ micState('没录到声音'); return; }
+    st.audioPcm=pcm;
+    micState('已录入 '+((Date.now()-mic.t0)/1000).toFixed(1)+' 秒');
+    toast('语音已录入');
+  }
+  function f32ToPcm16k(chunks,rate){
+    try{
+      let n=0; chunks.forEach(function(c){ n+=c.length; });
+      if(!n) return '';
+      const all=new Float32Array(n); let o=0;
+      chunks.forEach(function(c){ all.set(c,o); o+=c.length; });
+      const ratio=rate/16000, outLen=Math.floor(all.length/ratio);
+      const out=new Int16Array(outLen);
+      for(let i=0;i<outLen;i++){
+        const p=i*ratio, i0=Math.floor(p), i1=Math.min(all.length-1,i0+1), f=p-i0;
+        let v=all[i0]*(1-f)+all[i1]*f; v=Math.max(-1,Math.min(1,v));
+        out[i]=v<0?v*32768:v*32767;
+      }
+      let bin=''; for(let i=0;i<out.length;i++) bin+=String.fromCharCode(out[i]&255,out[i]>>8);
+      return btoa(bin);
+    }catch(e){ return ''; }
+  }
+  function micToggle(){ if(mic.recording) micStop(); else micStart(); }
+
   function wavToPcm16k(u8){
     try{
       const dv=new DataView(u8.buffer);
@@ -1146,6 +1223,7 @@ const DS = (function(){
   return {
     init:function(){ init(); initFiles(); },
     pair:pair, reset:reset, boot:boot, state:st,
+    mic:micToggle,
     pages:Object.keys(PAGES),
   };
 })();

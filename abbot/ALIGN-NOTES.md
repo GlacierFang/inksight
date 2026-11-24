@@ -460,6 +460,50 @@ env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u AL
 - 管理台 `index.html` 由 `FileResponse` 每次从磁盘读，改前端**无需重启服务**。
 
 ### 9.8 未做 / 待办（不属本轮范围）
+
+### 9.9 接通真实 MiniMax 多模态与语音链路（mock → 真实服务商）
+
+**起点**：`ai.provider` 一直是 `mock`，`speech.asr.enabled` / `speech.tts.enabled` 都是 `false` —— 拍题与语音永远返回桩数据，产品等于没有 AI 能力。本轮把三条链路全部接到真实服务商并逐条实测。
+
+**实测出来的服务商事实（照抄代码前必读）：**
+
+| 能力 | 端点 | 模型 | 备注 |
+| :--- | :--- | :--- | :--- |
+| 文本 | `/v1/text/chatcompletion_v2` | `MiniMax-M2.5` | 也可用 `/v1/chat/completions` |
+| 视觉 | `/v1/text/chatcompletion_v2` | `MiniMax-M3` | **该服务商没有独立视觉模型**（VL 系列已下架），视觉能力由 M3 原生承担 |
+| ASR | `/v1/speech_to_text` | `asr-1.0` | **下划线**，不是斜杠；`multipart/form-data`，语言提示走 `language` 请求头 |
+| TTS | `/v1/t2a_v2` | `speech-02-hd` + `male-qn-qingse` | 返回 Hex 字符串，按 `response_format: hex` 解码 |
+
+**踩到的四个坑（每个都浪费了一轮排查）：**
+
+1. **ASR 路径差一个字符**。官方端点是 `/v1/speech_to_text`（下划线），我先试的 `/v1/speech/to/text`（斜杠）连同其它 10 条候选路径全部 404，一度判成「该服务商没有 ASR」。**结论不是「路径 404 就是没有这个能力」，而是去查官方文档** —— 文档里写的 `POST /v1/speech_to_text` 一试就通，返回 `{"text":"今天我们讲一道数学题。","duration":2.04}`。
+2. **上游不支持裸 PCM**。ASR 只收带容器的 wav/mp3 等，裸 PCM 直接拒。网关已在 `speech_engine.pcm_to_wav()` 里统一封装 44 字节 WAV 头再上传，设备端仍只传裸 PCM。
+3. **「红图答红色」是假象**。最初用一张 294 字节的纯色几何图测视觉，M3 答「红色」看起来像通了 —— 实际上**那张图触发了内容审核，图像被静默剥离**，模型是猜的。换真实照片后立刻暴露：所有模型回「我没有看到图片」。**图片被审核拦下时上游返回 200 + 正常回复，不会报错** —— 这是最容易误判为「格式不对」或「模型不支持」的一种失败。
+4. **视觉模型守卫写反了**（本项目自己的 bug）。`_vision_call` 里判断「模型是否已配置」写成 `not model.startswith("<")`，本意是拦占位符 `<按服务商填写...>`，实际把**真实模型名也拦了**。改成 `model.startswith("<")` 才对。同类判断要注意方向：占位符以尖括号开头，已配置的值**不以**尖括号开头。
+
+**改了什么：**
+
+- `config.yaml`：`ai.provider` → `minimax`，补 `vision_model` / `text_path` / `vision_path` / `max_tokens`；`speech.asr` 与 `speech.tts` 全部启用并填真实模型与音色；新增 `path` 字段让端点路径也走配置驱动。
+- `router_ai.py`：路径与 `max_tokens` 改为配置驱动；新增 `_strip_think()` 剥离 `<think>…</think>` 推理块（推理模型把思考与答案放同一字段，不剥离会命中推理块内部的花括号，JSON 解析出错误结构）；新增 `_image_data_url()` 按字节嗅探 MIME（设备端传 JPEG，管理台注入可能是 PNG，硬写 `image/jpeg` 会带错类型标注）。
+- `speech_engine.py`：ASR/TTS 端点路径改配置驱动；ASR 请求带 `language` 头与 `response_format`，并检查 `base_resp.status_code`。
+- `web/index.html`：新增**浏览器麦克风采集**（`getUserMedia` → `AudioContext` → 重采样成 `16kHz/16bit/Mono` 裸 PCM，与设备上传格式一致），最长 10 秒；「口述内容」字段文案改为「不想说话时直接打字」；`doVoice()` 改为**统一走 `/api/v1/study/voice`** —— 有 PCM 走 ASR，只有文字走 `voice_text` 兼容字段，两者都不再落到 `solve` 的空图分支报错。
+- `router_ai.voice()`：接受 `voice_text` 兼容字段（有 PCM 时 ASR 结果覆盖它），补齐「无照片纯语音提问」路径。
+
+**验证（全部真实调用，非桩）：**
+
+- **拍题**：真实照片 → M3 视觉 → 严格 JSON 解析成功 → `status=NEED_DRAFT`（模型看到照片里没有题目文字，正确地要求学生先写第一步，而不是编造答案）→ TTS 落盘 `339620 字节 / 16000Hz / 1ch / 16bit`，与设备端格式一致。
+- **语音**：真实中文语音 → ASR 转写正确 → 模型据实回答（没有照片就说「请把题目发给我」，不编造）→ `has_audio: true`。
+- **纯文字提问**（无照片无录音）：正确答出配方法推导。
+- **`pack-cards`**：构建学科包（用设备密钥 AES 加密 `cards.enc`）→ 解密出的卡片正文完全正确；未登录 / 未配对 / 包不存在三个分支文案温和，无技术术语。
+- **真浏览器（headless Chromium + CDP）15 项全 PASS**：真实 UI 登录 → 真机画面页签 → 配对虚拟设备 → 摇杆短按 → 录音浮层 → 提交 → **真实 AI 回复抵达结果页**（内容为完整配方法推导，非 mock）→ 无未捕获 JS 错误。
+
+**实测时序**：一次真实模型调用约 **8 秒**（含视觉推理与 TTS）。验收脚本等 6 秒会误判为失败 —— 等足 25 秒或轮询页面状态。
+
+**边界（仍未验证）：**
+
+- 「无照片纯语音提问」现已走 `study/voice` 的 `voice_text` 兼容字段，**绕过了 ASR**；真正的「说一句话 → ASR → 回答」链路在管理台靠注入音频文件验证过，**浏览器麦克风实采未在 headless 下测**（headless 无真实麦克风设备）。
+- 真实 MiniMax 多模态接口的**计费与限流**行为未压测。
+
 - **真实 MiniMax 视觉/ASR/TTS 接口验证**（`ai.provider` 仍为 `mock`）—— 独立任务卡。
 - **固件侧网络层 C 接口与 `05` 字段对齐**（`net_study_solve()` 缺 `edu_stage`/`enrollment_year`/`device_remaining_quota` 入参）—— 独立任务卡。
 - **`pypdf` vs `python-docx` 中文教材抽取质量对比** —— 独立任务卡。

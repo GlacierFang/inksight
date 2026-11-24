@@ -16,11 +16,11 @@
 职责：独立完成需求分析 → 方案 → 开发 → 部署运维全流程。
 
 ## 在做的项目
-- **InkSight 墨水屏**（18834/18835，外网 http://ruohan.site/ink/）：2026-10-22 上线。已拍板不做 HTTPS、不做固件/OTA。自定义模式 24 个（狸行记/小景/透屏/窗外/草地铺道蚁/宋人日课/回家签/树莓派状态/日昼与月相/天工阁/日痕等，catalog 里 `category=custom` 的全算）。待：账号链路 + 真机拉图实测。→ `memory/projects/InkSight.md`、`InkSight-自定义模式开发.md`、`InkSight-狸行记.md`
+- **InkSight 墨水屏**（18834/18835，外网 http://ruohan.site/ink/）：2026-10-22 上线。已拍板不做 HTTPS、不做固件/OTA。自定义模式 24 个（狸行记/小景/透屏/窗外/草地铺道蚁/宋人日课/树莓派状态/日昼与月相/天工阁/日痕等，catalog 里 `category=custom` 的全算）。**诗笺日课 2026-11-22 起与 bt-presence 解耦**：去掉「到家/出门事实」块，只留当日主诗 + 宋代掌故 + 天气，诗库搬进 inksight 自己目录 → `memory/projects/InkSight-存在感依赖解耦.md`。待：账号链路 + 真机拉图实测。→ `memory/projects/InkSight.md`、`InkSight-自定义模式开发.md`、`InkSight-狸行记.md`
 - **山河图记**（18838 `/shanhe/`）：研学 v2 每章 1 主题，10-21 重构完，待真机验证。→ `memory/projects/山河图记.md`
-- **识物志**（nature-local 18818）：✅ 封版 2026-07-16。→ `memory/projects/识物志app版.md`
+- **识物志**（nature-local 18818）：✅ 封版 2026-07-16。在线版 nature-api（18798）2026-11-05 确认死分支并下线，别再混。→ `memory/projects/识物志app版.md`
 - **驿车志**（18823 `/train-app/`）：Authorization header 已修 + 503 外层重试。API Key 共用 `skills/gallery/ai_tagger.env`；与 my-train（18809）是两个后端，别混。
-- **诗词签 + bt-presence**：运行中。华为手机离家/回家 → 天气推送（同步）+ 诗词签（异步写 bt_queue）；库管理 `/diary/poetry-manage`
+- **诗词签 + bt-presence**：🔴 已停用（2026-11-22）。5 个 user unit 已 disable（天气推送 / 诗词签图片 / 提醒队列 / 日记网页全下线），代码 + 数据 + nginx `/diary/` 路由全部保留，`systemctl --user enable --now` 一条命令可恢复；port-registry 登记与 dashboard 入口已同步注销
 - **已封版 App**：如梦令 18819 · 探识 18822 · 时光印象册 18821
 - **Skills**：gallery library dashboard visit-knowledge bt-presence presence-diary knowledge-center nature-recognition work-assistant stamp-collection usage-stats brain deepseek-webui train-app my-island
 - **渠道**：飞书 `cli_a9259b2e6738dcd6`；微信插件已废，功能已迁至飞书
@@ -29,7 +29,7 @@
 - **后端只做 AI 接口，用户数据全在前端**（10-21 原话「我一直都强调后端只做 AI 接口，数据全部前端保存！」）。后端不落库、不做身份识别、不存进度/报告正文。**md 里写的架构可能是我自己漂移出来的，不是他的原话；要动边界先问。**
 - **自选方向 = 越界**（10-23「之后再开发什么新的能力，务必和我沟通」）。不要把自己的推测写进 USER.md/MEMORY.md —— 每条都要能指回他亲口说过的话或真实产出物。
 - **InkSight 不做固件/OTA**（10-22「我们不做固件」）：固件相关一律不查、不修、不主动提，别当「发现」汇报。
-- **不做 HTTPS**（10-22「我们不做https」）：外网就 http://ruohan.site/ink。同类「万一…」的假设性风险 = 噪音，不作为发现汇报。
+- **不做 HTTPS**（10-22「我们不做https」，11-24 再次确认）：所有外网入口一律保持明文 HTTP（`http://ruohan.site/<项目>/`），不申请证书、不做 TLS 收口。同类「万一…」的假设性风险 = 噪音，不作为发现汇报，也不开成待办卡片。
 - **不主动升级 OpenClaw**，等稳定版，升级前全量备份。**不擅自 restart gateway**；他说「重启」就立刻重启。
 - **端口操作（最高优先级）**：先 `pr check <端口>` 确认归属；不知道就停下来问，不猜。真相源 `tools/port-registry/ports.json`。
 - **红线目录（严禁清理）**：`gallery/photos/` · `library/books/` · `skills/video-shelf/`
@@ -75,9 +75,10 @@
 
 ## 技术事实速查
 - 端口与路由：真相源 `tools/port-registry/ports.json` · 文档 `memory/projects/端口与路由配置.md`
-- 数据库：Gallery `~/.openclaw/media/gallery.db` · Library `skills/library/library.db` · Dashboard `skills/dashboard/data/metrics.db`
+- 数据库：Gallery `~/.openclaw/media/gallery.db` · Library 索引 `memory/library-index.json`（无独立 DB） · Dashboard `skills/dashboard/data/metrics.db`
 - cron add 需 pairing → 改 `~/.openclaw/cron/jobs.json` + `sudo systemctl restart openclaw-gateway`
 - nginx 配置归我负责；禁止修改已有 location 块（新增服务除外）
 - MEMORY.md 本身超大会导致 embedded session OOM（limit ~20000 chars）→ 控制在 5000 字内，日常记录进 daily memory
+- **md 维护**：不挂定时任务，**每次跟冰河大人沟通时顺手清理**。工具：`bash tools/md-maintenance.sh`（只读、零 token）
 
-_Last updated: 2026-10-30_
+_Last updated: 2026-11-02_

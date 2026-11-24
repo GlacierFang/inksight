@@ -131,6 +131,47 @@ def _check_base_resp(data: Dict[str, Any]) -> None:
         )
 
 
+def _strip_think(text: str) -> str:
+    """
+    剥离模型返回里的 `<think>…</think>` 推理块。
+
+    推理模型会把思考过程与最终答案放进同一个 `content` 字段，
+    不剥离的话严格 JSON 解析会命中推理块内部的花括号，解析出错误的结构。
+    """
+    if not text:
+        return ""
+    out = re.sub(r"<think>.*?</think>", "", text, flags=re.S)
+    # 未闭合的思考块（被 max_tokens 截断）：从 <think> 起全部丢弃
+    idx = out.find("<think>")
+    if idx >= 0:
+        out = out[:idx]
+    return out.strip()
+
+
+def _image_data_url(image_b64: str) -> str:
+    """
+    按图片实际字节判定 MIME，组装 data URL。
+
+    设备端按 05 契约传 JPEG，但管理台「注入画面」允许任意格式；
+    一律硬写 `image/jpeg` 会让 PNG 图片带上错误的类型标注。
+    """
+    import base64
+
+    raw = image_b64 or ""
+    mime = "image/jpeg"
+    try:
+        head = base64.b64decode(raw[:16] + "==", validate=False)[:12]
+        if head.startswith(b"\x89PNG"):
+            mime = "image/png"
+        elif head.startswith(b"RIFF") and head[8:12] == b"WEBP":
+            mime = "image/webp"
+        elif head.startswith(b"GIF8"):
+            mime = "image/gif"
+    except Exception:
+        pass
+    return f"data:{mime};base64,{raw}"
+
+
 class RouterAI:
     """三级意图分流 + 配额仲裁 + Prompt 注入。"""
 
@@ -253,12 +294,14 @@ class RouterAI:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
-            "temperature": 0.6,
+            "temperature": float(cfg.get("temperature", 0.6) or 0.6),
         }
+        body["max_tokens"] = int(cfg.get("max_tokens", 4096) or 4096)
+        text_path = cfg.get("text_path") or "/v1/text/chatcompletion_v2"
         try:
             with httpx.Client(timeout=float(cfg.get("timeout_seconds", 60)), trust_env=False) as client:
                 resp = client.post(
-                    f"{base_url}/v1/text/chatcompletion_v2",
+                    f"{base_url}{text_path}",
                     headers={
                         "Authorization": f"Bearer {api_key}",
                         "Content-Type": "application/json",
@@ -278,9 +321,13 @@ class RouterAI:
             raise RouterError("模型返回内容无法解析", CODE_UPSTREAM) from None
         _check_base_resp(data)
         try:
-            return data["choices"][0]["message"]["content"]
+            content = data["choices"][0]["message"].get("content") or ""
         except (KeyError, IndexError, TypeError):
             raise RouterError("模型返回结构异常", CODE_UPSTREAM) from None
+        content = _strip_think(content)
+        if not content.strip():
+            raise RouterError("模型这次没有给出内容，再试一次好吗", CODE_UPSTREAM)
+        return content
 
     def _vision_call(self, system_prompt: str, image_b64: str, user_voice_text: str) -> str:
         """调用多模态视觉模型（第三级：拍题导学）。"""
@@ -291,14 +338,17 @@ class RouterAI:
         base_url = (cfg.get("base_url") or "").rstrip("/")
         model = cfg.get("vision_model", "")
         api_key = _api_key(provider)
-        if not base_url or not model or not model.startswith("<"):
+        # 占位符形如 `<按服务商填写，部署前校验>` —— 以尖括号开头说明还没填。
+        # 注意判定方向：真实模型名不以 `<` 开头，早前这里写反了，
+        # 导致填了真模型也被当"未配置"拒掉。
+        if not base_url or not model or model.startswith("<"):
             raise RouterError("视觉模型尚未配置", CODE_UPSTREAM)
         if not api_key:
             raise RouterError("模型服务缺少密钥", CODE_UPSTREAM)
 
         content: Any = [
             {"type": "text", "text": user_voice_text or "请分析这道题。"},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+            {"type": "image_url", "image_url": {"url": _image_data_url(image_b64)}},
         ]
         body = {
             "model": model,
@@ -306,12 +356,14 @@ class RouterAI:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": content},
             ],
-            "temperature": 0.6,
+            "temperature": float(cfg.get("temperature", 0.6) or 0.6),
         }
+        body["max_tokens"] = int(cfg.get("max_tokens", 4096) or 4096)
+        vision_path = cfg.get("vision_path") or "/v1/text/chatcompletion_v2"
         try:
             with httpx.Client(timeout=float(cfg.get("timeout_seconds", 60)), trust_env=False) as client:
                 resp = client.post(
-                    f"{base_url}/v1/chat/completions",
+                    f"{base_url}{vision_path}",
                     headers={
                         "Authorization": f"Bearer {api_key}",
                         "Content-Type": "application/json",
@@ -331,9 +383,13 @@ class RouterAI:
             raise RouterError("模型返回内容无法解析", CODE_UPSTREAM) from None
         _check_base_resp(data)
         try:
-            return data["choices"][0]["message"]["content"]
+            content = data["choices"][0]["message"].get("content") or ""
         except (KeyError, IndexError, TypeError):
             raise RouterError("模型返回结构异常", CODE_UPSTREAM) from None
+        content = _strip_think(content)
+        if not content.strip():
+            raise RouterError("模型这次没有给出内容，再试一次好吗", CODE_UPSTREAM)
+        return content
 
     # ------------------------------------------------------------ mock 上游
     #
@@ -476,9 +532,14 @@ class RouterAI:
         validate_profile(edu_stage, enrollment_year)
 
         pcm_b64 = payload.get("pcm_base64") or ""
-        if not pcm_b64:
+        voice_text = (payload.get("voice_text") or "").strip()
+        if pcm_b64:
+            text = get_speech_engine().transcribe(pcm_b64)
+        elif voice_text:
+            # 兼容字段：设备端/管理台已转写好的文本，免一次 ASR 往返
+            text = voice_text
+        else:
             raise RouterError("没有收到录音", CODE_ASR, "没听清，再说一次好吗")
-        text = get_speech_engine().transcribe(pcm_b64)
 
         # ---- 第一级：本地规则直出（零 LLM 调用）----
         local = self._local_intent(text)
