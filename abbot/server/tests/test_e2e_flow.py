@@ -129,10 +129,28 @@ def verify_resp_sig(resp: httpx.Response, ts: str, secret: bytes) -> bool:
     return hmac.compare_digest(sig, expect)
 
 
+def _read_admin_password() -> str:
+    """从 server/.env 读 ADMIN_PASSWORD；读不到返回空串（不打印明文）。"""
+    env_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"
+    )
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("ADMIN_PASSWORD="):
+                    return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="http://127.0.0.1:18843")
-    ap.add_argument("--password", default=os.environ.get("ADMIN_PASSWORD", "abbot2026"))
+    # 口令不写死：环境变量优先，其次读 server/.env。
+    # 写死弱口令做默认值，会把"环境变量没生效"静默吃掉 —— 改了口令测试还在用旧口令登录，
+    # 看起来 PASS 其实验的是另一套凭据。
+    ap.add_argument("--password", default=os.environ.get("ADMIN_PASSWORD") or _read_admin_password())
     ap.add_argument("--device-id", default="esp32s3_e2e0001")
     args = ap.parse_args()
 

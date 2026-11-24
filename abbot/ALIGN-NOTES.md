@@ -379,7 +379,8 @@ env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u AL
 
 ### 9.5 安全面处理
 
-- **管理台口令已轮换**（原为上轮我设的测试弱口令 `abbot2026`，现在公网可达），新口令写入 `server/.env`（权限 `0600`，未入 Git）。
+- **管理台口令**：由冰河大人指定预设值，写入 `server/.env` 的 `ADMIN_PASSWORD`（权限 `0600`，未入 Git，仓库与文档均不落明文）。轮换后必须 `systemctl --user restart openclaw-abbot.service` —— uvicorn 的 `--env-file` 只在启动时读一次，跑着的进程里还是旧口令。
+- **`server/.env` 另含 `MINIMAX_API_KEY`**：此前为空值，已从同机 `skills/creative-studio/.env` 补齐（同一把 key，本机其它项目共用）。`ai.provider` 仍是 `mock`，该 key 暂未被调用。
 - **管理台仅靠会话 Cookie + CSRF 头**保护，与同机其它项目同一档（未加 `auth_basic`）。
 - `nginx` `location /abbot/` 的 `client_max_body_size` 对齐 server 级 `100m`（电子书/固件上传体积大）。
 
