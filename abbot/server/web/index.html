@@ -50,11 +50,16 @@
   .dsscreenwrap{width:480px;height:720px;overflow:hidden;border:1px solid var(--line);border-radius:8px;background:#f4f6f8;flex:0 0 auto}
   .dsscreenwrap canvas{display:block;transform-origin:top left}
   .dsside{flex:1 1 260px;min-width:240px}
-  .dsdpad{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px}
-  .dsacts{display:flex;gap:6px;margin-bottom:10px}
-  .dsacts .dsbtn{flex:1}
-  .dsbtn{padding:8px 6px;font-size:13px}
-  .dsbtn.hit{background:#2559c4}
+  .dsjoy{position:relative;width:176px;height:176px;margin:0 auto 10px;user-select:none}
+  .dsjoy button{position:absolute;width:58px;height:58px;padding:0;border:1px solid var(--line);background:#fff;border-radius:10px;font-size:17px;cursor:pointer}
+  .dsjoy .dsup{left:59px;top:0}
+  .dsjoy .dsdown{left:59px;top:118px}
+  .dsjoy .dsleft{left:0;top:59px}
+  .dsjoy .dsright{left:118px;top:59px}
+  .dsjoy .dsstick{left:59px;top:59px;border-radius:50%;background:#e8eefb;border-color:#c3d3f0;font-size:13px}
+  .dsjoy button.hit{background:#2559c4;color:#fff;border-color:#2559c4}
+  .dsjoy .dsstick.armed{background:#b45309;color:#fff;border-color:#b45309}
+  .dshint{font-size:12.5px;color:var(--mut);text-align:center;margin:0 0 10px;line-height:1.7}
   details{margin-top:12px}
   summary{cursor:pointer;font-size:13.5px;color:var(--mut)}
 </style>
@@ -206,23 +211,18 @@
     <!-- 真机画面 -->
     <div class="card pane hide" data-p="dscreen">
       <h2>真机画面 · 320×480 竖屏复现</h2>
-      <p class="sub" style="margin:0 0 12px">依据 <code>03-竖屏界面布局与交互规范</code> 复现设备屏显。摇杆输入按 03 §3.2 仲裁表执行；拍题与语音走真实设备 API，不是前端假动画。</p>
+      <p class="sub" style="margin:0 0 12px">依据 <code>03-竖屏界面布局与交互规范</code> 复现设备屏显。摇杆输入按 03 §3.2 六手势宪法执行（四向导航 ＋ 短按确定 ＋ 长按退出，无双击）；拍题与语音走真实设备 API，不是前端假动画。</p>
       <div class="dsrow">
         <div class="dsscreenwrap" id="dsWrap"><canvas id="dsCanvas" width="320" height="480"></canvas></div>
         <div class="dsside">
-          <div class="dsdpad">
-            <button class="dsbtn sec" data-g="UP">▲ 上</button>
-            <button class="dsbtn sec" data-g="DOWN">▼ 下</button>
-            <button class="dsbtn sec" data-g="LEFT">◀ 左</button>
-            <button class="dsbtn sec" data-g="RIGHT">右 ▶</button>
+          <div class="dsjoy" id="dsJoy">
+            <button class="dsup" data-dir="UP" title="上推">▲</button>
+            <button class="dsleft" data-dir="LEFT" title="左推">◀</button>
+            <button class="dsright" data-dir="RIGHT" title="右推">▶</button>
+            <button class="dsdown" data-dir="DOWN" title="下推">▼</button>
+            <button class="dsstick" id="dsStick" title="中心键：短按确定，按住≥600ms松手退出">●</button>
           </div>
-          <div class="dsacts">
-            <button class="dsbtn sec" data-g="CLICK">短按</button>
-            <button class="dsbtn sec" data-g="DBL_CLICK">双击</button>
-            <button class="dsbtn sec" data-g="LONG_PRESS">长按</button>
-          </div>
-          <div class="kv"><span>键盘</span><span>方向键 / 回车 / Esc</span></div>
-          <div class="kv"><span>长按</span><span>按住空格 ≥600ms</span></div>
+          <p class="dshint">四向推杆 ＝ 导航（按住可连发）<br>中心键短按 ＝ 确定 ｜ 中心键按住 ≥600ms 松手 ＝ 退出</p>
           <label>虚拟设备 ID</label>
           <input id="dsDevId" value="esp32s3_web0001" autocomplete="off">
           <label>配对码（在「设备」页生成）</label>
@@ -403,7 +403,7 @@ $('pwd').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
  * 真机画面：320×480 竖屏复现
  * 依据 doc/03-竖屏界面布局与交互规范.md
  *   - 三区骨架：状态栏 y=0~24 / 内容区 y=24~448 / 提示栏 y=448~480
- *   - 摇杆手势按 03 §3.2 仲裁表派发（上下左右 + 短按/双击/长按）
+ *   - 摇杆手势按 03 §3.2 六手势宪法派发：四向导航 + 短按确定 + 长按退出（无双击）
  *   - 云端数据全部走真实设备 API（服务端回环做签名与信封加密）
  * 浏览器不自己算签名：管理台跑在明文 HTTP 上，crypto.subtle 不可用。
  * ============================================================ */
@@ -422,7 +422,7 @@ const DS = (function(){
     wifiList:[], wifiSel:0,
     pom:{running:false,remain:1500},
     reader:{title:'',lines:[],page:0,bytes:0},
-    cards:[], cardIdx:0, cardFlip:false, ota:null,
+    cards:[], cardIdx:0, cardFlip:false, cardSel:0, ota:null,
     devId:'', paired:false, busy:false, lastRaw:null, booted:false, wifiScanned:false,
     backlight:3, volume:3, voiceText:'',
   };
@@ -538,7 +538,7 @@ const DS = (function(){
   // ------------------------------------------------------------ 页面
   const PAGES={};
 
-  PAGES.PAGE_HOME={hint:'上下移动 | 短按进入 | 长按提问',draw:function(){
+  PAGES.PAGE_HOME={hint:'上下移动 | 短按确定 | 长按退出',draw:function(){
     const days=st.schedule&&st.schedule.days?st.schedule.days:{};
     const wk=['周日','周一','周二','周三','周四','周五','周六'][new Date().getDay()];
     const today=days[wk]||days['周一']||[];
@@ -552,6 +552,7 @@ const DS = (function(){
     }
     const items=[
       {label:'拍题导学', right:'剩余 '+st.quota.total-st.quota.used+' / 共 '+st.quota.total, go:'PAGE_CAMERA'},
+      {label:'语音提问', right:'说出你的想法', act:'voice'},
       {label:'学科卡片', right:'已收录 '+st.packs.length+' 个包', go:'PAGE_SUBJECT_LIST'},
       {label:'电子书架', right:'今日剩 45 分钟', go:'PAGE_BOOKSHELF'},
       {label:'专注番茄', right:'25分钟倒计时', go:'PAGE_POMODORO'},
@@ -559,19 +560,22 @@ const DS = (function(){
       {label:'系统设置', right:'WiFi/音量/OTA', go:'PAGE_SETTINGS'},
     ];
     menu(14,TOP+104,292,items,st.sel);
-  },onKey:function(g){
+  },onGesture:function(g){
     const items=[
-      {go:'PAGE_CAMERA'},{go:'PAGE_SUBJECT_LIST'},{go:'PAGE_BOOKSHELF'},
+      {go:'PAGE_CAMERA'},{voice:true},{go:'PAGE_SUBJECT_LIST'},{go:'PAGE_BOOKSHELF'},
       {go:'PAGE_POMODORO'},{go:'PAGE_OUTBOX'},{go:'PAGE_SETTINGS'},
     ];
     if(g==='UP') st.sel=(st.sel+items.length-1)%items.length;
     else if(g==='DOWN') st.sel=(st.sel+1)%items.length;
-    else if(g==='CLICK'){ st.prev=st.page; st.page=items[st.sel].go; st.sel=0; }
-    else if(g==='DBL'){ st.page='PAGE_HOME'; st.sel=0; }
-    else if(g==='LONG') startRecording();
+    else if(g==='CLICK'){
+      const it=items[st.sel];
+      if(it.voice) startRecording();
+      else { st.prev=st.page; st.page=it.go; st.sel=0; }
+    }
+    else if(g==='LONG'){ st.sel=0; }
   }};
 
-  PAGES.PAGE_CAMERA={hint:'短按拍照 | 长按边说边拍 | 双击退',draw:function(){
+  PAGES.PAGE_CAMERA={hint:'短按拍照 | 长按退出',draw:function(){
     text('拍题导学',8,TOP+18,{bold:true,size:13});
     text('['+st.battery+'%]',W-8,TOP+18,{size:12,align:'right',color:COL.mut});
     const fx=8, fy=TOP+28, fw=304, fh=228;
@@ -586,14 +590,13 @@ const DS = (function(){
     rrect(fx,fy,fw,fh,6); cx.strokeStyle=COL.line; cx.stroke();
     rrect(fx+112,fy+80,80,60,4); cx.strokeStyle='#93C5FD'; cx.lineWidth=2; cx.stroke();
     text('提示: 请确保题目旁留有手写草稿',8,TOP+276,{size:11,color:COL.mut});
-    text('长按摇杆可边拍边口述你的解题思路',8,TOP+294,{size:11,color:COL.mut});
-  },onKey:function(g){
+    text('拍完可在解析页选「口述你的思路」补充',8,TOP+294,{size:11,color:COL.mut});
+  },onGesture:function(g){
     if(g==='CLICK'){ doSolve(false); }
-    else if(g==='LONG'){ doSolve(true); }
-    else if(g==='DBL'){ back(); }
+    else if(g==='LONG'){ back(); }
   }};
 
-  PAGES.PAGE_SOLVE_RESULT={hint:'上下滚动 | 短按选择 | 双击返回',draw:function(){
+  PAGES.PAGE_SOLVE_RESULT={hint:'上下滚动 | 短按确定 | 长按退出',draw:function(){
     const s=st.solve;
     if(!s){ text('还没有解析结果',8,TOP+30,{size:13,color:COL.mut}); return; }
     const lvl=st.hint;
@@ -617,12 +620,12 @@ const DS = (function(){
       if(s.feynman_question){ y+=6; text('反问: '+fitText(s.feynman_question,270,11.5),12,y+12,{size:11.5,color:COL.acc}); y+=18; }
     }
     const items=[
-      {label:'按住摇杆说出你的答案', right:''},
+      {label:'口述你的思路', right:''},
       {label:'请求下一步提示 ('+(2-Math.max(0,lvl))+'/2)', right:''},
       {label:'收入错题本', right:''},
     ];
     menu(14,Math.max(y,BOT-96),288,items,st.sel);
-  },onKey:function(g){
+  },onGesture:function(g){
     const items=['voice','hint','wrongbook'];
     if(g==='UP') st.sel=(st.sel+items.length-1)%items.length;
     else if(g==='DOWN') st.sel=(st.sel+1)%items.length;
@@ -630,10 +633,10 @@ const DS = (function(){
       if(items[st.sel]==='hint') doSolve(false,true);
       else if(items[st.sel]==='voice') startRecording();
     }
-    else if(g==='DBL') back();
+    else if(g==='LONG') back();
   }};
 
-  PAGES.PAGE_SUBJECT_LIST={hint:'上下选择 | 短按进入 | 双击返回',draw:function(){
+  PAGES.PAGE_SUBJECT_LIST={hint:'上下选择 | 短按确定 | 长按退出',draw:function(){
     text('学科卡片',8,TOP+18,{bold:true,size:13});
     if(!st.packs.length){ text('还没有学科包',8,TOP+46,{size:12,color:COL.mut}); text('去管理台「学科包」页生成',8,TOP+64,{size:11,color:COL.mut}); return; }
     st.packs.forEach(function(p,i){
@@ -641,14 +644,14 @@ const DS = (function(){
       text((i===st.sel?'▶':' ')+' '+p.id,14,yy+18,{size:12,bold:i===st.sel,color:i===st.sel?COL.acc:COL.fg});
       text('0%',W-14,yy+18,{size:11,align:'right',color:COL.mut});
     });
-  },onKey:function(g){
+  },onGesture:function(g){
     if(g==='UP') st.sel=(st.sel+st.packs.length-1)%st.packs.length;
     else if(g==='DOWN') st.sel=(st.sel+1)%st.packs.length;
     else if(g==='CLICK'){ st.prev=st.page; st.page='PAGE_CARD_STUDY'; loadCards(); }
-    else if(g==='DBL') back();
+    else if(g==='LONG') back();
   }};
 
-  PAGES.PAGE_CARD_STUDY={hint:'短按翻转 | 左右切题 | 长按追问',draw:function(){
+  PAGES.PAGE_CARD_STUDY={hint:'左右切题 | 上下选菜单 | 短按确定 | 长按退出',draw:function(){
     const c=st.cards[st.cardIdx];
     if(!c){ text('正在取卡片…',8,TOP+30,{size:12,color:COL.mut}); return; }
     text('学科卡片  '+((st.cardIdx+1)+'/'+Math.max(1,st.cards.length)),8,TOP+18,{bold:true,size:13});
@@ -660,18 +663,23 @@ const DS = (function(){
       text(fitText(c.h2||'',280,11.5),18,TOP+132,{size:11.5});
       text(fitText(c.ans||'',280,11.5),18,TOP+154,{size:11.5,color:COL.acc});
     } else {
-      text('短按摇杆翻面看提示',18,TOP+120,{size:11.5,color:COL.mut});
+      text('选「翻面看提示」看答案',18,TOP+120,{size:11.5,color:COL.mut});
     }
-    text('长按摇杆可针对这题语音追问',8,TOP+240,{size:11,color:COL.mut});
-  },onKey:function(g){
-    if(g==='CLICK') st.cardFlip=!st.cardFlip;
+    menu(14,TOP+238,292,[{label:'翻面看提示'},{label:'语音追问这题'}],st.cardSel,26);
+  },onGesture:function(g){
+    const acts=['flip','voice'];
+    if(g==='UP') st.cardSel=(st.cardSel+acts.length-1)%acts.length;
+    else if(g==='DOWN') st.cardSel=(st.cardSel+1)%acts.length;
     else if(g==='LEFT'){ st.cardIdx=(st.cardIdx+st.cards.length-1)%st.cards.length; st.cardFlip=false; }
     else if(g==='RIGHT'){ st.cardIdx=(st.cardIdx+1)%st.cards.length; st.cardFlip=false; }
-    else if(g==='LONG') startRecording();
-    else if(g==='DBL') back();
+    else if(g==='CLICK'){
+      if(acts[st.cardSel]==='flip') st.cardFlip=!st.cardFlip;
+      else startRecording();
+    }
+    else if(g==='LONG') back();
   }};
 
-  PAGES.PAGE_BOOKSHELF={hint:'上下选择 | 短按打开 | 双击返回',draw:function(){
+  PAGES.PAGE_BOOKSHELF={hint:'上下选择 | 短按确定 | 长按退出',draw:function(){
     text('电子书架',8,TOP+18,{bold:true,size:13});
     if(!st.books.length){ text('书架是空的',8,TOP+46,{size:12,color:COL.mut}); text('去管理台「电子书」页上传一本',8,TOP+64,{size:11,color:COL.mut}); return; }
     st.books.forEach(function(b,i){
@@ -679,14 +687,14 @@ const DS = (function(){
       text((i===st.sel?'▶':' ')+' '+b.id,14,yy+18,{size:12,bold:i===st.sel,color:i===st.sel?COL.acc:COL.fg});
       text('未读',W-14,yy+18,{size:11,align:'right',color:COL.mut});
     });
-  },onKey:function(g){
+  },onGesture:function(g){
     if(g==='UP') st.sel=(st.sel+st.books.length-1)%st.books.length;
     else if(g==='DOWN') st.sel=(st.sel+1)%st.books.length;
     else if(g==='CLICK'){ st.prev=st.page; st.page='PAGE_READER'; loadBook(); }
-    else if(g==='DBL') back();
+    else if(g==='LONG') back();
   }};
 
-  PAGES.PAGE_READER={hint:'左右翻页 | 上下调背光 | 双击退回书架',draw:function(){
+  PAGES.PAGE_READER={hint:'左右翻页 | 上下调背光 | 长按退回书架',draw:function(){
     const r=st.reader;
     text(r.title||'阅读',8,20,{size:11,color:COL.mut});
     const lines=r.lines.slice(r.page*14,r.page*14+14);
@@ -696,16 +704,18 @@ const DS = (function(){
     });
     if(!lines.length) text('这本书还没有内容',8,TOP+30,{size:12,color:COL.mut});
     text('第 '+(r.page+1)+' 页',W-8,H-42,{size:11,align:'right',color:COL.mut});
-  },onKey:function(g){
+  },onGesture:function(g){
     const r=st.reader;
-    if(g==='LEFT') r.page=Math.min(r.page+1,Math.max(0,Math.ceil(r.lines.length/14)-1)); // 03/07: 左推=后翻
-    else if(g==='RIGHT') r.page=Math.max(0,r.page-1);                                   // 右推=前翻
-    else if(g==='UP') st.backlight=Math.min(5,st.backlight+1);   // 03: 阅读页上推=背光+1
-    else if(g==='DOWN') st.backlight=Math.max(1,st.backlight-1); // 03: 阅读页下推=背光-1
-    else if(g==='DBL'){ st.prev=st.page; st.page='PAGE_BOOKSHELF'; st.sel=0; }
+    const last=Math.max(0,Math.ceil(r.lines.length/14)-1);
+    if(g==='LEFT') r.page=Math.max(0,r.page-1);             // 左推＝上一页
+    else if(g==='RIGHT') r.page=Math.min(last,r.page+1);    // 右推＝下一页
+    else if(g==='UP') st.backlight=Math.min(5,st.backlight+1);   // 上推＝背光+1
+    else if(g==='DOWN') st.backlight=Math.max(1,st.backlight-1); // 下推＝背光-1
+    else if(g==='CLICK') toast('阅读快捷菜单（固件侧）还没接上');
+    else if(g==='LONG'){ st.prev=st.page; st.page='PAGE_BOOKSHELF'; st.sel=0; }
   }};
 
-  PAGES.PAGE_POMODORO={hint:'短按暂停/继续 | 双击结束退出',draw:function(){
+  PAGES.PAGE_POMODORO={hint:'短按暂停/继续 | 长按结束退出',draw:function(){
     text('专注计时',8,TOP+18,{bold:true,size:13});
     text('['+st.battery+'%]',W-8,TOP+18,{size:12,align:'right',color:COL.mut});
     const mm=String(Math.floor(st.pom.remain/60)).padStart(2,'0');
@@ -713,12 +723,12 @@ const DS = (function(){
     text(mm+' : '+ss,W/2,TOP+120,{size:44,bold:true,align:'center',color:COL.fg});
     text(st.pom.running?'专注进行中':'已暂停',W/2,TOP+146,{size:12,align:'center',color:COL.mut});
     text('目标: 完成数学几何练习',W/2,TOP+196,{size:11.5,align:'center',color:COL.mut});
-  },onKey:function(g){
+  },onGesture:function(g){
     if(g==='CLICK') st.pom.running=!st.pom.running;
-    else if(g==='DBL'){ st.pom.running=false; st.pom.remain=1500; back(); }
+    else if(g==='LONG'){ st.pom.running=false; st.pom.remain=1500; back(); }
   }};
 
-  PAGES.PAGE_OUTBOX={hint:'上下选择 | 短按同步 | 双击返回',draw:function(){
+  PAGES.PAGE_OUTBOX={hint:'上下选择 | 短按同步 | 长按退出',draw:function(){
     text('待问收件箱',8,TOP+18,{bold:true,size:13});
     text('最多 10 条',W-8,TOP+18,{size:11,align:'right',color:COL.mut});
     if(!st.outbox.length){
@@ -730,14 +740,14 @@ const DS = (function(){
       const yy=TOP+40+i*30;
       text((i===st.sel?'▶':' ')+' '+o.label,14,yy+18,{size:12,bold:i===st.sel});
     });
-  },onKey:function(g){
+  },onGesture:function(g){
     if(g==='UP') st.sel=(st.sel+st.outbox.length-1)%st.outbox.length;
     else if(g==='DOWN') st.sel=(st.sel+1)%st.outbox.length;
     else if(g==='CLICK'){ st.outbox.splice(st.sel,1); st.sel=0; toast('已同步一条'); }
-    else if(g==='DBL') back();
+    else if(g==='LONG') back();
   }};
 
-  PAGES.PAGE_SETTINGS={hint:'上下选择 | 短按进入 | 双击返回',draw:function(){
+  PAGES.PAGE_SETTINGS={hint:'上下选择 | 短按确定 | 长按退出',draw:function(){
     text('系统设置',8,TOP+18,{bold:true,size:13});
     const items=[
       {label:'无线网络配置', right:st.wifiList.length+' 个热点', go:'PAGE_WIFI_SCAN'},
@@ -748,7 +758,7 @@ const DS = (function(){
       {label:'固件版本与 OTA', right:'v1.0.3', go:'PAGE_OTA'},
     ];
     menu(14,TOP+40,292,items,st.sel);
-  },onKey:function(g){
+  },onGesture:function(g){
     const items=[{go:'PAGE_WIFI_SCAN'},{go:'PAGE_KEYBOARD'},{},{},{},{go:'PAGE_OTA'}];
     if(g==='UP') st.sel=(st.sel+items.length-1)%items.length;
     else if(g==='DOWN') st.sel=(st.sel+1)%items.length;
@@ -758,10 +768,10 @@ const DS = (function(){
       else if(st.sel===3) st.backlight=Math.max(1,Math.min(5,st.backlight+d));
     }
     else if(g==='CLICK'){ if(items[st.sel].go){ st.prev=st.page; st.page=items[st.sel].go; st.sel=0; } else toast('这个设置项不用配真机也能改'); }
-    else if(g==='DBL') back();
+    else if(g==='LONG') back();
   }};
 
-  PAGES.PAGE_WIFI_SCAN={hint:'上下选网 | 短按连接 | 双击返回',draw:function(){
+  PAGES.PAGE_WIFI_SCAN={hint:'上下选网 | 短按确定 | 长按退出',draw:function(){
     text('选择无线网络',8,TOP+18,{bold:true,size:13});
     const list=st.wifiList.length?st.wifiList:[{ssid:'（没扫到热点）',level:'',rssi:null}];
     list.slice(0,8).forEach(function(ap,i){
@@ -770,15 +780,15 @@ const DS = (function(){
       text(ap.level||'',W-14,yy+18,{size:11,align:'right',color:COL.mut});
     });
     text('（真实扫描本机周边热点）',8,BOT-6,{size:10.5,color:COL.mut});
-  },onKey:function(g){
+  },onGesture:function(g){
     const n=Math.max(1,st.wifiList.length);
     if(g==='UP') st.wifiSel=(st.wifiSel+n-1)%n;
     else if(g==='DOWN') st.wifiSel=(st.wifiSel+1)%n;
     else if(g==='CLICK') toast('这是模拟画面，不会真的去连热点');
-    else if(g==='DBL') back();
+    else if(g==='LONG') back();
   }};
 
-  PAGES.PAGE_KEYBOARD={hint:'摇杆选键 | 短按输入 | 60s无操作退',draw:function(){
+  PAGES.PAGE_KEYBOARD={hint:'摇杆选键 | 短按输入 | 长按退出',draw:function(){
     text('输入'+(st.kb.target==='配对码'?'配对码':'密码'),8,TOP+18,{bold:true,size:13});
     text(st.kb.target==='配对码'?'Home_WiFi_5G':'Home_WiFi_5G',8,TOP+38,{size:11.5,color:COL.mut});
     card(8,TOP+46,304,28);
@@ -805,7 +815,7 @@ const DS = (function(){
       rrect(x,y,96,kh,4); cx.fillStyle=i===2?COL.acc:'#EEF2F6'; cx.fill();
       text(f.t,x+48,y+16,{size:11.5,align:'center',color:i===2?'#fff':COL.fg});
     });
-  },onKey:function(g){
+  },onGesture:function(g){
     // 字符区 4×10 = 40 格，功能键 3 个（40=大小写 41=退格 42=确认）。
     // 功能键必须在字符区之外也能被摇杆选中 —— 上下推要能跨行、左右推要能跨行不跨区。
     const GRID=40;
@@ -838,10 +848,10 @@ const DS = (function(){
       else if(st.kb.cur===41){ st.kb.buf=st.kb.buf.slice(0,-1); }
       else if(st.kb.cur===42){ toast('配对码已填：'+st.kb.buf); back(); }
     }
-    else if(g==='DBL') back();
+    else if(g==='LONG') back();
   }};
 
-  PAGES.PAGE_OTA={hint:'短按检查更新 | 双击返回',draw:function(){
+  PAGES.PAGE_OTA={hint:'短按检查更新 | 长按退出',draw:function(){
     text('固件版本与 OTA',8,TOP+18,{bold:true,size:13});
     text('当前版本  v1.0.3',8,TOP+44,{size:12});
     text('设备 ID   '+st.devId,8,TOP+64,{size:11.5,color:COL.mut});
@@ -851,12 +861,12 @@ const DS = (function(){
     } else {
       text('短按摇杆检查更新',8,TOP+92,{size:11.5,color:COL.mut});
     }
-  },onKey:function(g){
+  },onGesture:function(g){
     if(g==='CLICK'){
       devCall('GET','/api/v1/ota/check?device_id='+encodeURIComponent(st.devId)+'&current_ver=v1.0.3')
         .then(function(d){ if(d){ st.ota=d.data; toast(d.data.has_update?'有新版固件':'已是最新'); } });
     }
-    else if(g==='DBL') back();
+    else if(g==='LONG') back();
   }};
 
   // ------------------------------------------------------------ 动作
@@ -867,14 +877,13 @@ const DS = (function(){
       return;
     }
     st.overlay={kind:'recording',t0:Date.now()};
+    // 最长 10 秒（03 §3.1）：到点自动结束并提交。
     setTimeout(function(){
-      if(st.overlay&&st.overlay.kind==='recording'&&!st.overlay.done){
-        st.overlay.done=true;
-        doVoice();
-      }
-    },600);
+      if(st.overlay&&st.overlay.kind==='recording') finishRecording();
+    },10000);
   }
   function cancelRecording(){ st.overlay=null; toast('已取消录音'); }
+  function finishRecording(){ st.overlay=null; doVoice(); }
   async function doVoice(){
     st.overlay=null;
     // 有 PCM → 走真实 ASR 通道（/api/v1/study/voice）；
@@ -915,7 +924,7 @@ const DS = (function(){
     const p=st.packs[st.sel]; if(!p) return;
     const r=await api('/admin/api/device-sim/pack-cards?device_id='+encodeURIComponent(st.devId)+'&pack_id='+encodeURIComponent(p.id));
     st.cards=(r.j.ok&&r.j.data)?r.j.data.cards:[];
-    st.cardIdx=0; st.cardFlip=false;
+    st.cardIdx=0; st.cardFlip=false; st.cardSel=0;
   }
   async function loadBook(){
     const b=st.books[st.sel]; if(!b) return;
@@ -955,7 +964,7 @@ const DS = (function(){
         const h=8+Math.abs(Math.sin(i*0.9+Date.now()/160))*26;
         cx.fillStyle=COL.acc; cx.fillRect(62+i*8,240-h/2,4,h);
       }
-      text('最多 10 秒，上推取消',W/2,292,{size:11,align:'center',color:COL.mut});
+      text('短按结束并提交 ｜ 上推取消',W/2,292,{size:11,align:'center',color:COL.mut});
     }
     if(st.toast&&Date.now()<st.toastT){
       cx.fillStyle='rgba(30,41,59,.92)';
@@ -967,30 +976,73 @@ const DS = (function(){
   function loop(){ draw(); requestAnimationFrame(loop); }
 
   // ------------------------------------------------------------ 手势
-  function onKey(g){
+  // 六手势宪法（03 §3.2）：四向导航 ＋ 短按确定 ＋ 长按退出；无双击。
+  // 长按阈值 600ms 由 HAL 层（02 §3.4）唯一裁定，这里只取用不改。
+  const HOLD_MS=600, REPEAT_DELAY=400, REPEAT_RATE=150;
+
+  function dispatch(g){
+    // 浮层优先（03 §3.1）：录音浮层吃掉手势，页面不再响应。
     if(st.overlay&&st.overlay.kind==='recording'){
-      if(g==='UP'){ cancelRecording(); return; }
-      if(g==='CLICK'){ st.overlay=null; doVoice(); return; }
+      if(g==='CLICK'){ finishRecording(); return; }   // 短按＝结束并提交
+      if(g==='UP'){ cancelRecording(); return; }      // 上推＝取消
+      if(g==='LONG'){ cancelRecording(); return; }    // 退出＝放弃
       return;
     }
     const p=PAGES[st.page];
-    if(p&&p.onKey) p.onKey(g);
+    if(p&&p.onGesture) p.onGesture(g);
     draw();
   }
-  function bindButtons(){
-    document.querySelectorAll('.dsbtn[data-g]').forEach(function(b){
-      b.addEventListener('click',function(){ onKey(b.getAttribute('data-g')); });
+  function bindJoystick(){
+    const pad=document.getElementById('dsJoy');
+    if(!pad) return;
+    const dirs=pad.querySelectorAll?pad.querySelectorAll('[data-dir]'):[];
+    Array.prototype.forEach.call(dirs,function(b){
+      let t1=null,t2=null;
+      function release(){
+        if(t1)clearTimeout(t1);
+        if(t2)clearInterval(t2);
+        t1=t2=null; b.classList.remove('hit');
+      }
+      let captured=false;
+      b.addEventListener('pointerdown',function(e){
+        e.preventDefault(); b.classList.add('hit');
+        // 指针捕获成功后浏览器会在目标上补发 pointerleave，
+        // 那不是「手指离开」，不能当成释放 —— 用 captured 标记区分。
+        captured=false;
+        if(b.setPointerCapture&&e.pointerId!=null){
+          try{ b.setPointerCapture(e.pointerId); captured=true; }catch(err){ captured=false; }
+        }
+        const g=b.getAttribute('data-dir');
+        dispatch(g);
+        t1=setTimeout(function(){ t2=setInterval(function(){ dispatch(g); },REPEAT_RATE); },REPEAT_DELAY);
+      });
+      b.addEventListener('pointerup',release);
+      b.addEventListener('pointerleave',function(){ if(!captured) release(); });
+      b.addEventListener('pointercancel',release);
     });
-  }
-  function bindKeys(){
-    const map={ArrowUp:'UP',ArrowDown:'DOWN',ArrowLeft:'LEFT',ArrowRight:'RIGHT'};
-    document.addEventListener('keydown',function(e){
-      if(st.page==='PAGE_HOME'&&!st.paired&&e.key!=='Tab') { /* 仍允许操作 */ }
-      if(map[e.key]){ e.preventDefault(); onKey(map[e.key]); }
-      else if(e.key==='Enter'){ e.preventDefault(); onKey('CLICK'); }
-      else if(e.key===' '){ e.preventDefault(); onKey('LONG'); }
-      else if(e.key==='Backspace'){ e.preventDefault(); onKey('DBL'); }
+    // 中心键：按下即计时；按住 ≥600ms 松手＝退出（长按），否则＝短按确定。
+    const stick=document.getElementById('dsStick');
+    if(!stick) return;
+    let timer=null, longArmed=false, captured=false;
+    stick.addEventListener('pointerdown',function(e){
+      e.preventDefault(); stick.classList.add('hit');
+      captured=false;
+      if(stick.setPointerCapture&&e.pointerId!=null){
+        try{ stick.setPointerCapture(e.pointerId); captured=true; }catch(err){ captured=false; }
+      }
+      longArmed=false;
+      timer=setTimeout(function(){ longArmed=true; stick.classList.add('armed'); },HOLD_MS);
     });
+    function release(){
+      stick.classList.remove('hit'); stick.classList.remove('armed');
+      if(timer)clearTimeout(timer);
+      timer=null;
+      dispatch(longArmed?'LONG':'CLICK');
+      longArmed=false;
+    }
+    stick.addEventListener('pointerup',release);
+    stick.addEventListener('pointerleave',function(){ if(!captured) release(); });
+    stick.addEventListener('pointercancel',release);
   }
 
   // ------------------------------------------------------------ 对外
@@ -1002,7 +1054,7 @@ const DS = (function(){
     cx=cv.getContext('2d'); cx.setTransform(dpr,0,0,dpr,0,0);
     cv.style.width=W+'px'; cv.style.height=H+'px';
     st.devId=(document.getElementById('dsDevId')||{}).value||'esp32s3_web0001';
-    bindButtons(); bindKeys();
+    bindJoystick();
     const z=document.getElementById('dsZoom');
     if(z) z.addEventListener('change',setZoom);
     setZoom();
@@ -1030,7 +1082,7 @@ const DS = (function(){
   }
   function reset(){
     st.page='PAGE_HOME'; st.prev=null; st.sel=0; st.solve=null; st.sid=null; st.hint=0;
-    st.overlay=null; st.toast=null; st.photo=null; st.photoB64=null; st.cards=[]; st.reader={title:'',lines:[],page:0,bytes:0};
+    st.overlay=null; st.toast=null; st.photo=null; st.photoB64=null; st.cards=[]; st.cardSel=0; st.reader={title:'',lines:[],page:0,bytes:0};
     draw();
   }
   function bindFile(id,handler){
