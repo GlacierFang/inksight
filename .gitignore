@@ -35,3 +35,5 @@ node_modules/
 abbot/.venv/
 abbot/doc.bak.*/
 abbot/*.log
+abbot/server/.env
+abbot/server/storage/

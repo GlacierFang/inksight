@@ -1,0 +1,65 @@
+# 05 §2.2 规定：模型路由、ASR/TTS 配置、配额与 OTA 策略热配置文件（权限 0600）
+# 严禁在代码中硬编码厂商或模型名 —— 一律由此文件驱动，支持热重载。
+# 敏感信息（API Key、管理员密码）放同目录 .env，不写在本文件。
+
+server:
+  host: "0.0.0.0"
+  port: 18770
+  # 静态管理台挂载点（零构建单文件 web/index.html）
+  web_dir: "web"
+  # storage/ 持久化目录（相对路径按 server/ 解析）
+  storage_dir: "storage"
+
+ai:
+  # 三级意图分流：第一级本地规则直出，第二级轻量云端，第三级大模型推理
+  # provider 可选：minimax（真实服务商）/ mock（本地联调占位，不调外部服务）
+  # 生产部署必须改为真实服务商；mock 仅用于无网络/无密钥时的联调自检。
+  provider: "mock"
+  base_url: "https://api.minimaxi.com"
+  text_model: "MiniMax-M2.5"
+  vision_model: "<按服务商填写，部署前校验>"
+  timeout_seconds: 60
+  max_concurrency_per_device: 1
+
+speech:
+  asr:
+    enabled: false
+    provider: "<按服务商填写，部署前校验>"
+    base_url: ""
+    model: ""
+    timeout_seconds: 20
+  tts:
+    enabled: false
+    provider: "<按服务商填写，部署前校验>"
+    base_url: ""
+    model: ""
+    voice_id: ""
+    timeout_seconds: 30
+    # 返回格式：hex | base64 | url —— 05 §4.4 要求按 Hex 解码落盘，严禁误用 Base64
+    response_format: "hex"
+
+quota:
+  # 每台设备每日深度导学次数上限（服务端账本是唯一真相源，见 05 §4.2）
+  daily_limit: 10
+  # 每日配额重置时刻（UTC+8 日期比对，见 05 §4.2）
+  reset_timezone: "Asia/Shanghai"
+
+ota:
+  manifest_file: "manifest.json"
+  # 固件魔数校验（05 §6.2：首字节 0xE9）
+  magic: "e9"
+  # 单个固件大小上限 3.9MB（适配 4MB app 分区）
+  max_size_mb: 3.9
+  # 保留最近 5 版
+  keep_versions: 5
+  # 分发策略：PAUSED / CANARY / ALL
+  strategy: "ALL"
+  # CANARY 策略下的灰度设备白名单
+  canary_devices: []
+  # 熔断：同一固件版本连续失败达到该次数即停止下发
+  circuit_breaker_threshold: 3
+
+admin:
+  username: "admin"
+  # 密码走 .env 的 ADMIN_PASSWORD，不写在明文配置里
+  session_ttl_seconds: 7200

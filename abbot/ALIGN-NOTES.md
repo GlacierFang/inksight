@@ -2,7 +2,7 @@
 
 > 阅读日期：2026-11-24 08:40
 > 来源：`abbot/doc/` 8 份契约文档（114010 字节 / 1377 行），已全量读完
-> 仓库现状：`abbot/` 下**无任何业务代码**（无 `server/`、无 `firmware/`），仅有 `doc/` 文档 + `doc/verify/` 验证工具 + 本文件
+> 仓库现状：`abbot/` 下**无固件代码**（无 `firmware/`），已有 `doc/` 契约文档 + `doc/verify/` 验证工具 + `server/` 树莓派网关服务端（Phase 1 已实现）+ 本文件
 >
 > **修订状态（2026-11-24 08:50 已落实）**：冰河大人指示“先修正对应文档”，下列 A~E 五项已全部落地到文档正文。
 > 备份：`doc.bak.<时间戳>/`（修订前快照）。
@@ -282,3 +282,53 @@ env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u AL
 - `verify_vectors.py` 12 项全 PASS（改了 IV 段、配额段、§5.1 之后，正则抓取仍全部命中）；
 - `verify_envelope.py` 端到端 ALL PASS；
 - 全文档扫描：旧配额公式 `min(device_remaining_quota, ...)` 残留 0 处；两处固定 `IV` 均已标注「仅单测核对值」。
+
+---
+
+## 八、第三轮：Phase 1 服务端落地（冰河大人「可以开工了」）
+
+范围仍锁死 abbot 项目内。按 06 §1.2 路由表，Phase 1 只读 `00`/`04`/`05`，**不碰 `01`/`02`**。
+
+### 交付物（`server/`，严格按 05 §2.2 目录树）
+
+| 文件 | 职责 | 关键约束落实 |
+| :--- | :--- | :--- |
+| `app/main.py` | FastAPI 入口 + 17 个 Admin 端点 + 6 个设备端点 + 全局异常兜底 | 统一响应信封 `{code,msg,payload}`；错误文案全中文温和，不露技术术语 |
+| `app/config.py` | `config.yaml` 加载 + mtime 热重载 | 厂商/模型名一律走配置，代码零硬编码 |
+| `app/security.py` | 双向 HMAC 验签、AES-128-CTR 信封、下载 Token | 每信封独立随机 IV、counter 从 0 起；Token 路径白名单防穿越 |
+| `app/router_ai.py` | 三级意图分流、每设备 `asyncio.Lock`、配额仲裁、教学 Prompt | Prompt 逐字对齐 05 §4.3；配额只认服务端账本 |
+| `app/speech_engine.py` | 云端 ASR / TTS、Hex 解码、MD5 缓存池 | TTS 硬超时 4s 静默降级；`bytes.fromhex()` 非 Base64 |
+| `app/storage.py` | `storage/` 原子写持久化层 | tmp→flush→fsync→replace；磁盘写满捕获 `OSError` 保持服务可用 |
+| `app/pack_builder.py` | 原始文本 → source.json → 加密 cards.enc + index.idx | `IDX1` 头 + CRC32；IV 逐包随机 |
+| `app/book_cleaner.py` | epub/pdf/docx/txt → UTF-8 txt + toc | **零 AI 调用**；字节偏移严格对齐 |
+| `app/ota_manager.py` | 魔数 + SHA-256 校验、多版本、灰度、熔断 | 魔数 `0xE9`、3.9MB 上限、保留 5 版、`PAUSED/CANARY/ALL` |
+| `cli_sim.py` | 终端设备模拟器 | 配对→拍题→语音→心跳→OTA |
+| `web/index.html` | 零构建单文件管理台 | 原生 HTML5+Vanilla JS，移动端优先；密钥掩码；POST 带 CSRF 头 |
+
+### 实现中发现并修掉的 5 个真 bug
+
+1. **`SpeechEngine._storage` 属性遮蔽同名方法** —— 构造函数赋的 `None` 把方法顶掉，`self._storage()` 变成对 `None` 调用，拍题链路直接 5001。已改名 `_storage_ref`，并写脚本扫描全项目同类碰撞（无其它实例）。
+2. **错误响应没签名** —— 05 §3.2 要求「返回**任何**业务响应时」都附 `X-Resp-Signature`，我最初的 `err()` 漏了。设备端因此无法区分「网关伪造的错误」与「真实错误」。已修：已知密钥时错误信封也加签。
+3. **错误码 4004 被两种语义共用** —— 「学段没设置」和「没拍到题」共用一个码，导致文案误导用户。已加 `RouterError.user_msg` 让业务层给出准确文案。
+4. **模拟器签名把 query 拼进 PATH** —— 05 §3.2 明确 PATH 是**纯路径**，两端拼出的签名串不一致必然验签失败。已修。
+5. **OTA 契约自造偏差** —— 我先写了 `ABFW` 魔数 + `rollout_whitelist`，而 05 §6.2 规定的是首字节 `0xE9` + `strategy(PAUSED/CANARY/ALL)` + `canary_devices[]`。已对齐契约。
+
+### 验收结果（真实跑，不是推断）
+
+| 脚本 | 结果 |
+| :--- | :--- |
+| `doc/verify/gen_vectors.py` | NIST F.5.1 四块全 PASS；`--update-doc` 回写幂等 |
+| `doc/verify/verify_vectors.py` | 12 项全 PASS |
+| `doc/verify/verify_envelope.py` | 端到端 ALL PASS |
+| `server/tests/test_security_vectors.py` | 12 项全 PASS（`app/security.py` 对契约向量） |
+| `server/tests/test_e2e_flow.py` | **35 项全 PASS** |
+
+端到端覆盖：配对 → 拍题四字段 → **配额仲裁三条**（`NEED_DRAFT` 不扣费 / 首次成功扣 1 次 / 同题追问不重复扣费）→ 语音分流 → 心跳同步 → OTA 检查 → 未配对设备拒绝 → 响应验签（成功与错误信封都验）。
+
+### 未完成 / 已知边界
+
+- **真实模型调用未验证** —— `ai.provider` 暂置 `mock` 做链路自检；视觉/ASR/TTS 的服务商接口形态仍待确认（已挂任务卡）。
+- **`cli_sim.py` 的语音链路只验证了错误路径** —— ASR 未启用（`speech.asr.enabled: false`），本地规则分流（音量/亮度/课表）因无真实 ASR 转写文本而无法触发。
+- **`admin/api/schedule/parse` 与 `packs/preview` 依赖真实模型**，mock 下只能返回占位回复。
+- **固件编译属 Phase 2**，本机无 PlatformIO。
+- 服务以 `127.0.0.1:18770` 启动验证，**未做 systemd 注册**（05 §2.1 要求 `study-gateway.service`，属部署环节）。

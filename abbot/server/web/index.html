@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>学伴终端 · 管理台</title>
+<style>
+  :root{--bg:#f5f6f8;--card:#fff;--fg:#1c2024;--mut:#6b7280;--line:#e3e6ea;--pri:#2f6feb;--ok:#0a7d3c;--warn:#b45309;--err:#c0392b}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:768px;margin:0 auto;padding:16px}
+  h1{font-size:20px;margin:0 0 4px}
+  h2{font-size:16px;margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  .sub{color:var(--mut);font-size:13px;margin:0 0 16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+  .tab{padding:7px 13px;border:1px solid var(--line);border-radius:999px;background:var(--card);cursor:pointer;font-size:14px;color:var(--mut)}
+  .tab.on{background:var(--pri);color:#fff;border-color:var(--pri)}
+  .tab:hover:not(.on){border-color:var(--pri);color:var(--pri)}
+  label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
+  input,textarea,select{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:14px;background:#fff;color:var(--fg)}
+  textarea{min-height:110px;resize:vertical;font-family:ui-monospace,Menlo,monospace;font-size:13px}
+  input:focus,textarea:focus{outline:2px solid #bfd4ff;border-color:var(--pri)}
+  button{padding:9px 16px;border:0;border-radius:7px;background:var(--pri);color:#fff;font:inherit;font-size:14px;cursor:pointer}
+  button:hover{background:#2559c4}
+  button.sec{background:#fff;color:var(--fg);border:1px solid var(--line)}
+  button.sec:hover{border-color:var(--pri);color:var(--pri)}
+  button:disabled{opacity:.55;cursor:not-allowed}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .row>*{flex:1 1 180px}
+  .row>.n{flex:0 0 auto}
+  .msg{padding:9px 12px;border-radius:7px;margin:10px 0;font-size:13px;display:none}
+  .msg.on{display:block}
+  .msg.ok{background:#e8f5ec;color:var(--ok);border:1px solid #bfe3cc}
+  .msg.err{background:#fdeceb;color:var(--err);border:1px solid #f3c9c5}
+  .msg.warn{background:#fdf3e3;color:var(--warn);border:1px solid #f0dcb8}
+  pre{background:#1e2227;color:#d6dae0;padding:12px;border-radius:7px;overflow:auto;font-size:12.5px;max-height:340px;margin:0}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th,td{text-align:left;padding:8px 9px;border-bottom:1px solid var(--line)}
+  th{color:var(--mut);font-weight:500;font-size:12.5px}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;background:#eef1f5;color:var(--mut)}
+  .pill.on{background:#e8f5ec;color:var(--ok)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .kv{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed var(--line);font-size:13.5px}
+  .kv span:first-child{color:var(--mut)}
+  .hide{display:none}
+  code{background:#eef1f5;padding:1px 5px;border-radius:4px;font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ============ 登录 ============ -->
+  <div id="login">
+    <h1>学伴终端 · 管理台</h1>
+    <p class="sub">请输入管理员密码</p>
+    <div class="card">
+      <label for="pwd">密码</label>
+      <input id="pwd" type="password" placeholder="请输入管理员密码" autocomplete="current-password">
+      <div class="msg" id="loginMsg"></div>
+      <div class="row" style="margin-top:12px">
+        <button onclick="doLogin()">登录</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 主界面 ============ -->
+  <div id="app" class="hide">
+    <h1>学伴终端 · 管理台</h1>
+    <p class="sub" id="statLine">—</p>
+
+    <div class="tabs" id="tabs">
+      <div class="tab on" data-t="status">状态</div>
+      <div class="tab" data-t="device">设备</div>
+      <div class="tab" data-t="config">配置</div>
+      <div class="tab" data-t="schedule">课表</div>
+      <div class="tab" data-t="packs">学科包</div>
+      <div class="tab" data-t="books">电子书</div>
+      <div class="tab" data-t="ota">固件</div>
+    </div>
+
+    <div class="msg" id="globalMsg"></div>
+
+    <!-- 状态 -->
+    <div class="card pane" data-p="status">
+      <h2>网关状态</h2>
+      <div id="statusBox"><div class="kv"><span>加载中…</span><span></span></div></div>
+      <div class="row" style="margin-top:12px">
+        <button class="sec" onclick="loadStatus()">刷新</button>
+        <button class="sec" onclick="clearTts()">清理语音缓存</button>
+        <button class="sec" onclick="doLogout()">退出登录</button>
+      </div>
+    </div>
+
+    <!-- 设备 -->
+    <div class="card pane hide" data-p="device">
+      <h2>设备管理</h2>
+      <label>生成 6 位配对码（5 分钟内有效，一次性）</label>
+      <div class="row">
+        <button onclick="makePairCode()">生成配对码</button>
+      </div>
+      <div class="msg" id="pairMsg"></div>
+      <div id="pairCodeBox" class="hide" style="margin-top:10px">
+        <div class="kv"><span>配对码</span><span style="font-size:22px;letter-spacing:3px;font-weight:600" id="pairCode"></span></div>
+      </div>
+      <label style="margin-top:16px">设备列表</label>
+      <table id="devTable"><thead><tr><th>设备</th><th>已用</th><th>剩余</th><th>操作</th></tr></thead><tbody></tbody></table>
+    </div>
+
+    <!-- 配置 -->
+    <div class="card pane hide" data-p="config">
+      <h2>模型与配额</h2>
+      <label>API 地址</label>
+      <input id="cfgBase" placeholder="https://api.minimaxi.com">
+      <label>文本模型</label>
+      <input id="cfgText" placeholder="MiniMax-M2.5">
+      <label>视觉模型</label>
+      <input id="cfgVision" placeholder="部署前填写">
+      <label>API Key（留空表示不修改）</label>
+      <input id="cfgKey" type="password" placeholder="sk-••••••••••••">
+      <label>每日深度导学配额</label>
+      <input id="cfgQuota" type="number" min="0" max="999">
+      <div class="msg" id="cfgMsg"></div>
+      <div class="row" style="margin-top:12px"><button onclick="saveConfig()">保存并生效</button></div>
+    </div>
+
+    <!-- 课表 -->
+    <div class="card pane hide" data-p="schedule">
+      <h2>课表</h2>
+      <label>原始课表文本（交给 AI 解析）</label>
+      <textarea id="schText" placeholder="周一 第一节 语文&#10;周一 第二节 数学&#10;周二 第一节 英语"></textarea>
+      <div class="row"><button onclick="parseSchedule()">解析为表格</button><button class="sec" onclick="loadSchedule()">读取已保存课表</button></div>
+      <div class="msg" id="schMsg"></div>
+      <label style="margin-top:14px">结构化 JSON（可手工微调后保存）</label>
+      <textarea id="schJson" style="min-height:180px">{"days":{},"period_times":[]}</textarea>
+      <div class="row" style="margin-top:10px"><button onclick="saveSchedule()">确认保存</button></div>
+    </div>
+
+    <!-- 学科包 -->
+    <div class="card pane hide" data-p="packs">
+      <h2>学科包打包</h2>
+      <label>讲义原文（AI 拆解为阶梯卡片）</label>
+      <textarea id="pkText" placeholder="## 题目：鸡兔同笼&#10;答案：…&#10;提示1：…&#10;提示2：…&#10;解析：…"></textarea>
+      <div class="row"><button onclick="previewPacks()">拆解为卡片</button></div>
+      <div class="msg" id="pkMsg"></div>
+      <label style="margin-top:14px">卡片 JSON（可手工微调）</label>
+      <textarea id="pkJson" style="min-height:150px"></textarea>
+      <div class="grid2" style="margin-top:10px">
+        <div><label>学科包编号</label><input id="pkId" placeholder="m7_geo"></div>
+        <div><label>名称</label><input id="pkName" placeholder="七年级地理"></div>
+      </div>
+      <label>加密方式</label>
+      <select id="pkKeyType">
+        <option value="">通用演示包（所有人可读）</option>
+        <option value="device">指定设备专用</option>
+      </select>
+      <label id="pkDevWrap" class="hide">目标设备编号</label>
+      <input id="pkDev" class="hide" placeholder="esp32s3_xxx">
+      <div class="row" style="margin-top:12px"><button onclick="buildPack()">加密打包</button></div>
+    </div>
+
+    <!-- 电子书 -->
+    <div class="card pane hide" data-p="books">
+      <h2>电子书清洗</h2>
+      <p class="sub" style="margin:0 0 10px">支持 epub / pdf / docx / txt。纯本地处理，不调用 AI。输出 UTF-8 纯文本 + 章节目录。</p>
+      <input type="file" id="bkFile" accept=".epub,.pdf,.docx,.txt,.md">
+      <div class="msg" id="bkMsg"></div>
+      <div class="row" style="margin-top:12px"><button onclick="cleanBook()">上传并清洗</button></div>
+    </div>
+
+    <!-- 固件 -->
+    <div class="card pane hide" data-p="ota">
+      <h2>固件发布</h2>
+      <label>固件文件（.bin，首字节须为 0xE9，不超过 3.9MB）</label>
+      <input type="file" id="otaFile" accept=".bin">
+      <label>版本号</label>
+      <input id="otaVer" placeholder="1.0.3">
+      <div class="row"><button onclick="uploadOta()">上传发布</button></div>
+      <div class="msg" id="otaMsg"></div>
+      <label style="margin-top:16px">分发策略</label>
+      <select id="otaStrategy">
+        <option value="ALL">全量下发</option>
+        <option value="CANARY">灰度下发（仅名单内设备）</option>
+        <option value="PAUSED">暂停下发</option>
+      </select>
+      <label>灰度设备编号（逗号分隔）</label>
+      <input id="otaCanary" placeholder="esp32s3_xxx,esp32s3_yyy">
+      <div class="row" style="margin-top:12px"><button onclick="saveOtaPolicy()">保存策略</button></div>
+      <label style="margin-top:16px">已发布版本</label>
+      <table id="otaTable"><thead><tr><th>版本</th><th>大小</th><th>时间</th></tr></thead><tbody></tbody></table>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ---- 基础工具 ----
+const $ = id => document.getElementById(id);
+function show(el, text, kind){ el.className = 'msg on ' + (kind||'ok'); el.textContent = text; }
+function hide(el){ el.className = 'msg'; }
+async function api(path, opts){
+  opts = opts || {};
+  const init = {method: opts.method || 'GET', headers: {'X-Requested-With':'XMLHttpRequest'}, credentials:'same-origin'};
+  if (opts.body !== undefined){ init.method = opts.method || 'POST'; init.headers['Content-Type']='application/json'; init.body = JSON.stringify(opts.body); }
+  const r = await fetch(path, init);
+  let j = null;
+  try { j = await r.json(); } catch(e) { j = {ok:false, msg:'服务器返回异常'}; }
+  return {status:r.status, j:j};
+}
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// ---- 登录 ----
+async function doLogin(){
+  const box = $('loginMsg');
+  const r = await api('/admin/api/login', {method:'POST', body:{password:$('pwd').value}});
+  if (r.j.ok){ $('login').classList.add('hide'); $('app').classList.remove('hide'); loadStatus(); loadConfig(); loadSchedule(); }
+  else show(box, r.j.msg || '登录失败', 'err');
+}
+async function doLogout(){ await api('/admin/api/logout', {method:'POST'}); location.reload(); }
+
+// ---- 标签页 ----
+$('tabs').addEventListener('click', e => {
+  const t = e.target.closest('.tab'); if(!t) return;
+  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on', x===t));
+  document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('hide', p.dataset.p !== t.dataset.t));
+  if(t.dataset.t==='device') loadStatus();
+  if(t.dataset.t==='ota') loadStatus();
+});
+
+// ---- 状态 ----
+async function loadStatus(){
+  const r = await api('/admin/api/status');
+  if(!r.j.ok){ show($('globalMsg'), r.j.msg||'加载失败','err'); return; }
+  const d = r.j.data;
+  $('statLine').textContent = `在线设备 ${d.device_count} 台 · 今日配额 ${d.daily_quota} 次/台 · 语音缓存 ${d.tts_cache_mb} MB`;
+  $('statusBox').innerHTML =
+    kv('运行时长', fmtDur(d.uptime_seconds)) + kv('已配对设备', d.device_count + ' 台') +
+    kv('语音缓存占用', d.tts_cache_mb + ' MB') + kv('每日配额', d.daily_quota + ' 次/台') +
+    kv('学科包', (d.packs||[]).length + ' 个') + kv('电子书', (d.books||[]).length + ' 本') +
+    kv('固件版本', (d.ota_versions||[]).join('、') || '—');
+  const tb = $('devTable').querySelector('tbody');
+  tb.innerHTML = (d.devices||[]).map(x=>`<tr><td><code>${esc(x.device_id)}</code></td><td>${x.used_count}</td><td>${x.remaining}</td><td><button class="sec" onclick="resetQuota('${esc(x.device_id)}')">重置配额</button> <button class="sec" onclick="unbind('${esc(x.device_id)}')">解绑</button></td></tr>`).join('')
+    || '<tr><td colspan="4" style="color:var(--mut)">还没有设备配对</td></tr>';
+  const ot = $('otaTable').querySelector('tbody');
+  ot.innerHTML = (d.ota_versions||[]).map(v=>`<tr><td>${esc(v)}</td><td></td><td></td></tr>`).join('');
+}
+function kv(k,v){ return `<div class="kv"><span>${esc(k)}</span><span>${esc(v)}</span></div>`; }
+function fmtDur(s){ const h=Math.floor(s/3600), m=Math.floor(s%3600/60); return h? h+' 小时 '+m+' 分' : m+' 分'; }
+
+async function resetQuota(id){ if(!confirm('重置这台设备的今日配额？')) return; const r=await api('/admin/api/quota/reset',{method:'POST',body:{device_id:id}}); show($('globalMsg'), r.j.msg||'已重置', r.j.ok?'ok':'err'); loadStatus(); }
+async function unbind(id){ if(!confirm('解绑后这台设备需要重新配对，确定？')) return; const r=await api('/admin/api/device/unbind',{method:'POST',body:{device_id:id}}); show($('globalMsg'), r.j.msg||'已解绑', r.j.ok?'ok':'err'); loadStatus(); }
+async function clearTts(){ const r=await api('/admin/api/cache/tts/clear',{method:'POST'}); show($('globalMsg'), r.j.msg||'已清理', r.j.ok?'ok':'err'); }
+
+// ---- 设备 / 配对 ----
+async function makePairCode(){
+  const r = await api('/admin/api/pair-code', {method:'POST'});
+  if(r.j.ok){ $('pairCode').textContent = r.j.data.pair_code; $('pairCodeBox').classList.remove('hide'); show($('pairMsg'),'配对码已生成，请在 5 分钟内到设备上输入','ok'); }
+  else show($('pairMsg'), r.j.msg||'生成失败','err');
+}
+
+// ---- 配置 ----
+async function loadConfig(){
+  const r = await api('/admin/api/config');
+  if(!r.j.ok) return;
+  const c = r.j.data || {};
+  $('cfgBase').value = (c.ai && c.ai.base_url) || '';
+  $('cfgText').value = (c.ai && c.ai.text_model) || '';
+  $('cfgVision').value = (c.ai && c.ai.vision_model) || '';
+  $('cfgQuota').value = (c.quota && c.quota.daily_limit) || '';
+}
+async function saveConfig(){
+  const body = {api_base_url:$('cfgBase').value, text_model:$('cfgText').value, vision_model:$('cfgVision').value, daily_quota:parseInt($('cfgQuota').value||'0',10)};
+  const r = await api('/admin/api/config', {method:'POST', body:body});
+  show($('cfgMsg'), r.j.msg||'已保存', r.j.ok?'ok':'err');
+  if(r.j.ok) loadStatus();
+}
+
+// ---- 课表 ----
+async function loadSchedule(){
+  const r = await api('/admin/api/schedule/get');
+  if(r.j.ok && r.j.data && Object.keys(r.j.data).length){ $('schJson').value = JSON.stringify(r.j.data,null,2); show($('schMsg'),'已读取服务端课表','ok'); }
+}
+async function parseSchedule(){
+  const r = await api('/admin/api/schedule/parse', {method:'POST', body:{text:$('schText').value}});
+  if(r.j.ok){ $('schJson').value = JSON.stringify(r.j.data,null,2); show($('schMsg'),'解析完成，请核对后保存','ok'); }
+  else show($('schMsg'), r.j.msg||'解析失败','err');
+}
+async function saveSchedule(){
+  let d; try{ d = JSON.parse($('schJson').value); }catch(e){ show($('schMsg'),'JSON 格式不对','err'); return; }
+  const r = await api('/admin/api/schedule/save', {method:'POST', body:d});
+  show($('schMsg'), r.j.msg||'已保存', r.j.ok?'ok':'err');
+}
+
+// ---- 学科包 ----
+async function previewPacks(){
+  const r = await api('/admin/api/packs/preview', {method:'POST', body:{text:$('pkText').value}});
+  if(r.j.ok){ $('pkJson').value = JSON.stringify(r.j.data,null,2); show($('pkMsg'),'已拆解为 '+(r.j.data||[]).length+' 张卡片','ok'); }
+  else show($('pkMsg'), r.j.msg||'拆解失败','err');
+}
+document.getElementById('pkKeyType').addEventListener('change', e=>{
+  const on = e.target.value==='device';
+  $('pkDevWrap').classList.toggle('hide', !on);
+  $('pkDev').classList.toggle('hide', !on);
+});
+async function buildPack(){
+  let cards=null; const t=$('pkJson').value.trim();
+  if(t){ try{ cards=JSON.parse(t); }catch(e){ show($('pkMsg'),'卡片 JSON 格式不对','err'); return; } }
+  const body = {pack_id:$('pkId').value.trim(), name:$('pkName').value.trim(), text:$('pkText').value, cards:cards};
+  if($('pkKeyType').value==='device') body.device_id = $('pkDev').value.trim();
+  const r = await api('/admin/api/packs/build', {method:'POST', body:body});
+  show($('pkMsg'), r.j.ok ? ('打包完成：'+(r.j.data.total_cards||0)+' 张卡片') : (r.j.msg||'打包失败'), r.j.ok?'ok':'err');
+  if(r.j.ok) loadStatus();
+}
+
+// ---- 电子书 ----
+async function cleanBook(){
+  const f = $('bkFile').files[0];
+  if(!f){ show($('bkMsg'),'先选一个文件','warn'); return; }
+  const fd = new FormData(); fd.append('file', f);
+  const r = await fetch('/admin/api/books/clean', {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:fd, credentials:'same-origin'});
+  const j = await r.json();
+  show($('bkMsg'), j.ok ? ('清洗完成：'+(j.data.sections||0)+' 个章节，'+(j.data.chars||0)+' 字') : (j.msg||'清洗失败'), j.ok?'ok':'err');
+}
+
+// ---- 固件 ----
+async function uploadOta(){
+  const f = $('otaFile').files[0];
+  if(!f){ show($('otaMsg'),'先选一个固件文件','warn'); return; }
+  const fd = new FormData(); fd.append('file', f); fd.append('version', $('otaVer').value.trim());
+  const r = await fetch('/admin/api/ota/upload', {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:fd, credentials:'same-origin'});
+  const j = await r.json();
+  show($('otaMsg'), j.ok ? '固件已发布' : (j.msg||'发布失败'), j.ok?'ok':'err');
+  if(j.ok) loadStatus();
+}
+async function saveOtaPolicy(){
+  const canary = $('otaCanary').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const r = await api('/admin/api/ota/policy', {method:'POST', body:{strategy:$('otaStrategy').value, canary_devices:canary}});
+  show($('otaMsg'), r.j.msg||'已保存', r.j.ok?'ok':'err');
+}
+
+$('pwd').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+</script>
+</body>
+</html>
