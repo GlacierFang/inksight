@@ -217,7 +217,7 @@ env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u AL
 
 - 未验证 MiniMax 真实可用的视觉模型、ASR、TTS 接口形态（**TTS 非流式是否仍返回 Hex**、流式首字延迟），这是 Phase 1 第一个要打通的外部依赖。
 - 未验证 `pypdf` / `python-docx` 对中文教材的抽取质量。
-- 未核对 `05 §5` 的 API 字段是否与 `04 §6` 的 `net_client.h` 函数签名一一对应（初看 `net_study_solve` 缺 `edu_stage` / `enrollment_year` / `device_remaining_quota` 的入参，疑似缺口）—— **待冰河大人确认是否由 net 层自动注入**。
+- ~~未核对 `05 §5` 的 API 字段是否与 `04 §6` 的 `net_client.h` 函数签名一一对应（初看 `net_study_solve` 缺 `edu_stage` / `enrollment_year` / `device_remaining_quota` 的入参，疑似缺口）~~ → **第二轮已定**：`edu_stage` / `enrollment_year` 由设备端 net 层从 `profile.json` 自动注入（写入 `05 §5.1`），`device_remaining_quota` 仅用于对账不参与判定；`net_client.h` 的 C 签名仍待 Phase 2 落地时对齐。
 - 未开始任何业务代码实现（仅新增两个验证脚本）。
 
 ---
@@ -238,3 +238,47 @@ env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u AL
 | `02` 新增 §六 | `hal_interfaces.h` 完整 C 签名 + `hal_status_t` 语义码 |
 | `00` | 文档地图同步 02 实际章节；新增 `verify/` 目录条目 |
 | 新增 `doc/verify/` | `verify_vectors.py`（静态：从文档正文抓向量复算）+ `verify_envelope.py`（动态：真实 FastAPI 端到端）+ `README.md` |
+
+---
+
+## 七、第二轮：四条契约判断的落地（冰河大人授权「其他按你判断更新文档」）
+
+范围锁定 **abbot 项目内**，不外扩；不写业务代码，不动 `01`/`07`。
+
+### 1. 字段口径 —— 05 为唯一线上契约
+
+`05 §5` 开头新增声明：**本节是端云线上协议的唯一口径来源，其它文档只能引用字段名与语义，不得自行重述**。两处各写一份必然漂移 —— 本项目此前的字段冲突正是这么产生的。
+`06 §3.1` 验收项相应改为「字段口径以 `05` 为唯一真相源，本清单不另行定义字段」，删掉重述的字段名。
+
+### 2. 请求三字段的归属
+
+| 字段 | 填充方 | 参与服务端判定 |
+| :--- | :--- | :--- |
+| `edu_stage` / `enrollment_year` | **设备端 net 层从 `profile.json` 自动注入**（`05 §5.1` 已写死，UI 状态机不感知、不得自行拼装） | 是 |
+| `device_remaining_quota` | 设备端上报 | **否** —— 仅对账与告警 |
+
+**配额账本的唯一真相源是服务端 `storage/quota.json`**：`effective_remaining = daily_quota - used_count`，设备上报值**不进入判定式**（哪怕取 `min()`）。理由：客户端可任意伪造，取 `min()` 也会被伪造小值误封。
+连带厘清：**「无状态网关」指网关进程不持有会话与业务状态；配额账本属存储层持久化状态**，落盘与重启恢复是规定动作，不是破坏无状态性；严禁把配额只放进程内存当唯一副本。
+账本损坏/丢失时 `used_count` 归零重算并告警，**不得**用设备上报值顶替。
+
+### 3. `IV` 与计数器作用域（最要紧的一条）
+
+生产路径：**每个信封独立 CSPRNG 随机 16B `IV`，计数器作用域限于单个信封、从 0 起**；严禁固定值、严禁计数器派生、严禁跨包复用。
+依据：固定 `IV` + 跨包递增 counter 要求两端共享严格有序计数器，设备端并发、重传乱序、丢包补发都会让 counter 错序，**一旦重用就是 AES-CTR 密钥流重用**（两份密文异或即还原明文）。
+连带：
+- `05 §3.4` 那组固定 `IV` **降级为「单测对齐值」**，明文写「严禁照抄进生产路径」；
+- `04 §4.2` 的 `cards.enc` 文件头 `IV` 明确为**逐包随机生成**，并说明它是**包文件作用域**，与请求信封作用域是两套独立作用域、互不影响。
+
+### 4. 补 `doc/verify/gen_vectors.py`（生成 → 文档 → 复算闭环）
+
+原状：`05 §3.4` 要求「生成命令」，但项目里没有生成器 —— 向量只能手抄，而手抄正是错误向量的成因。
+新脚本：**先过 NIST SP 800-38A F.5.1 官方向量自检（不通过直接拒绝产出）**，再产出向量组，支持 `--emit` / `--update-doc`（回写文档中 `<!-- VECTORS:BEGIN -->` 区块）。
+**这次它当场抓到了真错**：脚本里手抄的两个 NIST 期望值（block3/block4）就是错的，NIST 自检直接 FAIL —— 修正为真值后通过。这恰好证明这道闸门不是形式主义。
+`verify_vectors.py` 保留为反向闸门（从文档抓取重算）。
+
+### 第二轮验证结果
+
+- `gen_vectors.py --update-doc` 回写 **幂等**（与手改前仅差一个空行）；
+- `verify_vectors.py` 12 项全 PASS（改了 IV 段、配额段、§5.1 之后，正则抓取仍全部命中）；
+- `verify_envelope.py` 端到端 ALL PASS；
+- 全文档扫描：旧配额公式 `min(device_remaining_quota, ...)` 残留 0 处；两处固定 `IV` 均已标注「仅单测核对值」。

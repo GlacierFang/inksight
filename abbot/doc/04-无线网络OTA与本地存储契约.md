@@ -231,6 +231,7 @@
    * `block_index = payload_offset / 16`
    * `byte_in_block = payload_offset % 16`
 4. 构造当前块初始计数器：`nonce_counter = BigEndian128(IV_base) + block_index`（无符号 128 位大端序加法进位，开发时必须先通过 `05` 文档第 3.4 节局部块偏移向量单测）。就地核对值：`IV_base = 0102030405060708090a0b0c0d0e0f10`、`block_index = 2` 时 `nonce_counter = 0102030405060708090a0b0c0d0e0f12`，明文 `7b2270696e67223a317d`（`{"ping":1}`）的期望密文为 `41da37cc48e5aa3f8d06`；
+   * **`IV_base` 来源与作用域（勿与请求信封混淆）**：`IV_base` 取自 **`cards.enc` 文件头前 16 字节**（即第 4.1 节索引里「第 0 题偏移恒为 16」所跳过的那个 `IV`），由**打包时逐包随机生成**并写入文件头；上面那个固定 `IV_base` **仅是 `05` 第 3.4 节的单测核对值**，严禁把它当成打包默认值写死 —— 同一密钥下复用 `IV` 会造成 CTR 密钥流重用，两个包同偏移密文可直接异或还原。`IV_base` 的作用域是**单个学科包文件**（包内 `block_index` 递增），与 `05` 第 3.2 节「每个请求信封独立随机 `IV`、计数器从 0 起」是**两套独立作用域**，互不影响；
 5. 调用 `mbedtls_aes_crypt_ctr()` 时传入 `nc_off = byte_in_block`、`nonce_counter` 与 `stream_block` 缓冲，即可在单题 `< 10ms` 内精确解密单行 JSONL 明文，无需解密整本文件。
 
 ---
