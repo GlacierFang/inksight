@@ -1,6 +1,9 @@
 name: 编译固件
 
 on:
+  # 推 main 即自动编译 —— 固件产出不该依赖"记得手动点一下"
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       release_tag:
@@ -105,11 +108,140 @@ jobs:
               echo "::notice::$esc"
             done
 
-      # 编译失败时把完整日志回写到 ci-logs 分支。
-      # 本机拉不到 Actions 的 logs/artifacts（blob 存储被出口代理挡），git 通道能通 ——
-      # 这与 fw-bin 分支取固件产物是同一条思路。
-      - name: 失败时回写编译日志到 ci-logs 分支
-        if: failure()
+      # 产物清单 —— 收集 build 目录里真实存在的文件。
+      #
+      # 上一轮在这里栽过：固件产物文件名是硬编码的 5 个，其中 boot_app0.bin
+      # 是 ESP-IDF 的产物，Arduino 框架根本不生成它 -> git hash-object 找不到
+      # 文件 -> 推 fw-bin 分支那一步当场失败，而错误只写在本机拉不到的
+      # step log 里，看不见也修不了。
+      #
+      # 现在改成 glob 收集实际存在的文件 + 写 manifest.txt。
+      # manifest.txt 永远回写 ci-logs 分支（见末尾那一步），
+      # 于是「产物到底叫什么、有多大」这件事由 CI 自证，不用猜。
+      - name: 收集固件产物
+        id: collect
+        if: success()
+        working-directory: .
+        run: |
+          set -e
+          B=.pio/build/esp32s3
+          rm -rf dist && mkdir -p dist
+          {
+            echo "### build 目录内容"
+            ls -la "$B" || true
+            echo
+            echo "### 收集到的产物"
+          } > dist/manifest.txt
+          cnt=0
+          for f in "$B"/*.bin; do
+            [ -e "$f" ] || continue
+            cp "$f" dist/
+            echo "  $(basename "$f")  $(wc -c < "$f") 字节" >> dist/manifest.txt
+            cnt=$((cnt+1))
+          done
+          if [ -f "$B/flash_args.txt" ]; then
+            cp "$B/flash_args.txt" dist/
+            echo "  flash_args.txt  $(wc -c < "$B/flash_args.txt") 字节" >> dist/manifest.txt
+          fi
+          echo "  共 $cnt 个 bin" >> dist/manifest.txt
+          echo
+          echo "### sha256" >> dist/manifest.txt
+          (cd dist && sha256sum *.bin flash_args.txt 2>/dev/null || true) >> dist/manifest.txt
+          cat dist/manifest.txt
+          # 固件本体必须有 —— 少了它这个 Release 没意义
+          if [ ! -f dist/firmware.bin ]; then
+            echo "::error::没有 dist/firmware.bin —— Arduino 框架的产物名可能变了"
+            echo "没有 dist/firmware.bin" >> dist/manifest.txt
+            exit 1
+          fi
+
+      # 固件产物推到 fw-bin 分支 —— git 通道在受限网络下比 artifact 下载更稳。
+      - name: 把固件产物推到分支
+        id: push_fwbin
+        if: success()
+        env:
+          SHA: ${{ github.sha }}
+          BRANCH: fw-bin
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: .
+        run: |
+          set -e
+          git config user.name 'ci'
+          git config user.email 'ci@local'
+          BASE=''
+          if git ls-remote --exit-code origin "refs/heads/$BRANCH" >/dev/null 2>&1; then
+            git fetch --depth 1 origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+            BASE=$(git rev-parse "refs/remotes/origin/$BRANCH")
+          fi
+          TMPIDX=$(mktemp)
+          export GIT_INDEX_FILE=$TMPIDX
+          if [ -n "$BASE" ]; then git read-tree "$BASE^{tree}"; else git read-tree --empty; fi
+          # 推 dist/ 里实际存在的全部文件（含 manifest.txt），不做文件名假设
+          for f in dist/*; do
+            [ -f "$f" ] || continue
+            BLOB=$(git hash-object -w "$f")
+            git update-index --add --cacheinfo 100644,$BLOB,"$(basename "$f")"
+          done
+          TREE=$(git write-tree)
+          # 首次推送（分支还不存在）时不能带 -p：git commit-tree 的父提交必须是
+          # commit 对象，空树对象会被拒（"is not a valid 'commit' object"）。
+          if [ -n "$BASE" ]; then
+            C=$(git commit-tree "$TREE" -p "$BASE" -m "fw $SHA")
+          else
+            C=$(git commit-tree "$TREE" -m "fw $SHA")
+          fi
+          git update-ref "refs/heads/$BRANCH" "$C"
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+                 "refs/heads/$BRANCH:refs/heads/$BRANCH"
+
+      - name: 上传产物
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: abbot-firmware
+          path: dist/
+          if-no-files-found: error
+
+      # 建 Release —— 必须在推 fw-bin 之后，且 gh 需要 GH_TOKEN 才有鉴权。
+      # 上一轮这里没设 GH_TOKEN，gh release create 必然鉴权失败。
+      - name: 建 Release
+        if: success()
+        env:
+          SHA: ${{ github.sha }}
+          TAG: ${{ inputs.release_tag || format('fw-{0}', github.sha) }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: .
+        run: |
+          set -e
+          FILES=$(ls dist/*.bin dist/flash_args.txt 2>/dev/null || true)
+          gh release create "$TAG" $FILES \
+            --title "$TAG" --notes "abbot ESP32-S3 固件（提交 $SHA）"
+
+      # 记录这轮所有步骤的结论 —— 写进 ci-logs 后，本机不拉 Actions 日志也能知道
+      # 到底是哪一步挂的（上一轮栽在"看不见失败原因"上）。
+      # 必须排在回写之前，否则 steps.txt 生成得太晚，进不了 ci-logs。
+      - name: 记录步骤结论
+        if: always()
+        working-directory: .
+        run: |
+          set +e
+          {
+            echo "commit: ${{ github.sha }}"
+            echo "run:    ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "steps:"
+            echo '${{ toJSON(steps) }}'
+          } > steps.txt
+          head -40 steps.txt
+
+      # 把日志与清单回写到 ci-logs 分支。
+      #
+      # 本机拉不到 Actions 的 logs/artifacts（blob 存储被出口代理挡，403），
+      # git 通道能通 —— 这与 fw-bin 分支取固件产物是同一条思路。
+      #
+      # 这一步 always() 跑：成功时也回写，这样「产物清单」和「完整编译日志」
+      # 永远可查，失败时不用靠猜。
+      - name: 回写日志与清单到 ci-logs 分支
+        if: always()
         env:
           SHA: ${{ github.sha }}
           BRANCH: ci-logs
@@ -127,80 +259,23 @@ jobs:
           TMPIDX=$(mktemp)
           export GIT_INDEX_FILE=$TMPIDX
           if [ -n "$BASE" ]; then git read-tree "$BASE^{tree}"; else git read-tree --empty; fi
-          BLOB=$(git hash-object -w build.log)
-          git update-index --add --cacheinfo 100644,$BLOB,"build-$SHA.log"
+          # 回写三样东西：编译日志、产物清单、以及这轮的所有步骤结论
+          for f in build.log dist/manifest.txt steps.txt; do
+            [ -f "$f" ] || continue
+            case "$f" in
+              build.log)  NAME="build-$SHA.log" ;;
+              dist/manifest.txt) NAME="manifest-$SHA.txt" ;;
+              *)          NAME="steps-$SHA.txt" ;;
+            esac
+            BLOB=$(git hash-object -w "$f")
+            git update-index --add --cacheinfo 100644,$BLOB,"$NAME"
+          done
           TREE=$(git write-tree)
-          # 首次推送（分支还不存在）时不能带 -p：git commit-tree 的父提交必须是
-          # commit 对象，空树对象会被拒（"is not a valid 'commit' object"）。
           if [ -n "$BASE" ]; then
             C=$(git commit-tree "$TREE" -p "$BASE" -m "ci log $SHA")
           else
             C=$(git commit-tree "$TREE" -m "ci log $SHA")
           fi
           git update-ref "refs/heads/$BRANCH" "$C"
-          # 用 GITHUB_TOKEN 显式推, 不依赖 checkout 的 ref 凭据
-          # (checkout 的凭据挂在被检出分支的 ref 上, 推新分支时那个 ref 不存在)
           git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
                  "refs/heads/$BRANCH:refs/heads/$BRANCH"
-
-      - name: 上传产物
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: abbot-firmware
-          path: |
-            .pio/build/esp32s3/bootloader.bin
-            .pio/build/esp32s3/partitions.bin
-            .pio/build/esp32s3/boot_app0.bin
-            .pio/build/esp32s3/firmware.bin
-            .pio/build/esp32s3/flash_args.txt
-
-      # 固件产物推到 fw-bin 分支 —— git 通道在受限网络下比 artifact 下载更稳。
-      - name: 把固件产物推到分支
-        if: success()
-        env:
-          SHA: ${{ github.sha }}
-          BRANCH: fw-bin
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        working-directory: .
-        run: |
-          set -e
-          git config user.name 'ci'
-          git config user.email 'ci@local'
-          B=.pio/build/esp32s3
-          BASE=''
-          if git ls-remote --exit-code origin "refs/heads/$BRANCH" >/dev/null 2>&1; then
-            git fetch --depth 1 origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
-            BASE=$(git rev-parse "refs/remotes/origin/$BRANCH")
-          fi
-          TMPIDX=$(mktemp)
-          export GIT_INDEX_FILE=$TMPIDX
-          if [ -n "$BASE" ]; then git read-tree "$BASE^{tree}"; else git read-tree --empty; fi
-          for f in bootloader.bin partitions.bin boot_app0.bin firmware.bin flash_args.txt; do
-            BLOB=$(git hash-object -w "$B/$f")
-            git update-index --add --cacheinfo 100644,$BLOB,"$f"
-          done
-          TREE=$(git write-tree)
-          # 同上: 首次推送不带 -p（父提交必须是 commit 对象）
-          if [ -n "$BASE" ]; then
-            C=$(git commit-tree "$TREE" -p "$BASE" -m "fw $SHA")
-          else
-            C=$(git commit-tree "$TREE" -m "fw $SHA")
-          fi
-          git update-ref "refs/heads/$BRANCH" "$C"
-          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-                 "refs/heads/$BRANCH:refs/heads/$BRANCH"
-
-      - name: 建 Release
-        if: success()
-        env:
-          SHA: ${{ github.sha }}
-          TAG: ${{ inputs.release_tag || format('fw-{0}', github.sha) }}
-        working-directory: .
-        run: |
-          set -e
-          B=.pio/build/esp32s3
-          gh release create "$TAG" \
-            "$B/bootloader.bin" "$B/partitions.bin" "$B/boot_app0.bin" \
-            "$B/firmware.bin" "$B/flash_args.txt" \
-            --title "$TAG" --notes "abbot ESP32-S3 固件（提交 $SHA）"
