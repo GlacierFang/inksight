@@ -643,6 +643,12 @@ PCM 样本是**有符号 16 位**，`>> 8` 是**算术右移** —— 负样本�
 | `src/hal/hal_power.cpp` | MAX17043 电量计 + Light-Sleep / ext0 唤醒 | doc/02 §3.5 |
 | `src/hal/hal_shared.cpp` | 共享 I2C 总线与互斥 | doc/02 §2.1 |
 | `src/tasks.cpp` | FreeRTOS 双核六任务（摇杆/UI/相机/音频/存储/网络） | doc/04 |
+| `src/ui/ui_pages.cpp` + `include/ui_pages.h` | 13 个核心页面 + 6 个电子书子页面的三区骨架 | doc/03 §二/§五、doc/07 |
+| `src/ui/ui_router.cpp` + `include/ui_router.h` | 页面路由 + 三层浮层抢占 + 六手势宪法 | doc/03 §3.1/§3.2 |
+| `src/ui/ui_error.cpp` + `include/ui_error.h` | 错误码 → 中文文案唯一查表，零技术术语 | doc/03 §四 |
+| `src/ui/ui_display_port.cpp` | LVGL 缓冲 → 屏幕 HAL，UI 层不碰 SPI | doc/02 §3.1 |
+| `src/ui/fonts/ui_font_cn_16.c` | Noto Sans CJK SC 裁剪 929 字形，16px/4bpp | doc/06 中文字库要求 |
+| `tools/gen_font.sh` + `tools/subset_font.py` + `tools/font_charset.txt` | 字库可复现生成流程 | — |
 | `.github/workflows/build.yml` | Actions 编译 + fw-bin 分支 + Release + ci-logs 回写 | 沿用 eink-mini 已验证通路 |
 
 **信封层是端云协议的命门，已用实弹验证：** NIST SP 800-38A F.5.1 官方向量 4/4 先自检 AES-CTR 分组与计数器推进，再核对 `doc/05` §3.4 全部锁定向量 —— 请求体、`block_index=2` 局部块密文、`RAW_BODY_SHA256`、`X-Signature`、`X-Resp-Signature`、空 body SHA-256、信封回环，外加两条负例。**期望值不手抄**，以 `doc/verify/gen_vectors.py` 为唯一出处，与 Python 权威实现逐字节对齐。
@@ -655,7 +661,11 @@ PCM 样本是**有符号 16 位**，`>> 8` 是**算术右移** —— 负样本�
 
 **Actions 实编译已通过（2026-11-24）：** 提交 `e567bb2` 的 run 全绿 —— 主机侧向量测试 18 PASS、固件编译成功、产物推送成功、Release `fw-e567bb2ee1aa962328c911e634bf097ec50c2485` 已生成。`fw-bin` 分支实测清单：`bootloader.bin` 15104 B、`firmware.bin` 355056 B、`partitions.bin` 3072 B，另有 `manifest.txt`（文件名 / 字节数 / sha256）。
 
-**补齐六个 HAL + 双核任务后再次全绿：** 独立仓提交 `c8924ea`（HAL 全量）→ `339c5d4`（返回类型修正）→ `bb9d521`（类型转换修正），run `45411295778` 全绿，Release `fw-bb9d521e04f300ae1a833655e568ce9205917476` 已生成，`fw-bin` 分支同步更新（`bootloader.bin` / `firmware.bin` / `partitions.bin` / `manifest.txt`）。**固件编译链路至此闭环：源码 → Actions → 产物分支 + Release，全部在 GitHub 上完成，本机不装 PlatformIO。**
+**UI 骨架已落地并编译通过（2026-11-24 晚）：** 独立仓提交 `979a9ca`（UI 骨架 + 字库）→ `e43c28a`（LVGL 8.x 样式 API）→ `feea6df`（extern "C" 链接），run `45415776564` 全绿，Release `fw-feea6df647c62c6db0e97279d2d281e720166f84` 已生成，`fw-bin` 分支同步更新，`firmware.bin` **820752 字节**（含 LVGL 与中文裁剪字库，manifest 的 sha256 与三个 bin 实测逐一吻合）。
+
+**UI 已实现的部分：** 三区骨架（状态栏 24px / 内容 424px / 提示栏 32px）、13 个核心页面 + 6 个电子书子页面的静态线框、三层浮层（提醒 > 录音 > Toast）优先级抢占、六手势路由（短按确定 / 长按 600ms 松开才退出 / 四向导航）、错误码查表渲染。**长按阈值仍只由 HAL 裁定，UI 层没有自己的计时器。**
+
+**中文渲染必须自带字库：** LVGL 内置的 Montserrat 没有汉字，中文界面必须裁剪一份中文字库 —— 走 `tools/gen_font.sh`（fontTools 裁剪 Noto Sans CJK SC → `lv_font_conv` 转 LVGL 格式），字符集在 `tools/font_charset.txt`，改了界面文案要把新字加进去重跑。全量 CJK 塞进固件会爆 Flash，裁到 929 字形后字库约 720KB 源码。
 
 **CI 踩过的坑（都是踩出来的，别回头再踩）：**
 
@@ -665,13 +675,17 @@ PCM 样本是**有符号 16 位**，`>> 8` 是**算术右移** —— 负样本�
 4. **本机拉不到 Actions 的 logs / artifacts**（blob 存储被出口代理挡成 403）。因此定位失败**只能读代码 + 读 ci-logs 分支**，不能去拉 Actions 日志 —— 这也是本节加 `manifest.txt` / `steps.txt` 的原因。
 5. **本机巡检脚本曾按字母序取"最新"日志** —— 日志文件名是 commit SHA，字母序 ≠ 时间序，于是连盯了三轮旧报错，误以为固件编译不过。已改为按 git 历史排序并比对当前 main 的 SHA。
 
-**尚未做：** LVGL 13 页 UI（页面骨架 + 浮层优先级还没写）、网络任务封装（`task_net_worker` 现在只是占位，尚未接 `net_client` 的端云信封）、UI 层与 HAL 的真实调用接线。**实体硬件未到位**，摄像头取图 / 摇杆 ADC 阈值 / 屏幕刷屏 / TF 挂载这四项只有编译期保证，真机行为要等硬件做逐像素、逐交互黄金样校准。
+**尚未做：** 网络任务封装（`task_net_worker` 现在只是占位，尚未接 `net_client` 的端云信封，也没接真实 HTTP 传输）、UI 页面与真实数据源的绑定（各页目前是静态线框，没接拍题/解析/卡片包/书目数据）、页面级方向键的焦点移动与列表滚动。**实体硬件未到位**，摄像头取图 / 摇杆 ADC 阈值 / 屏幕刷屏 / TF 挂载这四项只有编译期保证，真机行为要等硬件做逐像素、逐交互黄金样校准。
 
 **这一轮 Actions 踩的坑（已修，别回头再踩）：**
 
 6. **HAL 返回值语义要分清。** `hal_audio_read_chunk` 原本声明成 `hal_status_t` 却要返回采样点数，`-Werror` 下直接 `invalid conversion from 'int' to 'hal_status_t'`。这类"要数量又要错误码"的接口统一返回 `int`：>=0 是数量，<0 才是 `hal_status_t` 错误码。
 7. **Arduino 2.x 的 `File::read/write` 收 `uint8_t*`，不收 `char*`。** 读文本缓冲区要显式 `(uint8_t *)buf` 强转，否则 `invalid conversion from 'char*' to 'uint8_t*'`。
 8. **GPIO 常量宏是 `int`，ESP-IDF 函数要 `gpio_num_t`。** `pinMode()` 收 `uint8_t`、`esp_sleep_enable_ext0_wakeup()` 收 `gpio_num_t`，宏直传一律 `invalid conversion from 'int'` —— 在调用处强转，不要改宏定义（宏还要给 C 侧和 `camera_config` 用）。
+9. **`lv_obj_set_style_all` 是 LVGL v9 的 API，8.3.11 没有** —— 等价写法是 `lv_obj_remove_style_all(obj)` + `lv_obj_add_style(obj, &style, LV_PART_MAIN)`。
+10. **C++ 文件里的跨模块函数必须看到 `extern "C"` 声明** —— `hal_display.cpp` 定义 `hal_display_blit_rgb565` 时没 include `hal_shared.h`，符号成了 C++ mangled 名，编译全过、链接才炸 `undefined reference`。凡是跨模块的非 static 函数，定义文件必须 include 声明它的那个头。
+11. **`fold -w1` 会按字节切碎 UTF-8** —— 拼字库符号集时用它，中文全被切坏，`lv_font_conv` 收到乱码后只吐出 95 个 ASCII 字形（生成文件只有 39KB，一眼能看出不对）。要用 Python 按**字符**处理。
+12. **`fw-bin` 分支是 force push** —— 本机 `git fetch` 普通 refspec 会被拒，核验产物时要用 `+refs/heads/fw-bin:<新 ref 名>`。
 
 - **真实 MiniMax 视觉/ASR/TTS 接口验证**（`ai.provider` 仍为 `mock`）—— 独立任务卡。
 - **固件侧网络层 C 接口与 `05` 字段对齐**（`net_study_solve()` 缺 `edu_stage`/`enrollment_year`/`device_remaining_quota` 入参）—— 独立任务卡。

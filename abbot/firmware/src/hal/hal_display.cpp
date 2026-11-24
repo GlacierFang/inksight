@@ -29,6 +29,9 @@
 #include <Arduino.h>
 
 #include "board_config.h"
+/* hal_display_blit_rgb565 声明在 hal_shared.h 的 extern "C" 块里 ——
+ * 必须包含它, 否则定义的符号是 C++ mangled 名, 链接时对不上。 */
+#include "hal_shared.h"
 
 #include <LovyanGFX.hpp>
 
@@ -148,6 +151,20 @@ hal_status_t hal_display_flush(void)
      * 这里保证缓冲区确实已经送出去（等待 DMA 完成）。 */
     s_display.waitDisplay();
     return HAL_OK;
+}
+
+/* LVGL 绘制缓冲 -> 屏幕。UI 层不碰 SPI, 像素搬运统一在这里做。 */
+void hal_display_blit_rgb565(int x, int y, int w, int h, const uint16_t *pixels)
+{
+    if (pixels == NULL || w <= 0 || h <= 0) {
+        return;
+    }
+    /* startWrite/setAddrWindow/writePixels/endWrite 是 LovyanGFX v1 的标准组合:
+     * 先开写事务 -> 设窗口 -> 送像素 -> 等 DMA 收尾。 */
+    s_display.startWrite();
+    s_display.setAddrWindow(x, y, w, h);
+    s_display.writePixels((const uint8_t *)pixels, (size_t)w * (size_t)h * sizeof(uint16_t), true);
+    s_display.endWrite();
 }
 
 hal_status_t hal_display_set_backlight(uint8_t level)

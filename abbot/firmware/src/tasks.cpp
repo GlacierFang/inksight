@@ -26,6 +26,9 @@
 #include "board_config.h"
 #include "hal_interfaces.h"
 #include "hal_shared.h"
+#include "lvgl.h"
+#include "ui_display_port.h"
+#include "ui_router.h"
 
 static const char *TAG = "tasks";
 
@@ -43,18 +46,38 @@ static void task_joystick(void *arg)
     }
 }
 
-/** 事件分发骨架：Phase 3 接 LVGL 后，这里做页面路由与浮层优先级 */
+/** 界面核：LVGL 渲染 + 事件分发 + 页面路由与浮层优先级 */
 static void task_ui_fsm(void *arg)
 {
     (void)arg;
     QueueHandle_t q = hal_joystick_queue();
+    QueueHandle_t qcmd = hal_ui_command_queue();
+
+    /* LVGL 必须在**使用它的那个任务**里初始化 —— 页面对象与 lv_timer_handler
+     * 必须同属一个任务, 否则对象树会跨任务踩内存。 */
+    ui_display_port_init();
+    ui_router_init();
+
+    TickType_t last_wake = xTaskGetTickCount();
     for (;;) {
         joystick_event_t ev;
-        if (q != NULL && xQueueReceive(q, &ev, portMAX_DELAY) == pdTRUE) {
+        if (q != NULL && xQueueReceive(q, &ev, pdMS_TO_TICKS(10)) == pdTRUE) {
             /* 有用户操作 —— 重置低功耗空闲计时 */
             hal_power_note_activity();
-            /* Phase 3：把事件交给 LVGL 页面状态机（doc/03） */
+            /* 事件交给 LVGL 页面状态机（doc/03 §3.2 六手势宪法） */
+            ui_router_handle_joystick(&ev);
         }
+
+        ui_command_t cmd;
+        if (qcmd != NULL && xQueueReceive(qcmd, &cmd, 0) == pdTRUE) {
+            if (cmd.kind == 1) {
+                ui_toast(cmd.text);
+            }
+        }
+
+        lv_tick_inc(5);
+        lv_timer_handler();
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(5));
     }
 }
 

@@ -133,6 +133,8 @@ typedef struct {
 } net_request_t;
 
 /* ===================== HAL 内部互调（不在 §六 对外契约里） ===================== */
+/* LVGL 绘制缓冲 -> 屏幕的像素搬运 (RGB565)。UI 层不碰 SPI, 只能走这里。 */
+void hal_display_blit_rgb565(int x, int y, int w, int h, const uint16_t *pixels);
 hal_status_t hal_storage_write_binary(const char *path, const uint8_t *data, uint32_t len);
 void hal_camera_release_jpeg(uint8_t *jpg);
 /* 取一段 PCM：>=0 为实际取到的采样点数；<0 为 hal_status_t 错误码 */
