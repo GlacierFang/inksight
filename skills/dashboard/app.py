@@ -1448,8 +1448,6 @@ def api_projects():
         {"id": "stamp", "name": "邮票收藏", "icon": "📮", "url": "/stamp/"},
         {"id": "ink", "name": "墨鱼墨水屏", "icon": "🖥️", "url": "/ink"},
         
-        {"id": "diary", "name": "存在感日记", "icon": "📅", "url": "/diary/"},
-        
         {"id": "retro", "name": "老游戏厅", "icon": "🕹", "url": "/retro/"},
         {"id": "app-download", "name": "App 下载页", "icon": "📱", "url": "/app/"},
         {"id": "wenhua", "name": "华夏文明五书", "icon": "📖", "url": "/wenhua/"},
@@ -1462,6 +1460,7 @@ def api_projects():
         {"id": "shanhe-app", "name": "山河图记", "icon": "🗺️", "url": "/shanhe-app/"},
         {"id": "pet", "name": "桌面宠物", "icon": "🐾", "url": "/ai-agent-pet/"},
         {"id": "eink-mini", "name": "墨水屏控制台", "icon": "📟", "url": "/eink-mini/"},
+        {"id": "abbot", "name": "学科盒子", "icon": "🎒", "url": "/abbot/"},
 
     ]
     return jsonify({"projects": projects})
