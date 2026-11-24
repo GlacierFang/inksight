@@ -142,13 +142,19 @@ Markdown
 ### 外网访问纪律
 
 - 不要在 shell 里 curl 外部域名：本机出网走出口代理（`HTTPS_PROXY` + `~/.openclaw/secret-egress-proxy/*/trust-bundle.pem`），部分站点被代理策略挡成 403，或直接挂住不返回
-- 出口代理白名单是唯一真相源：`~/.openclaw/openclaw.json` → `secrets.egressProxy.allowedHosts`。不在名单里的域名一律被挡成 403 / 000（直连能通也没用）
+- 出口代理白名单是**走代理时**的唯一真相源：`~/.openclaw/openclaw.json` → `secrets.egressProxy.allowedHosts`。不在名单里的域名**走代理**会被挡成 403 / 000
+- ⚠️ **但“直连能通也没用”是错的**（2026-11-24 实测推翻）：白名单只约束代理链路。**unset 代理变量后直连 pypi.org 完全正常**：
+  ```bash
+  env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY \
+    python3 -m pip install fastapi pypdf     # 实测装成 fastapi 0.165.0 / pypdf 7.1.1
+  ```
+  以后遇到“某域名被挡”先试直连，再考虑改白名单（改白名单要重启 Gateway，代价大得多）
 - 改白名单必须重启 Gateway 才生效（代理启动时读一次配置，热加载不生效）
 - 天气已放行：`wttr.in` / `wttr.is` / `api.open-meteo.com` / `geocoding-api.open-meteo.com`
 - `nominatim.openstreetmap.org` 在本网络不可达（代理与直连都超时），已从白名单移除，代码侧改为快速失败并降级到 Open-Meteo 地理编码
 - Python 走代理时 `SSL_CERT_FILE` 必须保留出口代理 trust-bundle；被覆盖成 certifi 会导致 MITM 链路 `CERTIFICATE_VERIFY_FAILED`
 - 取外部数据走 `web_fetch` 工具：它在工具层出网且有超时，不会挂住 shell
-- 实测被挡：`registry.npmjs.org`（`npm ping` / `npm view` 均 403 Forbidden，curl 返回 000）、`raw.githubusercontent.com`（curl 无返回）
+- 实测被挡（**走代理**）：`registry.npmjs.org`（`npm ping` / `npm view` 均 403 Forbidden，curl 返回 000）、`raw.githubusercontent.com`（curl 无返回）
 - 后果：npm 装包路径不通，`openclaw update` 的安装步骤会断在 `global-install-failed`；curl 挂住 → 转后台 → 退出时往对话投系统事件
 - 这两个域名用 `web_fetch` 都能正常读到
 
@@ -231,6 +237,7 @@ Markdown
 | 18838  | shanhe             | /shanhe/        | 山河图记 App 后端（地理研学，11 章；研学 v2 每章 1 主题）                                            |
 | 18840  | sanxia             | /sanxia/        | 伞下 App 后端（情绪庇护 LLM 代理，后端桩已起）                                                    |
 | 18841  | little-prince      | /little-prince/ | 小王子の日历 App 后端（每日生图 + 台词）                                                        |
+| 18842  | eink-mini           | /eink-mini/      | eink-mini 墨水屏服务端（页面清单/1bpp 位图/留言板）                                                |
 | 18888  | ai-assistant       | /ai-ass-v/      | AI Assistant 发行版（Dashboard + Gallery + Library + Nature + Knowledge + Creative） |
 | 18899  | tangping           | /tangping/      | 躺平巴拉 App 后端（沉浸式水豚养成游戏）                                                          |
 | 5173   | my-island-vite     | /my-island-web/ | my-island Vite dev 前端（nginx `/my-island-web/` 转这里）                              |
@@ -321,3 +328,15 @@ WantedBy=default.target
 - 替代方案：直接写入 `~/.openclaw/cron/jobs.json` + `sudo systemctl restart openclaw-gateway`
 
 - 验证：`cron list`（需等待几秒让 gateway 加载）
+
+
+### eink-mini 固件构建与刷写
+
+- 本机没有 PlatformIO：~/.platformio 不存在。**原因不是 pypi 不可达**（直连 pypi 实际是通的，见上方“外网访问纪律”）——而是 PlatformIO 自身的平台工具链（`dl.espressif.com` 等）不在出口白名单
+- 编译走 GitHub Actions：eink-mini/.github/workflows/build.yml（workflow_dispatch，手动触发）
+  - 产物推 fw-bin 分支（git 通道，网络受限下比 artifact 下载稳），并建同名 Release
+  - 本机取产物：git fetch --depth 1 origin +refs/heads/fw-bin:refs/remotes/origin/fw-bin，再 git show origin/fw-bin:文件名
+- esptool 用 apt 装：sudo apt-get install -y esptool（4.7.0；命令名是 esptool，不是 esptool.py）
+- 设备是 WiFi 联网状态（经 nginx 反代，来源 IP 显示 127.0.0.1），默认没有 USB 直连本机
+  - 固件里没有 OTA/更新通道，无法远程刷写；刷写必须 USB 接到本机，再按 flash_args.txt 走 esptool
+- 网页端无头验收：chromium --headless=new --no-proxy-server（系统代理会同时污染 CDP 与 websocket）；target 要选 type == page

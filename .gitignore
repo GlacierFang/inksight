@@ -30,3 +30,8 @@ __pycache__/
 *.bak.*
 node_modules/
 .next/
+
+# ── abbot 项目（随身学习终端）──
+abbot/.venv/
+abbot/doc.bak.*/
+abbot/*.log
