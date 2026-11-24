@@ -42,14 +42,29 @@
 /* ===================== 电量计 MAX17043 (I2C_NUM_0) ===================== */
 #define POWER_I2C_ADDR 0x36
 
+/* ===================== 共享 I2C 总线 (doc/02 §2.1) =====================
+ * OV5640 的 SCCB 与 MAX17043 **物理共享** I2C_NUM_0，总线频率统一锁定 100kHz。
+ * 摄像头侧不另装驱动：camera_config.pin_sccb_sda = -1 + sccb_i2c_port = I2C_NUM_0，
+ * 直接复用这里配置的 Wire 总线；MAX17043 也走同一条总线。
+ * 因此所有跨设备访问必须持 g_i2c_bus_mutex（见 hal_shared.h），
+ * 且**拍照捕获帧数据期间严禁轮询电量计**。
+ */
+#define I2C_BUS_FREQ_HZ 100000
+#define POWER_I2C_SDA 4   /* 与 CAM_PIN_SIOD 同一根线 */
+#define POWER_I2C_SCL 5   /* 与 CAM_PIN_SIOC 同一根线 */
+
 /* ===================== 摇杆 (ADC1) ===================== */
 #define JOY_PIN_VRX    2    /* ADC1_CH1, 左右 */
 #define JOY_PIN_VRY    3    /* ADC1_CH2, 上下 */
 #define JOY_PIN_SW     0    /* 下压, 低有效; 开机瞬间严禁按压 */
 
-/* 摇杆模拟轴中心值与死区 —— 真机标定后回填, 见 doc/03 摇杆仲裁表 */
+/* 摇杆模拟轴中心值与死区 —— 真机标定后回填, 见 doc/03 摇杆仲裁表
+ * 死区取 doc/02 §3.4 与 §五 防线表 #3 的 **±650**（12-bit ADC 满量程 0~4095）。
+ * 中心值不写死：HAL 开机动态校准（300ms 内连采 20 次取均值），
+ * 这里的 JOY_ADC_CENTER 仅作校准失败时的兜底。
+ */
 #define JOY_ADC_CENTER 2048
-#define JOY_ADC_DEADBAND 400
+#define JOY_ADC_DEADBAND 650
 
 /* 长按阈值: HAL 层唯一裁定来源, UI 层严禁另设阈值 */
 #define LONG_PRESS_MS  600

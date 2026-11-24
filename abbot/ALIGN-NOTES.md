@@ -635,6 +635,14 @@ PCM 样本是**有符号 16 位**，`>> 8` 是**算术右移** —— 负样本�
 | `test/test_net_client.c` | 主机侧向量测试，18 PASS / 0 FAIL | doc/05 §3.4 |
 | `include/lv_conf.h` | LVGL v8.3.11 配置（官方模板派生，`LV_CONF_INCLUDE_SIMPLE`） | LVGL 找不到配置直接编译失败 |
 | `src/hal/hal_display.cpp` | ST7796S 竖屏 + 5 档背光（LovyanGFX 1.1.16，SPI 40MHz） | doc/02 §3.1 |
+| `include/hal_shared.h` | 六个 HAL 的统一头（共享 I2C 互斥、录音缓冲、错误码） | doc/02 §六 |
+| `src/hal/hal_camera.cpp` | OV5640 拍题 + AF 固件 + JPEG 释放 | doc/02 §3.2 |
+| `src/hal/hal_audio.cpp` | ICS43434 录音 + MAX98357 播放，半双工 | doc/02 §3.3 |
+| `src/hal/hal_joystick.cpp` | ADC1 双轴 + 下压键，动态中心校准 | doc/02 §3.4 |
+| `src/hal/hal_storage.cpp` | TF 卡（SD_MMC 1-Bit）+ `.bak` 自愈 + 原子写 | doc/04 §2.3 |
+| `src/hal/hal_power.cpp` | MAX17043 电量计 + Light-Sleep / ext0 唤醒 | doc/02 §3.5 |
+| `src/hal/hal_shared.cpp` | 共享 I2C 总线与互斥 | doc/02 §2.1 |
+| `src/tasks.cpp` | FreeRTOS 双核六任务（摇杆/UI/相机/音频/存储/网络） | doc/04 |
 | `.github/workflows/build.yml` | Actions 编译 + fw-bin 分支 + Release + ci-logs 回写 | 沿用 eink-mini 已验证通路 |
 
 **信封层是端云协议的命门，已用实弹验证：** NIST SP 800-38A F.5.1 官方向量 4/4 先自检 AES-CTR 分组与计数器推进，再核对 `doc/05` §3.4 全部锁定向量 —— 请求体、`block_index=2` 局部块密文、`RAW_BODY_SHA256`、`X-Signature`、`X-Resp-Signature`、空 body SHA-256、信封回环，外加两条负例。**期望值不手抄**，以 `doc/verify/gen_vectors.py` 为唯一出处，与 Python 权威实现逐字节对齐。
@@ -647,6 +655,8 @@ PCM 样本是**有符号 16 位**，`>> 8` 是**算术右移** —— 负样本�
 
 **Actions 实编译已通过（2026-11-24）：** 提交 `e567bb2` 的 run 全绿 —— 主机侧向量测试 18 PASS、固件编译成功、产物推送成功、Release `fw-e567bb2ee1aa962328c911e634bf097ec50c2485` 已生成。`fw-bin` 分支实测清单：`bootloader.bin` 15104 B、`firmware.bin` 355056 B、`partitions.bin` 3072 B，另有 `manifest.txt`（文件名 / 字节数 / sha256）。
 
+**补齐六个 HAL + 双核任务后再次全绿：** 独立仓提交 `c8924ea`（HAL 全量）→ `339c5d4`（返回类型修正）→ `bb9d521`（类型转换修正），run `45411295778` 全绿，Release `fw-bb9d521e04f300ae1a833655e568ce9205917476` 已生成，`fw-bin` 分支同步更新（`bootloader.bin` / `firmware.bin` / `partitions.bin` / `manifest.txt`）。**固件编译链路至此闭环：源码 → Actions → 产物分支 + Release，全部在 GitHub 上完成，本机不装 PlatformIO。**
+
 **CI 踩过的坑（都是踩出来的，别回头再踩）：**
 
 1. **产物文件名不能硬编码。** 上一轮编译本身成功，失败的是"推 fw-bin 分支"那步 —— 脚本 `set -e` + 点名 5 个文件，其中 `boot_app0.bin` 是 ESP-IDF 的产物、Arduino 框架根本不生成，`git hash-object -w` 找不到文件直接 fatal，整步当场死掉，而错误只写在本机拉不到的 Actions step log 里。**Arduino 框架实际只产 3 个 bin**（bootloader / partitions / firmware），没有 `boot_app0.bin`、也没有 `flash_args.txt`。现在改成 glob 收集 + manifest 自证。
@@ -655,7 +665,13 @@ PCM 样本是**有符号 16 位**，`>> 8` 是**算术右移** —— 负样本�
 4. **本机拉不到 Actions 的 logs / artifacts**（blob 存储被出口代理挡成 403）。因此定位失败**只能读代码 + 读 ci-logs 分支**，不能去拉 Actions 日志 —— 这也是本节加 `manifest.txt` / `steps.txt` 的原因。
 5. **本机巡检脚本曾按字母序取"最新"日志** —— 日志文件名是 commit SHA，字母序 ≠ 时间序，于是连盯了三轮旧报错，误以为固件编译不过。已改为按 git 历史排序并比对当前 main 的 SHA。
 
-**尚未做：** 六个 HAL 实现（camera / audio / joystick / storage / power 五个还没写，display 已完成骨架）、LVGL 13 页 UI、FreeRTOS 双核任务、网络任务封装。**实体硬件未到位**，摄像头取图 / 摇杆 ADC 阈值 / 屏幕刷屏 / TF 挂载这四项只有编译期保证，真机行为要等硬件做逐像素、逐交互黄金样校准。
+**尚未做：** LVGL 13 页 UI（页面骨架 + 浮层优先级还没写）、网络任务封装（`task_net_worker` 现在只是占位，尚未接 `net_client` 的端云信封）、UI 层与 HAL 的真实调用接线。**实体硬件未到位**，摄像头取图 / 摇杆 ADC 阈值 / 屏幕刷屏 / TF 挂载这四项只有编译期保证，真机行为要等硬件做逐像素、逐交互黄金样校准。
+
+**这一轮 Actions 踩的坑（已修，别回头再踩）：**
+
+6. **HAL 返回值语义要分清。** `hal_audio_read_chunk` 原本声明成 `hal_status_t` 却要返回采样点数，`-Werror` 下直接 `invalid conversion from 'int' to 'hal_status_t'`。这类"要数量又要错误码"的接口统一返回 `int`：>=0 是数量，<0 才是 `hal_status_t` 错误码。
+7. **Arduino 2.x 的 `File::read/write` 收 `uint8_t*`，不收 `char*`。** 读文本缓冲区要显式 `(uint8_t *)buf` 强转，否则 `invalid conversion from 'char*' to 'uint8_t*'`。
+8. **GPIO 常量宏是 `int`，ESP-IDF 函数要 `gpio_num_t`。** `pinMode()` 收 `uint8_t`、`esp_sleep_enable_ext0_wakeup()` 收 `gpio_num_t`，宏直传一律 `invalid conversion from 'int'` —— 在调用处强转，不要改宏定义（宏还要给 C 侧和 `camera_config` 用）。
 
 - **真实 MiniMax 视觉/ASR/TTS 接口验证**（`ai.provider` 仍为 `mock`）—— 独立任务卡。
 - **固件侧网络层 C 接口与 `05` 字段对齐**（`net_study_solve()` 缺 `edu_stage`/`enrollment_year`/`device_remaining_quota` 入参）—— 独立任务卡。

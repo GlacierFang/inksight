@@ -1,17 +1,23 @@
 /**
  * main.cpp —— abbot 固件入口
  *
- * 骨架阶段：点亮 ST7796S 竖屏、跑通 5 档背光、打印启动自检横幅。
- * 目的是打通「编译 → 产出 bin → 首次刷写」的链路，硬件到位当天即可验证
- * 屏幕接线与 320x480 竖屏骨架。
+ * 初始化顺序有依赖，不能乱：
+ *   1. hal_shared_init —— 总线锁 + 跨核队列 + 共享 I2C 总线（必须最先）
+ *   2. 屏幕（ST7796S 竖屏 + 5 档背光）
+ *   3. TF 卡（SD_MMC 1-Bit）+ 空白卡自愈建目录
+ *   4. 摄像头（OV5640）+ AF 固件装载
+ *   5. 音频（I2S 半双工）
+ *   6. 摇杆（动态中点校准）
+ *   7. 电量计（MAX17043）
+ *   8. FreeRTOS 双核任务
  *
  * HAL 接入一律经 doc/02 §六 的 hal_interfaces.h，本文件不直接碰 SPI/LovyanGFX。
  */
-
 #include <Arduino.h>
 
 #include "board_config.h"
 #include "hal_interfaces.h"
+#include "hal_shared.h"
 
 static const char *TAG = "abbot";
 
@@ -31,10 +37,12 @@ void setup()
                   (int)(ESP.getPsramSize() / (1024 * 1024)));
     Serial.printf("[%s] lcd=%dx%d backlight gpio=%d\n", TAG,
                   LCD_WIDTH, LCD_HEIGHT, LCD_PIN_BL);
-    Serial.printf("[%s] long-press threshold = %dms (HAL only)\n", TAG,
-                  LONG_PRESS_MS);
+    Serial.printf("[%s] long-press threshold = %dms (HAL only)\n", TAG, LONG_PRESS_MS);
 
-    /* 屏幕 */
+    /* 1. 共享设施：总线锁 + 队列 + I2C 总线 */
+    hal_shared_init();
+
+    /* 2. 屏幕 */
     if (hal_display_init() != HAL_OK) {
         Serial.printf("[%s] display init failed\n", TAG);
     } else {
@@ -48,10 +56,37 @@ void setup()
         hal_display_set_backlight(2);
         hal_display_flush();
     }
+
+    /* 3. TF 卡：没插卡不崩溃，切「纯在线阅后即焚模式」（doc/02 §3.5） */
+    if (hal_storage_init_and_scaffold() != HAL_OK) {
+        Serial.printf("[%s] no TF card -> online-only mode\n", TAG);
+    }
+
+    /* 4. 摄像头 */
+    if (hal_camera_init() != HAL_OK) {
+        Serial.printf("[%s] camera init failed\n", TAG);
+    }
+
+    /* 5. 音频 */
+    hal_audio_init();
+
+    /* 6. 摇杆：开机 300ms 动态中点校准 */
+    if (hal_joystick_init() != HAL_OK) {
+        Serial.printf("[%s] joystick init failed\n", TAG);
+    }
+
+    /* 7. 电量计 */
+    hal_power_init();
+
+    /* 8. 双核任务 */
+    abbot_tasks_start();
+
+    Serial.printf("[%s] ready\n", TAG);
 }
 
 void loop()
 {
-    /* 骨架阶段无业务逻辑 */
-    delay(1000);
+    /* 所有业务在 FreeRTOS 任务里；loop 只负责看门狗与空闲降功耗 */
+    hal_power_tick_idle();
+    delay(200);
 }
