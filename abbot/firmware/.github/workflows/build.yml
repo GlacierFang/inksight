@@ -1,0 +1,159 @@
+name: 编译固件
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release 标签（留空则用 fw-<短SHA>）'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 拉代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: 允许 git 读取工作区
+        run: git config --global --add safe.directory '*'
+
+      - name: 装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+
+      # 只缓存下载体积大的包，不缓存 ~/.platformio/penv。
+      # penv 是 PlatformIO 自己的虚拟环境，shebang 写死创建时的 Python 路径，
+      # Python 补丁号一变就 bad interpreter，命令直接 126 失败。
+      - name: 缓存 PlatformIO 包
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: pio-pkg-${{ hashFiles('platformio.ini') }}-py3.11.9
+
+      # PlatformIO Core 必须钉在 6.1.18。
+      # 6.2.0 会带 SCons 4.11+，SCons 4.11 起 ${func(args)} 要求被调函数
+      # 接受 target/source/env/for_signature 关键字参数，而 espressif32 的
+      # __get_board_flash_mode(env) 不匹配 -> 替换返回 SCons 的 _Null 哨兵 ->
+      # elf2image 那步 print_cmd_line 里 _Null + str 抛 TypeError。
+      - name: 装 PlatformIO
+        run: |
+          set +e
+          rm -rf ~/.platformio/penv
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade 'platformio==6.1.18'
+          pio --version
+
+      # 主机侧向量测试：固件的端云信封实现必须与服务端逐字节一致
+      # （doc/05 §3.4 锁定向量 + NIST SP 800-38A F.5.1 官方向量）。
+      # 这一步在编译之前跑 —— 信封跑偏的固件编出来也没意义。
+      - name: 主机侧向量测试（端云信封）
+        working-directory: .
+        run: |
+          set +e
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libmbedtls-dev
+          gcc -Wall -Wextra -Werror -I include -I src \
+              test/test_net_client.c src/net/net_client.c \
+              -o /tmp/test_net_client -lmbedtls -lmbedcrypto
+          /tmp/test_net_client
+
+      - name: 编译固件
+        working-directory: .
+        run: |
+          set +e
+          {
+            echo '### pio 版本'
+            pio --version
+            echo
+            echo '### platformio.ini'
+            cat platformio.ini
+            echo
+            echo '### pio run -v'
+          } > build.log
+          pio run -v 2>&1 | tee -a build.log
+          rc=${PIPESTATUS[0]}
+          echo "PIORC=$rc" | tee -a build.log
+          exit $rc
+
+      - name: 提取编译错误
+        if: always()
+        working-directory: .
+        run: |
+          set +e
+          echo "日志字节数: $(wc -c < build.log)"
+          echo '### 错误行'
+          grep -hn -iE 'error:|fatal error|undefined reference|no such file|bad interpreter|command not found|Traceback|TypeError' build.log \
+            | grep -viE 'Node\.js 20 is deprecated|deprecat' \
+            | head -20 | while IFS= read -r l; do
+                esc=$(printf '%s' "$l" | sed -e 's/%/%25/g' -e 's/\r//g' | cut -c1-400)
+                echo "::error::$esc"
+              done
+          echo '### 日志尾 20 行'
+          tail -20 build.log | while IFS= read -r l; do
+              esc=$(printf '%s' "$l" | sed -e 's/%/%25/g' -e 's/\r//g' | cut -c1-300)
+              echo "::notice::$esc"
+            done
+
+      - name: 上传产物
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: abbot-firmware
+          path: |
+            .pio/build/esp32s3/bootloader.bin
+            .pio/build/esp32s3/partitions.bin
+            .pio/build/esp32s3/boot_app0.bin
+            .pio/build/esp32s3/firmware.bin
+            .pio/build/esp32s3/flash_args.txt
+
+      # 固件产物推到 fw-bin 分支 —— git 通道在受限网络下比 artifact 下载更稳。
+      - name: 把固件产物推到分支
+        if: success()
+        env:
+          SHA: ${{ github.sha }}
+          BRANCH: fw-bin
+        working-directory: .
+        run: |
+          set -e
+          git config user.name 'ci'
+          git config user.email 'ci@local'
+          B=.pio/build/esp32s3
+          BASE=''
+          if git ls-remote --exit-code origin "refs/heads/$BRANCH" >/dev/null 2>&1; then
+            git fetch --depth 1 origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+            BASE=$(git rev-parse "refs/remotes/origin/$BRANCH")
+          fi
+          TMPIDX=$(mktemp)
+          export GIT_INDEX_FILE=$TMPIDX
+          if [ -n "$BASE" ]; then git read-tree "$BASE^{tree}"; else git read-tree --empty; fi
+          for f in bootloader.bin partitions.bin boot_app0.bin firmware.bin flash_args.txt; do
+            BLOB=$(git hash-object -w "$B/$f")
+            git update-index --add --cacheinfo 100644,$BLOB,"$f"
+          done
+          TREE=$(git write-tree)
+          C=$(git commit-tree "$TREE" -p ${BASE:-$(git hash-object -t tree /dev/null)} -m "fw $SHA")
+          git update-ref "refs/heads/$BRANCH" "$C"
+          git push origin "refs/heads/$BRANCH:refs/heads/$BRANCH"
+
+      - name: 建 Release
+        if: success()
+        env:
+          SHA: ${{ github.sha }}
+          TAG: ${{ inputs.release_tag || format('fw-{0}', github.sha) }}
+        working-directory: .
+        run: |
+          set -e
+          B=.pio/build/esp32s3
+          gh release create "$TAG" \
+            "$B/bootloader.bin" "$B/partitions.bin" "$B/boot_app0.bin" \
+            "$B/firmware.bin" "$B/flash_args.txt" \
+            --title "$TAG" --notes "abbot ESP32-S3 固件（提交 $SHA）"
