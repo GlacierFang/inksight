@@ -617,6 +617,31 @@ PCM 样本是**有符号 16 位**，`>> 8` 是**算术右移** —— 负样本�
 
 **本评估的边界（别当普适结论）：** 夹具 PDF 由 MuPDF 生成，ToUnicode 映射规范。**部分真实中文 PDF 的 ToUnicode CMap 残缺，pypdf 会抽出乱码** —— 这类文件只能靠人工核对或换解析器（`fitz` 本机已装 1.27.2.3，可作对照），本评估未覆盖。
 
+### 9.13 固件（Phase 2）现状
+
+源码在 `abbot/firmware/`（目录自包含，**仓库归属待定** —— 可整体拷进独立仓库）。
+
+**已交付：**
+
+| 文件 | 内容 | 依据 |
+| :--- | :--- | :--- |
+| `platformio.ini` | `esp32-s3-devkitc-1` + `qio_opi` + `huge_app.csv` + 16MB Flash | doc/02 §一 三条强制值 |
+| `include/board_config.h` | 全引脚矩阵、`LONG_PRESS_MS 600` | doc/01 零冲突表 |
+| `include/hal_interfaces.h` | 逐字抄录，未改未加 | doc/02 §六 |
+| `include/net_client.h` + `src/net/net_client.c` | 端云签名 + AES-128-CTR 信封 + 128-bit 计数器 | doc/05 §3 |
+| `test/test_net_client.c` | 主机侧向量测试，18 PASS / 0 FAIL | doc/05 §3.4 |
+| `.github/workflows/build.yml` | Actions 编译 + fw-bin 分支 + Release | 沿用 eink-mini 已验证通路 |
+
+**信封层是端云协议的命门，已用实弹验证：** NIST SP 800-38A F.5.1 官方向量 4/4 先自检 AES-CTR 分组与计数器推进，再核对 `doc/05` §3.4 全部锁定向量 —— 请求体、`block_index=2` 局部块密文、`RAW_BODY_SHA256`、`X-Signature`、`X-Resp-Signature`、空 body SHA-256、信封回环，外加两条负例。**期望值不手抄**，以 `doc/verify/gen_vectors.py` 为唯一出处，与 Python 权威实现逐字节对齐。
+
+**三个实现取舍（都是踩出来的）：**
+
+1. **mbedtls 版本兼容层必须写。** 3.x 把 `mbedtls_sha256_starts_ret()` 改名成 `mbedtls_sha256_starts()` 并改返回 int；ESP32 Arduino 2.x（IDF 4.4）自带 mbedtls 2.16，**只有 `_ret` 变体**且无 `_ret` 名的老函数返回 void。主机侧装的是 3.6.6。按 `MBEDTLS_VERSION_MAJOR` 选一套，两边都能编。
+2. **HMAC-SHA256 手工构造 RFC 2104（ipad/opad）**，不用 mbedtls 的 `mbedtls_md_hmac_*` —— 3.x 把它标 deprecated，会撞 `-Werror`。
+3. **AES-CTR 手工推进完整 128-bit 计数器**，不用 `mbedtls_aes_crypt_ctr` —— 后者只推进尾部 32-bit，与 `04` §4.2 的 nonce_counter 公式和 `cards.enc` 局部块解密语义不一致。
+
+**尚未做：** 六个 HAL 实现（display / camera / audio / joystick / storage / power）、LVGL 13 页 UI、FreeRTOS 双核任务、网络任务封装。**实体硬件未到位**，摄像头取图 / 摇杆 ADC 阈值 / 屏幕刷屏 / TF 挂载这四项只有编译期保证，真机行为要等硬件做逐像素、逐交互黄金样校准。固件本身也尚未经 Actions 实编译（仓库归属定下来才有地方跑 CI）。
+
 - **真实 MiniMax 视觉/ASR/TTS 接口验证**（`ai.provider` 仍为 `mock`）—— 独立任务卡。
 - **固件侧网络层 C 接口与 `05` 字段对齐**（`net_study_solve()` 缺 `edu_stage`/`enrollment_year`/`device_remaining_quota` 入参）—— 独立任务卡。
 - **`pypdf` vs `python-docx` 中文教材抽取质量对比** —— 独立任务卡。
