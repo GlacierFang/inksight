@@ -1,0 +1,30 @@
+name: abbot-ui-fidelity
+
+# 模拟屏保真度门禁：固件 UI 改了 → 模拟屏必须同批改。
+# 真相源：abbot/doc/03-竖屏界面布局与交互规范.md
+# 脚本：abbot/tools/check_ui_fidelity.py（纯 python3 标准库）
+
+on:
+  push:
+    paths:
+      - 'abbot/firmware/**'
+      - 'abbot/server/web/index.html'
+      - 'abbot/tools/check_ui_fidelity.py'
+      - '.github/workflows/abbot-ui-fidelity.yml'
+  pull_request:
+    paths:
+      - 'abbot/firmware/**'
+      - 'abbot/server/web/index.html'
+      - 'abbot/tools/check_ui_fidelity.py'
+      - '.github/workflows/abbot-ui-fidelity.yml'
+  workflow_dispatch:
+
+jobs:
+  check-ui-fidelity:
+    name: 模拟屏保真度门禁
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 比较固件 UI 与模拟屏
+        run: python3 abbot/tools/check_ui_fidelity.py
