@@ -51,6 +51,29 @@ int8_t net_wifi_get_rssi(void);
 6. `ui_router.cpp` 的按键分发（短按确定/长按退出怎么落到页面）
 7. 现有测试的编译/运行方式（`test/host_check_arduino.sh` 与 CI 步骤）
 
+## 执行记录（2026-11-25）
+
+### 已完成
+- 净逻辑模块：`wifi_model.c`（扫描解析 + 连接状态机）、`keypad_editor.c`（键盘编辑）——均为纯 C，主机侧可测
+- 主机侧测试：`test/test_wifi_model.c`、`test/test_keypad.c` → gcc -Wall -Wextra -Werror → ALL PASS
+- HAL 层改造（`net_api.cpp`）：扫描结果区分「还在扫 / 扫完但扫不到」、非阻塞连接、跨核双槽+序号交接
+- UI 接线（`ui_pages.cpp` + `ui_router.cpp`）：扫描页接真结果、键盘页真键盘、三态反馈 + 重试
+- 凭据沿用既有 NVS（连上才落盘）；密码只进内存，不进日志
+- CI：第一轮 45599205004 失败（`-Wformat-truncation`，键盘输入行 buffer 不够）→ 修 → 第二轮 **45599597419 成功**
+
+### 核验结果（已完成）
+- CI run **45599597419** = success（https://github.com/GlacierFang/abbot-firmware/actions/runs/45599597419）
+  - 步骤「主机侧向量测试（端云信封）」✓（内含 test_wifi_model / test_keypad 两个新测试）
+  - 步骤「编译固件」✓（PlatformIO，-Wall -Wextra -Werror）
+- `fw-bin` 分支（commit 6776a02，指向固件提交 d56f1d4）三个 bin 的实算 sha256 与 `manifest.txt` 逐一吻合：
+  - bootloader.bin  `2a71d69b471e20c2bac7fb469f3c6a807b3ebee780e348e5889db0da849ca363`  MATCH
+  - firmware.bin    `63b8cf57b18a7a5ea0fbaed7dc935a371b79a6d30b5668cef2cf92c3031581ae`  MATCH
+  - partitions.bin  `71939c82bec98f427052a1811aaa2a9bebfcf8cc107128341674de72f1f06ec6`  MATCH
+
+### 提交
+- workspace 仓库：`3072ab2`（功能）→ `4bb499b`（CI 修的格式串）→ 文档 `d6aea0c`
+- 发布仓库 /tmp/abbot-firmware：`46c5367` → `d56f1d4`（main 已推）
+
 ## 步骤
 1. 读 net_api.cpp / net_api.h / ui_pages.cpp 的 Wi-Fi 与键盘段 / ui_router.cpp
 2. 抽纯逻辑：`wifi_scan_model`（解析+排序+信号分级+加密判定）、`keypad_editor`（光标/输入/退格/空格/大小写/掩码）
