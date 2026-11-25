@@ -85,6 +85,12 @@ static bool s_city_synced = false;
 /* 读配对标志（定义在“页面动作”段） */
 static void ui_paired_refresh(void);
 
+/* 前置声明（定义在下面的“天气与城市”段）——
+ * 必须放在使用点之前：ui_weather_handle_reply() 内部会调它们。 */
+static void ui_weather_save_cache(const nr_weather_t *w);
+static void ui_weather_refresh_display(void);
+static void ui_heartbeat_post(void);
+
 /* ===================== 天气与城市（doc/05 §5.2） ===================== */
 
 /**
@@ -238,10 +244,6 @@ static void ui_heartbeat_post(void)
         s_hb_due_ms = (uint32_t)millis() + UI_HB_RETRY_MS;
     }
 }
-
-/* 前置声明（定义在“天气与城市”段） */
-static void ui_weather_refresh_display(void);
-static void ui_heartbeat_post(void);
 
 /* ===================== 浮层 ===================== */
 
