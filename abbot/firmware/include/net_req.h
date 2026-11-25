@@ -40,6 +40,19 @@ typedef struct {
     int device_remaining_quota; /* 仅供对账，不参与放行判定 */
 } nr_profile_t;
 
+/**
+ * 拍题应答（doc/05 §5 的 `/api/v1/study/solve` 响应字段）。
+ * 协议字段名只存在于 net_req.c 这一层，UI 只认这个结构 —— UI 不解析协议。
+ */
+typedef struct {
+    char status[24];                /* SOLVED / NEED_DRAFT 等 */
+    char display_markdown[1024];     /* 逐步解析正文 */
+    char feynman_question[256];      /* 费曼反问 */
+    char speech_text[256];           /* 语音转写（边说边拍时） */
+    bool has_audio;                  /* 是否附带语音 */
+    int effective_remaining_quota;   /* 网关判定的剩余配额 */
+} nr_solve_result_t;
+
 /** `/config/profile.json` 解析结果（设备本地档案，doc/04 §3.1）。 */
 typedef struct {
     char edu_stage[16];
@@ -107,6 +120,19 @@ int nr_parse_profile(const char *json, size_t len, nr_profile_doc_t *out);
 /** 取字符串字段（自动解转义）。返回写入长度（不含结尾 NUL），负数为错误。 */
 int nr_json_get_string(const char *json, size_t len, const char *key,
                        char *out, size_t out_cap);
+/**
+ * 取字符串字段，**超长时截断**而不是失败。
+ * 解题步骤正文可能很长，截断比整条丢弃可用；返回值是写入的字节数（不含结尾 NUL）。
+ */
+int nr_json_get_string_trunc(const char *json, size_t len, const char *key,
+                              char *out, size_t out_cap);
+
+/**
+ * 解析拍题应答明文 -> `nr_solve_result_t`。
+ * 返回 0 成功（字段缺失时对应位置为空串 / 默认值），-1 入参非法。
+ */
+int nr_parse_solve_result(const char *json, size_t len, nr_solve_result_t *out);
+
 int nr_json_get_int(const char *json, size_t len, const char *key, int fallback);
 int nr_json_get_bool(const char *json, size_t len, const char *key, bool fallback);
 

@@ -47,6 +47,28 @@ QueueHandle_t hal_audio_pcm_queue(void) { return s_q_audio; }
 QueueHandle_t hal_net_request_queue(void) { return s_q_net; }
 QueueHandle_t hal_storage_req_queue(void) { return s_q_storage; }
 
+/**
+ * 提交一次抓拍请求（UI 核 → 相机任务）。
+ * 队列满不阻塞 UI：直接回 `HAL_ERR_NO_SPACE`，由 UI 层出温和提示。
+ */
+hal_status_t hal_photo_request_submit(const char *session_id, uint8_t want_uxga, uint8_t with_voice)
+{
+    if (s_q_photo == NULL) {
+        return HAL_ERR_INVALID;
+    }
+    photo_request_t req;
+    memset(&req, 0, sizeof(req));
+    req.want_uxga = want_uxga;
+    req.with_voice = with_voice;
+    if (session_id != NULL) {
+        strncpy(req.session_id, session_id, sizeof(req.session_id) - 1);
+    }
+    if (xQueueSend(s_q_photo, &req, 0) != pdTRUE) {
+        return HAL_ERR_NO_SPACE;
+    }
+    return HAL_OK;
+}
+
 /** 安装共享 I2C 总线：GPIO 4/5 @ 100kHz（doc/02 §2.1 强制） */
 static void hal_i2c_install(void)
 {

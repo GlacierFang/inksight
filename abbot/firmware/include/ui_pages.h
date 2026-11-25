@@ -26,6 +26,26 @@ lv_obj_t *ui_page_content(ui_page_t page);
 lv_obj_t *ui_page_root_book(ui_book_page_t page);
 lv_obj_t *ui_page_content_book(ui_book_page_t page);
 
+/* ---------- 列表光标（doc/03 §三 页面级仲裁表） ---------- */
+/**
+ * 移动页面内的列表光标。返回移动后的光标索引；页面无可选行时返回 -1。
+ * 光标渲染成行首标记（`> ` 选中 / `  ` 未选），与 doc/03 线框一致。
+ */
+int ui_pages_cursor_move(ui_page_t page, int delta);
+/** 当前光标索引（无可选行时 -1）。 */
+int ui_pages_cursor_index(ui_page_t page);
+/** 光标复位到首行（进入页面时调用）。 */
+void ui_pages_cursor_reset(ui_page_t page);
+
+/* ---------- 解析结果页（接云端真实内容） ---------- */
+/**
+ * 写入解析结果页：解题步骤正文 + 费曼反问。
+ * 正文按行分屏显示，滚动由 `ui_pages_solve_scroll` 控制。
+ */
+void ui_pages_set_solve_result(const char *markdown, const char *question);
+/** 正文滚动（delta=+1 下一屏，-1 上一屏）。返回是否真的滚动了。 */
+bool ui_pages_solve_scroll(int delta);
+
 lv_obj_t *ui_overlay_root(ui_overlay_t overlay);
 void ui_overlay_set_text(ui_overlay_t overlay, const char *text);
 void ui_overlay_set_visible(ui_overlay_t overlay, bool visible);

@@ -54,6 +54,14 @@ hal_status_t hal_camera_start_preview(void);                        // FRAMESIZE
 hal_status_t hal_camera_capture_jpeg(uint8_t **out_jpg, size_t *out_len);  // 切 UXGA 抓拍，含 1500ms AF 熔断
 hal_status_t hal_camera_stop_preview(void);
 
+/* ---------- hal_photo：拍题抓拍请求（UI 核 → 相机任务） ---------- */
+/**
+ * 提交一次抓拍请求（投递到 `q_photo_request`，doc/02 §4.2 队列表已定的方向）。
+ * `session_id` 是本题会话号（doc/05 §5.1：同题追问沿用同一个），可传 NULL。
+ * 队列满时返回 `HAL_ERR_NO_SPACE`，由 UI 层给出温和中文提示。
+ */
+hal_status_t hal_photo_request_submit(const char *session_id, uint8_t want_uxga, uint8_t with_voice);
+
 /* ---------- hal_audio：ICS43434 + MAX98357 半双工 I2S ---------- */
 hal_status_t hal_audio_init(void);
 hal_status_t hal_audio_start_record(void);                         // 16kHz/16bit/Mono，丢弃首 30ms

@@ -293,6 +293,53 @@ static void test_http_response(void)
     }
 }
 
+static void test_solve_result(void)
+{
+    printf("[8] 拍题应答解析\n");
+    /* 云端真实应答形状（字段名见 doc/05 §5） */
+    const char *json =
+        "{\"status\":\"SOLVED\","
+        "\"speech_text\":\"这道题用勾股定理\","
+        "\"display_markdown\":\"1. 先圈出已知条件\\n2. 找出联系\\n3. 往下推\","
+        "\"feynman_question\":\"为什么要这样想？\","
+        "\"has_audio\":true,\"tts_cache_key\":\"abc\","
+        "\"effective_remaining_quota\":9}";
+    nr_solve_result_t r;
+    int rc = nr_parse_solve_result(json, strlen(json), &r);
+    CHECK(rc == 0, "拍题应答解析成功");
+    CHECK(strcmp(r.status, "SOLVED") == 0, "status 正确");
+    CHECK(strcmp(r.display_markdown, "1. 先圈出已知条件\n2. 找出联系\n3. 往下推") == 0,
+          "display_markdown 正确（转义已解开）");
+    CHECK(strcmp(r.feynman_question, "为什么要这样想？") == 0, "feynman_question 正确");
+    CHECK(strcmp(r.speech_text, "这道题用勾股定理") == 0, "speech_text 正确");
+    CHECK(r.has_audio == true, "has_audio 为真");
+    CHECK(r.effective_remaining_quota == 9, "effective_remaining_quota 正确");
+
+    /* 字段缺失时不得崩，应给空串 / 默认值 */
+    const char *poor = "{\"status\":\"NEED_DRAFT\"}";
+    rc = nr_parse_solve_result(poor, strlen(poor), &r);
+    CHECK(rc == 0, "字段缺失时仍解析成功");
+    CHECK(r.display_markdown[0] == '\0', "缺失字段为空串");
+    CHECK(r.has_audio == false, "缺失 has_audio 为假");
+    CHECK(r.effective_remaining_quota == -1, "缺失配额为 -1");
+
+    /* 超长正文必须截断而不是失败 */
+    {
+        char big[4096];
+        size_t n = 0;
+        n += (size_t)snprintf(big + n, sizeof(big) - n, "{\"display_markdown\":\"");
+        for (size_t i = 0; i < 3000; i++) {
+            big[n++] = 'A';
+        }
+        big[n++] = '"';
+        big[n++] = '}';
+        big[n] = '\0';
+        rc = nr_parse_solve_result(big, n, &r);
+        CHECK(rc == 0, "超长正文解析成功");
+        CHECK(strlen(r.display_markdown) == sizeof(r.display_markdown) - 1, "超长正文被截断");
+    }
+}
+
 int main(void)
 {
     printf("=== abbot 设备端请求层测试（net_req）===\n");
@@ -303,6 +350,7 @@ int main(void)
     test_pair_plain();
     test_json_get();
     test_http_response();
+    test_solve_result();
     printf("\n=== %d PASS / %d FAIL ===\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

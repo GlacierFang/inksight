@@ -522,6 +522,101 @@ int nr_json_get_string(const char *json, size_t len, const char *key,
     return (int)pos;
 }
 
+int nr_json_get_string_trunc(const char *json, size_t len, const char *key,
+                              char *out, size_t out_cap)
+{
+    const char *p = nr_find_value(json, len, key);
+    if (p == NULL || *p != '"') {
+        return -1;
+    }
+    p++;
+    size_t pos = 0;
+    while (*p != '\0' && *p != '"') {
+        char c;
+        if (*p == '\\') {
+            p++;
+            char e = *p;
+            switch (e) {
+            case '"':  c = '"';  break;
+            case '\\': c = '\\'; break;
+            case '/':  c = '/';  break;
+            case 'n':  c = '\n'; break;
+            case 'r':  c = '\r'; break;
+            case 't':  c = '\t'; break;
+            case 'b':  c = '\b'; break;
+            case 'f':  c = '\f'; break;
+            case 'u': {
+                unsigned cp = 0;
+                if (hex4(p + 1, &cp) != 0) {
+                    return -1;
+                }
+                p += 4;
+                if (cp >= 0xD800 && cp <= 0xDBFF && p[1] == '\\' && p[2] == 'u') {
+                    unsigned lo = 0;
+                    if (hex4(p + 3, &lo) == 0 && lo >= 0xDC00 && lo <= 0xDFFF) {
+                        cp = 0x10000u + ((cp - 0xD800u) << 10) + (lo - 0xDC00u);
+                        p += 6;
+                    }
+                }
+                if (out != NULL && pos + 4 <= out_cap) {
+                    utf8_put(out, &pos, cp);
+                } else {
+                    pos += (cp < 0x80) ? 1 : (cp < 0x800) ? 2 : (cp < 0x10000) ? 3 : 4;
+                }
+                p++;
+                continue;
+            }
+            default:
+                return -1;
+            }
+            p++;
+        } else {
+            c = *p;
+            p++;
+        }
+        if (out != NULL && pos + 1 < out_cap) {
+            out[pos] = c;
+        }
+        pos++;
+    }
+    if (*p != '"') {
+        return -1;
+    }
+    if (out != NULL) {
+        if (out_cap == 0) {
+            return -2;
+        }
+        out[pos < out_cap ? pos : out_cap - 1] = '\0';
+    }
+    return (int)pos;
+}
+
+int nr_parse_solve_result(const char *json, size_t len, nr_solve_result_t *out)
+{
+    if (json == NULL || out == NULL) {
+        return -1;
+    }
+    memset(out, 0, sizeof *out);
+    if (nr_json_get_string_trunc(json, len, "status", out->status, sizeof out->status) < 0) {
+        out->status[0] = '\0';
+    }
+    if (nr_json_get_string_trunc(json, len, "display_markdown", out->display_markdown,
+                                 sizeof out->display_markdown) < 0) {
+        out->display_markdown[0] = '\0';
+    }
+    if (nr_json_get_string_trunc(json, len, "feynman_question", out->feynman_question,
+                                 sizeof out->feynman_question) < 0) {
+        out->feynman_question[0] = '\0';
+    }
+    if (nr_json_get_string_trunc(json, len, "speech_text", out->speech_text,
+                                 sizeof out->speech_text) < 0) {
+        out->speech_text[0] = '\0';
+    }
+    out->has_audio = (nr_json_get_bool(json, len, "has_audio", false) != 0);
+    out->effective_remaining_quota = nr_json_get_int(json, len, "effective_remaining_quota", -1);
+    return 0;
+}
+
 int nr_json_get_int(const char *json, size_t len, const char *key, int fallback)
 {
     const char *p = nr_find_value(json, len, key);

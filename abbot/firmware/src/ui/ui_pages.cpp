@@ -12,6 +12,9 @@
  */
 #include "ui_pages.h"
 
+#include <stdio.h>
+#include <string.h>
+
 #include "lvgl.h"
 #include "ui_font.h"
 
@@ -49,6 +52,30 @@ typedef struct {
 
 static ui_page_widgets_t s_pages[PAGE_COUNT];
 static ui_page_widgets_t s_book_pages[PAGE_BOOK_COUNT - PAGE_BOOKSHELF];
+
+/* ===================== 列表光标（doc/03 §三） ===================== */
+
+#define UI_MAX_ITEMS 12          /* 每页最多可选行数 */
+#define UI_ITEM_TEXT_MAX 72      /* 行文案（不含行首标记）上限 */
+#define UI_SOLVE_TEXT_MAX 1024   /* 解析正文缓存上限 */
+#define UI_SOLVE_LINES 13        /* 正文一屏显示的行数 */
+
+typedef struct {
+    lv_obj_t *row;
+    lv_obj_t *label;
+    char text[UI_ITEM_TEXT_MAX]; /* 去掉行首 "> " / "  " 标记后的原文 */
+} ui_item_t;
+
+static ui_item_t s_items[PAGE_COUNT][UI_MAX_ITEMS];
+static uint8_t s_item_count[PAGE_COUNT];
+static uint8_t s_cursor[PAGE_COUNT];
+static int s_build_page = -1;     /* 正在构建的页面（-1 = 不登记条目） */
+
+/* 解析结果页的动态内容 */
+static lv_obj_t *s_solve_body = NULL;
+static lv_obj_t *s_solve_question = NULL;
+static char s_solve_text[UI_SOLVE_TEXT_MAX];
+static int s_solve_scroll = 0;
 
 /* 浮层句柄 */
 typedef struct {
@@ -196,6 +223,27 @@ static lv_obj_t *ui_make_list_item(lv_obj_t *parent, const char *text, const cha
     lv_obj_add_style(label, &s_style_body, 0);
     lv_obj_align(label, LV_ALIGN_LEFT_MID, 0, 0);
 
+    /* 登记为可选行（光标用）：行首的 "> " / "  " 标记在渲染时按光标位置重写 */
+    if (s_build_page >= 0 && s_build_page < (int)PAGE_COUNT) {
+        uint8_t n = s_item_count[s_build_page];
+        if (n < UI_MAX_ITEMS) {
+            const char *t = text;
+            while (*t == ' ') {
+                t++;
+            }
+            if (*t == '>') {
+                t++;
+                while (*t == ' ') {
+                    t++;
+                }
+            }
+            snprintf(s_items[s_build_page][n].text, UI_ITEM_TEXT_MAX, "%s", t);
+            s_items[s_build_page][n].row = row;
+            s_items[s_build_page][n].label = label;
+            s_item_count[s_build_page] = n + 1;
+        }
+    }
+
     if (sub != NULL) {
         lv_obj_t *right = lv_label_create(row);
         lv_label_set_text(right, sub);
@@ -273,9 +321,11 @@ static void ui_build_solve_result(lv_obj_t *content)
     lv_obj_t *body = ui_make_label(content,
         "1. 先圈出已知条件\n2. 找出它们之间的联系\n3. 一步一步往下推\n4. 回头检查每一步", false);
     lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 36);
+    s_solve_body = body;
 
     lv_obj_t *q = ui_make_label(content, "还有哪里没想明白？", false);
     lv_obj_align(q, LV_ALIGN_BOTTOM_LEFT, 0, -34);
+    s_solve_question = q;
 
     lv_obj_t *menu = ui_make_list_item(content, "> [ 口述你的思路 ]", NULL);
     lv_obj_align(menu, LV_ALIGN_BOTTOM_LEFT, 0, 0);
@@ -618,9 +668,13 @@ void ui_pages_init(lv_obj_t *parent)
         s_pages[i].content = ui_make_content(root);
         s_pages[i].hint = ui_make_hint(root,
             (s_page_hints[i] != NULL) ? s_page_hints[i] : "");
+        s_build_page = i;   /* 构建期间登记可选行 */
+        s_item_count[i] = 0;
+        s_cursor[i] = 0;
         if (s_page_builders[i] != NULL) {
             s_page_builders[i](s_pages[i].content);
         }
+        s_build_page = -1;
         lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
     }
 
@@ -635,6 +689,136 @@ void ui_pages_init(lv_obj_t *parent)
         }
         lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
     }
+}
+
+/* ===================== 列表光标 ===================== */
+
+static void ui_cursor_render(ui_page_t page)
+{
+    if (page < 0 || page >= (int)PAGE_COUNT) {
+        return;
+    }
+    for (uint8_t i = 0; i < s_item_count[page]; i++) {
+        if (s_items[page][i].label == NULL) {
+            continue;
+        }
+        char buf[UI_ITEM_TEXT_MAX + 4];
+        snprintf(buf, sizeof(buf), "%s%s", (i == s_cursor[page]) ? "> " : "  ",
+                 s_items[page][i].text);
+        lv_label_set_text(s_items[page][i].label, buf);
+    }
+}
+
+int ui_pages_cursor_move(ui_page_t page, int delta)
+{
+    if (page < 0 || page >= (int)PAGE_COUNT || s_item_count[page] == 0) {
+        return -1;
+    }
+    int c = (int)s_cursor[page] + delta;
+    if (c < 0) {
+        c = 0;
+    }
+    if (c > (int)s_item_count[page] - 1) {
+        c = (int)s_item_count[page] - 1;
+    }
+    s_cursor[page] = (uint8_t)c;
+    ui_cursor_render(page);
+    return c;
+}
+
+int ui_pages_cursor_index(ui_page_t page)
+{
+    if (page < 0 || page >= (int)PAGE_COUNT || s_item_count[page] == 0) {
+        return -1;
+    }
+    return (int)s_cursor[page];
+}
+
+void ui_pages_cursor_reset(ui_page_t page)
+{
+    if (page < 0 || page >= (int)PAGE_COUNT) {
+        return;
+    }
+    s_cursor[page] = 0;
+    ui_cursor_render(page);
+}
+
+/* ===================== 解析结果页 ===================== */
+
+/** 按行切出正文的一屏（从 s_solve_scroll 行起，最多 UI_SOLVE_LINES 行）。 */
+static void ui_solve_render(void)
+{
+    if (s_solve_body == NULL) {
+        return;
+    }
+    static char buf[UI_SOLVE_TEXT_MAX];   /* static：别占 FreeRTOS 任务栈 */
+    size_t pos = 0;
+    const char *p = s_solve_text;
+    int line = 0;
+    while (*p != '\0' && line < s_solve_scroll) {
+        while (*p != '\0' && *p != '\n') {
+            p++;
+        }
+        if (*p == '\n') {
+            p++;
+        }
+        line++;
+    }
+    int shown = 0;
+    while (*p != '\0' && shown < UI_SOLVE_LINES) {
+        const char *e = p;
+        while (*e != '\0' && *e != '\n') {
+            e++;
+        }
+        size_t n = (size_t)(e - p);
+        if (pos + n + 2 >= sizeof(buf)) {
+            break;
+        }
+        memcpy(buf + pos, p, n);
+        pos += n;
+        buf[pos++] = '\n';
+        shown++;
+        p = (*e == '\n') ? e + 1 : e;
+    }
+    buf[pos] = '\0';
+    lv_label_set_text(s_solve_body, buf);
+}
+
+void ui_pages_set_solve_result(const char *markdown, const char *question)
+{
+    snprintf(s_solve_text, sizeof(s_solve_text), "%s", (markdown != NULL) ? markdown : "");
+    s_solve_scroll = 0;
+    ui_solve_render();
+    if (s_solve_question != NULL) {
+        lv_label_set_text(s_solve_question, (question != NULL) ? question : "还有哪里没想明白？");
+    }
+}
+
+bool ui_pages_solve_scroll(int delta)
+{
+    int total = 1;
+    for (const char *p = s_solve_text; *p != '\0'; p++) {
+        if (*p == '\n') {
+            total++;
+        }
+    }
+    int max_scroll = total - UI_SOLVE_LINES;
+    if (max_scroll < 0) {
+        max_scroll = 0;
+    }
+    int next = s_solve_scroll + delta;
+    if (next < 0) {
+        next = 0;
+    }
+    if (next > max_scroll) {
+        next = max_scroll;
+    }
+    if (next == s_solve_scroll) {
+        return false;
+    }
+    s_solve_scroll = next;
+    ui_solve_render();
+    return true;
 }
 
 lv_obj_t *ui_page_root(ui_page_t page)

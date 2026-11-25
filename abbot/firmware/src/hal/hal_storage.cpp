@@ -43,7 +43,7 @@ typedef struct {
 } kDefaultFile;
 
 static const kDefaultFile kDefaultFiles[] = {
-    {"/config/profile.json", "{\n  \"grade\": \"m7\",\n  \"daily_quota\": 10,\n  \"volume\": 3,\n  \"brightness\": 3\n}\n"},
+    {"/config/profile.json", "{\n  \"schema_version\": 1,\n  \"edu_stage\": \"JUNIOR\",\n  \"enrollment_year\": 2026,\n  \"daily_quota\": 10,\n  \"quota_used_count\": 0,\n  \"volume_level\": 3,\n  \"brightness_level\": 3\n}\n"},
     {"/config/schedule.json", "{\n  \"lessons\": []\n}\n"},
     {"/subjects/manifest.json", "{\n  \"packs\": []\n}\n"},
     {"/records/progress.json", "{\n  \"cards\": {}\n}\n"},

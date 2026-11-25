@@ -26,6 +26,7 @@
 #include "board_config.h"
 #include "hal_interfaces.h"
 #include "hal_shared.h"
+#include "net_req.h"
 #include "lvgl.h"
 #include "ui_display_port.h"
 #include "ui_router.h"
@@ -169,11 +170,53 @@ static void task_audio(void *arg)
     }
 }
 
+/**
+ * 读一次 TF 卡档案并投给网络任务。
+ *
+ * TF 卡由本任务独占串行化访问（doc/02 §4.2），**net 任务不得直接扫盘**；
+ * 因此档案的读取与解析都在这里做，net 层只收 `edu_stage` / `enrollment_year` /
+ * 剩余配额三个值，之后组装明文时自动注入（doc/05 §5.1）。
+ */
+static void storage_publish_profile(void)
+{
+    char buf[512];
+    uint32_t len = 0;
+    if (hal_storage_read_text("/config/profile.json", buf, (uint32_t)sizeof(buf), &len) != HAL_OK ||
+        len == 0) {
+        return;
+    }
+    nr_profile_doc_t doc;
+    if (nr_parse_profile(buf, (size_t)len, &doc) != 0) {
+        Serial.printf("[%s] profile.json 解析失败\n", TAG);
+        return;
+    }
+    int remaining = doc.daily_quota - doc.quota_used_count;
+    if (remaining < 0) {
+        remaining = 0;
+    }
+    net_request_t req;
+    memset(&req, 0, sizeof(req));
+    req.op = NET_OP_PROFILE;
+    snprintf(req.edu_stage, sizeof(req.edu_stage), "%s", doc.edu_stage);
+    req.enrollment_year = doc.enrollment_year;
+    req.remaining_quota = remaining;
+    if (xQueueSend(hal_net_request_queue(), &req, 0) != pdTRUE) {
+        Serial.printf("[%s] profile 投递失败（网络队列满）\n", TAG);
+        return;
+    }
+    Serial.printf("[%s] profile 已投递：%s %d 剩余 %d\n", TAG, doc.edu_stage,
+                  doc.enrollment_year, remaining);
+}
+
 /** 存储任务：TF 卡访问在此单线程串行化 */
 static void task_storage(void *arg)
 {
     (void)arg;
     QueueHandle_t q = hal_storage_req_queue();
+
+    /* 开机先把档案交给网络任务 —— 之后每次联网请求都会带上学段 */
+    storage_publish_profile();
+
     for (;;) {
         storage_req_t req;
         if (q == NULL || xQueueReceive(q, &req, portMAX_DELAY) != pdTRUE) {

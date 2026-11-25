@@ -11,10 +11,12 @@
  */
 #include "ui_router.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "lvgl.h"
+#include "net_req.h"
 #include "ui_pages.h"
 
 static ui_page_t s_current = PAGE_OOBE;
@@ -23,6 +25,9 @@ static bool s_in_book = false;
 
 /* 浮层可见状态, 索引即优先级(高->低) */
 static bool s_overlay_visible[OVERLAY_COUNT] = {false, false, false};
+
+/* 本题会话号计数器（doc/05 §5.1：每题唯一，同题追问沿用同一个） */
+static uint32_t s_session_seq = 0;
 
 /* 最近一次云端应答（解密后的业务明文）—— 由网络任务经队列投递过来 */
 static char *s_last_reply = NULL;
@@ -113,6 +118,7 @@ static void ui_show_page(ui_page_t page)
 void ui_router_go(ui_page_t page)
 {
     ui_show_page(page);
+    ui_pages_cursor_reset(page);
 }
 
 void ui_router_go_book(ui_book_page_t page)
@@ -142,6 +148,79 @@ ui_page_t ui_router_current(void)
 bool ui_router_in_book_module(void)
 {
     return s_in_book;
+}
+
+/* ===================== 页面动作 ===================== */
+
+/**
+ * 页面级「确定」动作（doc/03 §三 仲裁表的短按列）。
+ *
+ * 只有**已有真实实现**的入口才跳转；尚未打通的入口给一句温和提示，
+ * 不用假动作糊弄过去。
+ */
+static void ui_page_action(ui_page_t page)
+{
+    int idx = ui_pages_cursor_index(page);
+    switch (page) {
+    case PAGE_CAMERA: {
+        /* 短按 = 拍照：投递抓拍请求（UI 核 → 相机任务，doc/02 §4.2） */
+        char sid[32];
+        s_session_seq++;
+        snprintf(sid, sizeof(sid), "sess_%u", (unsigned)s_session_seq);
+        if (hal_photo_request_submit(sid, 1, 0) == HAL_OK) {
+            ui_toast("已拍照，正在解题");
+        } else {
+            ui_toast("相机忙，请稍后再试");
+        }
+        break;
+    }
+    case PAGE_HOME:
+        switch (idx) {
+        case 0: ui_router_go(PAGE_CAMERA); break;
+        case 2: ui_router_go(PAGE_SUBJECT_LIST); break;
+        case 3: ui_router_go_book(PAGE_BOOKSHELF); break;
+        case 4: ui_router_go(PAGE_POMODORO); break;
+        case 5: ui_router_go(PAGE_OUTBOX); break;
+        case 6: ui_router_go(PAGE_SETTINGS); break;
+        case 1: ui_toast("语音提问还在准备中"); break;
+        default: break;
+        }
+        break;
+    case PAGE_SETTINGS:
+        switch (idx) {
+        case 0: ui_router_go(PAGE_WIFI_SCAN); break;
+        case 3: ui_router_go(PAGE_OTA); break;
+        default: ui_toast("这个设置还在准备中"); break;
+        }
+        break;
+    case PAGE_SUBJECT_LIST:
+        if (idx >= 0) {
+            ui_router_go(PAGE_CARD_STUDY);
+        }
+        break;
+    case PAGE_SOLVE_RESULT:
+        /* 菜单项「口述你的思路」—— 语音链路尚未打通 */
+        ui_toast("口述思路还在准备中");
+        break;
+    case PAGE_WIFI_SCAN:
+        ui_toast("连接热点还在准备中");
+        break;
+    case PAGE_OTA:
+        ui_toast("检查更新还在准备中");
+        break;
+    default:
+        break;
+    }
+}
+
+/** 方向键：列表页移动光标；解析结果页滚动正文（doc/03 §三）。 */
+static void ui_page_nav(ui_page_t page, int delta)
+{
+    if (page == PAGE_SOLVE_RESULT) {
+        ui_pages_solve_scroll(delta);
+        return;
+    }
+    ui_pages_cursor_move(page, delta);
 }
 
 /* ===================== 手势 ===================== */
@@ -199,10 +278,24 @@ void ui_router_handle_gesture(ui_gesture_t gesture)
         return;
     }
 
-    /* 页面级: 短按 = 确定, 长按 = 退出 */
+    /* 页面级: 短按 = 确定, 长按 = 退出, 方向键 = 页内导航 */
     switch (gesture) {
     case GESTURE_CLICK:
-        /* 各页的"确定"动作由各页自己的选择器处理; 这里只做页面级路由 */
+        if (s_in_book) {
+            /* 阅读模块的确认动作由电子书子页处理 */
+            break;
+        }
+        ui_page_action(s_current);
+        break;
+    case GESTURE_UP:
+        if (!s_in_book) {
+            ui_page_nav(s_current, -1);
+        }
+        break;
+    case GESTURE_DOWN:
+        if (!s_in_book) {
+            ui_page_nav(s_current, 1);
+        }
         break;
     case GESTURE_LONG:
         /* 退出: 退回上一级 */
@@ -309,12 +402,23 @@ void ui_router_handle_net_reply(int32_t biz_code, char *payload, uint32_t len)
     }
 
     /* 文案一律由 UI 层出（doc/03 §四）：HAL / net 层不拼面向用户的中文 */
-    if (s_last_biz == 0) {
-        ui_toast("已收到云端应答");
-    } else if (s_last_biz == 4004) {
+    if (s_last_biz == 4004) {
         ui_toast("请先在设置里完成学段选择");
-    } else {
+        return;
+    }
+    if (s_last_biz != 0) {
         ui_toast("网络请求未成功");
+        return;
+    }
+
+    /* 成功：把解题步骤与费曼反问渲染到解析结果页 */
+    nr_solve_result_t res;
+    if (nr_parse_solve_result(s_last_reply, s_last_reply_len, &res) == 0 &&
+        res.status[0] != '\0') {
+        ui_pages_set_solve_result(res.display_markdown, res.feynman_question);
+        ui_router_go(PAGE_SOLVE_RESULT);
+    } else {
+        ui_toast("已收到云端应答");
     }
 }
 
