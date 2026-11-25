@@ -1078,6 +1078,48 @@ int ui_data_today(ui_data_date_t *out)
     return UI_DATA_OK;
 }
 
+/**
+ * 取当前本地时刻（当天第几分钟）。
+ *
+ * 宵禁判定要的就是这个值 —— 未校时（系统时间不对）时返回错误，
+ * 上层据此**不锁**（宁可不锁，也不要因为设备没校时而误锁孩子的阅读）。
+ */
+int ui_data_local_minutes(int *out_min)
+{
+    if (out_min == NULL) {
+        return UI_DATA_ERR_INVALID;
+    }
+    time_t now = time(NULL);
+    if (now < 1700000000L) {
+        return UI_DATA_ERR_NOT_FOUND; /* 未校时 */
+    }
+    struct tm tm_now;
+    if (localtime_r(&now, &tm_now) == NULL) {
+        return UI_DATA_ERR_IO;
+    }
+    int minutes = tm_now.tm_hour * 60 + tm_now.tm_min;
+    if (minutes < 0 || minutes > 1439) {
+        return UI_DATA_ERR_IO;
+    }
+    *out_min = minutes;
+    return UI_DATA_OK;
+}
+
+/** 取今天的日期串 "YYYY-MM-DD"（doc/07 §2.4 的 daily_date）。 */
+int ui_data_today_str(char *out, size_t cap)
+{
+    if (out == NULL || cap < UI_DATA_MAX_DATE_STR) {
+        return UI_DATA_ERR_INVALID;
+    }
+    ui_data_date_t d;
+    int rc = ui_data_today(&d);
+    if (rc != UI_DATA_OK) {
+        return rc;
+    }
+    snprintf(out, cap, "%04d-%02d-%02d", d.year, d.month, d.day);
+    return UI_DATA_OK;
+}
+
 /* ============================================================
  * 本地设置（番茄钟时长）
  * ============================================================ */

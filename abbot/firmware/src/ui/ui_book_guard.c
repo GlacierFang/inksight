@@ -320,11 +320,35 @@ void ui_bookmarks_parse(const char *json, size_t len, ui_bookmarks_t *out)
     if (out == NULL) {
         return;
     }
+    out->schema_version = 0;
+    out->daily_date[0] = '\0';
+    out->daily_used_sec = 0;
     out->count = 0;
     if (json == NULL) {
         return;
     }
     const char *e = json + len;
+
+    /* --- 顶层字段：schema_version / daily_date / daily_used_sec（doc/07 §2.3） --- */
+    const char *sv = js_obj_find(json, e, "schema_version");
+    if (sv != NULL) {
+        uint32_t v = 0;
+        if (js_parse_u32(sv, e, &v)) {
+            out->schema_version = (int)v;
+        }
+    }
+    const char *dd = js_obj_find(json, e, "daily_date");
+    if (dd != NULL && dd < e && *dd == '"') {
+        js_parse_string(dd, e, out->daily_date, sizeof(out->daily_date));
+    }
+    const char *du = js_obj_find(json, e, "daily_used_sec");
+    if (du != NULL) {
+        uint32_t v = 0;
+        if (js_parse_u32(du, e, &v)) {
+            out->daily_used_sec = v;
+        }
+    }
+
     const char *books = js_obj_find(json, e, "books");
     if (books == NULL || books >= e || *books != '{') {
         return;
@@ -347,7 +371,12 @@ void ui_bookmarks_parse(const char *json, size_t len, ui_bookmarks_t *out)
         if (after < e && *after == '{') {
             uint32_t offset = 0;
             uint32_t total = 0;
-            const char *v = js_obj_find(after, e, "offset");
+            uint32_t ts = 0;
+            /* doc/07 §2.3 的字段名是 byte_offset；offset 作旧别名兼容。 */
+            const char *v = js_obj_find(after, e, "byte_offset");
+            if (v == NULL) {
+                v = js_obj_find(after, e, "offset");
+            }
             if (v != NULL) {
                 js_parse_u32(v, e, &offset);
             }
@@ -355,15 +384,25 @@ void ui_bookmarks_parse(const char *json, size_t len, ui_bookmarks_t *out)
             if (v != NULL) {
                 js_parse_u32(v, e, &total);
             }
+            v = js_obj_find(after, e, "last_read_ts");
+            if (v != NULL) {
+                js_parse_u32(v, e, &ts);
+            }
             if (out->count < UI_BOOK_MARK_MAX) {
                 ui_book_mark_t *m = &out->items[out->count];
                 snprintf(m->name, sizeof(m->name), "%s", name);
                 m->offset = offset;
                 m->total_bytes = total;
+                m->last_read_ts = ts;
                 out->count++;
             }
         }
-        p = js_skip_ws(after, e);
+        /* 跳过这一本书的对象（否则只能解析到第一本）。 */
+        const char *next = js_skip_value(after, e);
+        if (next == NULL) {
+            return;
+        }
+        p = js_skip_ws(next, e);
         if (p < e && *p == ',') {
             p = js_skip_ws(p + 1, e);
             continue;
@@ -372,13 +411,82 @@ void ui_bookmarks_parse(const char *json, size_t len, ui_bookmarks_t *out)
     }
 }
 
+/** 检查 JSON 的括号是否配平（字符串字面量里的括号不算）。 */
+static bool js_balanced(const char *json, size_t len)
+{
+    const char *e = json + len;
+    const char *p = json;
+    int depth = 0;
+    while (p < e) {
+        char c = *p;
+        if (c == '"') {
+            p = js_parse_string(p, e, NULL, 0);
+            if (p == NULL) {
+                return false;   /* 字符串没闭合 —— 残缺文件 */
+            }
+            continue;
+        }
+        if (c == '{' || c == '[') {
+            depth++;
+        } else if (c == '}' || c == ']') {
+            depth--;
+            if (depth < 0) {
+                return false;
+            }
+        }
+        p++;
+    }
+    return depth == 0;
+}
+
+bool ui_bookmarks_valid(const char *json, size_t len)
+{
+    if (json == NULL || len == 0) {
+        return false;
+    }
+    if (!js_balanced(json, len)) {
+        return false;   /* 残缺 / 被截断的文件 */
+    }
+    const char *e = json + len;
+    const char *books = js_obj_find(json, e, "books");
+    return (books != NULL && books < e && *books == '{');
+}
+
+int ui_book_pick_source(const char *primary, size_t primary_len, const char *backup,
+                        size_t backup_len, const char **out_json, size_t *out_len)
+{
+    if (out_json != NULL) {
+        *out_json = primary;
+    }
+    if (out_len != NULL) {
+        *out_len = primary_len;
+    }
+    if (ui_bookmarks_valid(primary, primary_len)) {
+        return 0;
+    }
+    if (ui_bookmarks_valid(backup, backup_len)) {
+        if (out_json != NULL) {
+            *out_json = backup;
+        }
+        if (out_len != NULL) {
+            *out_len = backup_len;
+        }
+        return 1;
+    }
+    return -1;
+}
+
 int ui_bookmarks_format(const ui_bookmarks_t *marks, char *out, size_t cap)
 {
     if (marks == NULL || out == NULL || cap == 0) {
         return -1;
     }
     size_t pos = 0;
-    int n = snprintf(out + pos, cap - pos, "{\"books\":{");
+    int n = snprintf(out + pos, cap - pos,
+                     "{\"schema_version\":%d,\"daily_date\":\"%s\",\"daily_used_sec\":%lu,"
+                     "\"books\":{",
+                     marks->schema_version, marks->daily_date,
+                     (unsigned long)marks->daily_used_sec);
     if (n < 0 || (size_t)n >= cap - pos) {
         return -1;
     }
@@ -386,10 +494,13 @@ int ui_bookmarks_format(const ui_bookmarks_t *marks, char *out, size_t cap)
     int i;
     for (i = 0; i < marks->count && i < UI_BOOK_MARK_MAX; i++) {
         const ui_book_mark_t *m = &marks->items[i];
+        /* percent 只是导出快照 —— 显示端永远重算，这里存的仅供外部参考。 */
+        int pct = ui_book_progress_percent(m->offset, m->total_bytes);
         n = snprintf(out + pos, cap - pos,
-                     "%s\"%s\":{\"offset\":%lu,\"total_bytes\":%lu}",
+                     "%s\"%s\":{\"byte_offset\":%lu,\"total_bytes\":%lu,"
+                     "\"percent\":%d,\"last_read_ts\":%lu}",
                      (i > 0) ? "," : "", m->name, (unsigned long)m->offset,
-                     (unsigned long)m->total_bytes);
+                     (unsigned long)m->total_bytes, pct, (unsigned long)m->last_read_ts);
         if (n < 0 || (size_t)n >= cap - pos) {
             return -1;
         }
@@ -440,38 +551,17 @@ int ui_bookmarks_set(ui_bookmarks_t *marks, const char *name, uint32_t offset,
     return idx;
 }
 
-/* ===================== 每日阅读时长统计 ===================== */
+/* ===================== 每日阅读时长统计（doc/07 §2.4） ===================== */
 
-void ui_book_reading_parse(const char *json, size_t len, ui_book_reading_t *out)
+bool ui_book_daily_rollover(ui_bookmarks_t *marks, const char *today)
 {
-    if (out == NULL) {
-        return;
+    if (marks == NULL || today == NULL || today[0] == '\0') {
+        return false;
     }
-    out->date[0] = '\0';
-    out->seconds = 0;
-    if (json == NULL) {
-        return;
+    if (strcmp(marks->daily_date, today) == 0) {
+        return false;
     }
-    const char *e = json + len;
-    const char *d = js_obj_find(json, e, "date");
-    if (d != NULL && d < e && *d == '"') {
-        js_parse_string(d, e, out->date, sizeof(out->date));
-    }
-    const char *s = js_obj_find(json, e, "seconds");
-    if (s != NULL) {
-        js_parse_u32(s, e, &out->seconds);
-    }
-}
-
-int ui_book_reading_format(const ui_book_reading_t *st, char *out, size_t cap)
-{
-    if (st == NULL || out == NULL || cap == 0) {
-        return -1;
-    }
-    int n = snprintf(out, cap, "{\"date\":\"%s\",\"seconds\":%lu}", st->date,
-                     (unsigned long)st->seconds);
-    if (n < 0 || (size_t)n >= cap) {
-        return -1;
-    }
-    return n;
+    snprintf(marks->daily_date, sizeof(marks->daily_date), "%s", today);
+    marks->daily_used_sec = 0;
+    return true;
 }

@@ -428,6 +428,11 @@ static void ui_book_gesture(ui_gesture_t gesture)
         break;
     case GESTURE_CLICK:
         if (s_current_book == PAGE_BOOKSHELF) {
+            /* 宵禁 / 每日上限：被锁就不进入阅读（doc/07 §2.4） */
+            if (!ui_pages_reader_guard_check()) {
+                ui_router_go_book(PAGE_BOOK_LOCKED);
+                break;
+            }
             if (ui_pages_bookshelf_open_selected() == 0) {
                 ui_router_go_book(PAGE_READER);
             } else {
@@ -542,6 +547,7 @@ void ui_router_handle_gesture(ui_gesture_t gesture)
             case PAGE_BOOK_MENU:
             case PAGE_BOOK_TOC:
             case PAGE_BOOK_JUMP:
+                ui_pages_reader_leave();   /* 退出阅读：保存进度与当日时长 */
                 ui_router_go_book(PAGE_BOOKSHELF);
                 break;
             case PAGE_BOOKSHELF:
@@ -614,6 +620,11 @@ void ui_toast(const char *text)
 
 /* ===================== 初始化与刷新 ===================== */
 
+ui_book_page_t ui_router_current_book(void)
+{
+    return s_current_book;
+}
+
 void ui_router_init(void)
 {
     lv_obj_t *scr = lv_scr_act();
@@ -627,7 +638,15 @@ void ui_router_tick(void)
 {
     /* LVGL 5ms 心跳由 task_ui_fsm 的 lv_timer_handler 驱动;
      * 番茄钟的倒计时挂在这里 —— 用毫秒计数，不做秒级累加。 */
-    ui_pages_pomodoro_tick((uint32_t)millis());
+    uint32_t now = (uint32_t)millis();
+    ui_pages_pomodoro_tick(now);
+
+    /* 阅读计时（doc/07 §2.4）：只有阅读页在前台、无浮层遮挡、屏幕点亮时
+     * 才累计当日阅读时长 —— 菜单页 / 目录页 / 提醒弹窗 / 息屏一律暂停。 */
+    bool reading_active = s_in_book && (s_current_book == PAGE_READER) &&
+                          (ui_overlay_top() == OVERLAY_NONE) &&
+                          (hal_display_get_backlight() > 0);
+    ui_pages_reader_tick(now, reading_active);
 }
 
 /* ===================== 云端应答 ===================== */

@@ -93,6 +93,8 @@ void ui_router_init(void);
 void ui_router_go(ui_page_t page);
 void ui_router_go_book(ui_book_page_t page);
 ui_page_t ui_router_current(void);
+/** 当前所在的电子书子页面（不在模块内时返回 PAGE_BOOKSHELF）。 */
+ui_book_page_t ui_router_current_book(void);
 bool ui_router_in_book_module(void);
 
 /* 浮层：push 后按优先级抢占，返回真正显示的那一层。 */

@@ -45,8 +45,14 @@ extern "C" {
 #define UI_DATA_PATH_SETTINGS  "/config/settings.json"
 #define UI_DATA_PATH_SCHEDULE  "/config/schedule.json"
 #define UI_DATA_PATH_PROFILE   "/config/profile.json"
+#define UI_DATA_PATH_BOOKMARKS "/records/bookmarks.json"
+/* 原子写留下的备份（主文件坏了就回退到它，doc/07 §2.3） */
+#define UI_DATA_PATH_BOOKMARKS_BAK "/records/bookmarks.json.bak"
 #define UI_DATA_DIR_BOOKS      "/books"
 #define UI_DATA_DIR_SUBJECTS   "/subjects"   /* 学科包目录（每个子目录是一个包） */
+
+/* "YYYY-MM-DD" + '\0' */
+#define UI_DATA_MAX_DATE_STR   12
 
 /* doc/07 §3 单页读取与排版上限 */
 #define UI_DATA_PAGE_BYTES     1024  /* 单次读卡字节数（恒定 < 3KB 内存） */
@@ -164,6 +170,18 @@ int ui_data_read_schedule(const ui_data_date_t *date, ui_data_lesson_t *out,
  * 未校时返回 UI_DATA_ERR_NOT_FOUND —— 上层据此不编课程。
  */
 int ui_data_today(ui_data_date_t *out);
+
+/**
+ * 取当前本地时刻（当天第几分钟，0..1439）。NTP 校时后有效。
+ * 未校时返回 UI_DATA_ERR_NOT_FOUND —— 上层据此不判宵禁（宁可不锁也不误锁）。
+ */
+int ui_data_local_minutes(int *out_min);
+
+/**
+ * 取今天的日期串 "YYYY-MM-DD"（doc/07 §2.4 的 daily_date）。
+ * 未校时返回 UI_DATA_ERR_NOT_FOUND。
+ */
+int ui_data_today_str(char *out, size_t cap);
 
 /* ===================== 本地设置（番茄钟时长等） ===================== */
 /** 解析设置 JSON 里的专注时长（纯函数）。缺字段时用 fallback。 */

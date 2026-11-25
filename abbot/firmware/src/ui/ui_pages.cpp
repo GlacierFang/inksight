@@ -19,6 +19,7 @@
 #include "ui_font.h"
 
 #include "hal_interfaces.h"
+#include "ui_book_guard.h"
 #include "ui_data.h"
 
 /* ===================== 颜色（中性骨架，落地前按 doc/03 §一 核对） ===================== */
@@ -150,6 +151,23 @@ static lv_obj_t *s_reader_body = NULL;
 static char s_chapter_titles[UI_MAX_CHAPTERS][32];
 static uint32_t s_chapter_offsets[UI_MAX_CHAPTERS];
 static int s_chapter_count = 0;
+
+/* ===================== 阅读护栏（doc/07 §2.3 / §2.4） ===================== */
+
+static ui_bookmarks_t s_bookmarks;           /* /records/bookmarks.json 的内存形态 */
+static bool s_bookmarks_loaded = false;
+static ui_book_guard_t s_book_guard;         /* /config/profile.json 的护栏配置 */
+static bool s_book_guard_loaded = false;
+static uint32_t s_reader_tick_last_ms = 0;   /* 上一次计时的毫秒计数 */
+static uint32_t s_reader_session_ms = 0;     /* 本次会话的零头（不足 1 秒的部分） */
+static bool s_reader_counting = false;       /* 是否正在计当日阅读时长 */
+static lv_obj_t *s_locked_title = NULL;      /* 宵禁 / 上限提示页 */
+static lv_obj_t *s_locked_body = NULL;
+
+/* 进度表读写用的缓冲（静态：不占 UI 任务栈） */
+static char s_bookmarks_buf[1024];
+static char s_bookmarks_bak_buf[1024];
+static char s_bookmarks_out[1400];
 
 /* 浮层句柄 */
 typedef struct {
@@ -767,9 +785,11 @@ static void ui_build_book_locked(lv_obj_t *content)
 {
     lv_obj_t *title = ui_make_label(content, "该休息啦", true);
     lv_obj_align(title, LV_ALIGN_CENTER, 0, -20);
+    s_locked_title = title;
 
     lv_obj_t *body = ui_make_label(content, "现在是阅读休息时段\n明早再来读书吧", false);
     lv_obj_align(body, LV_ALIGN_CENTER, 0, 12);
+    s_locked_body = body;
 }
 
 /* ===================== 页面表 ===================== */
@@ -1218,6 +1238,181 @@ void ui_pages_refresh_home(void)
 
 /* ===================== 书架与阅读页（doc/07） ===================== */
 
+/* ===================== 阅读护栏：进度表与配置读写 ===================== */
+
+/**
+ * 读 /records/bookmarks.json；主文件坏了就退回 .bak（doc/07 §2.3 的自愈路径）。
+ *
+ * 只走 ui_data（存储任务请求/应答）—— UI 任务不碰 SPI（doc/02 §4.2）。
+ */
+static void ui_book_load_marks(void)
+{
+    uint32_t n1 = 0;
+    uint32_t n2 = 0;
+
+    s_bookmarks_buf[0] = '\0';
+    s_bookmarks_bak_buf[0] = '\0';
+    int r1 = ui_data_read_text(UI_DATA_PATH_BOOKMARKS, s_bookmarks_buf,
+                               (uint32_t)sizeof(s_bookmarks_buf), &n1);
+    int r2 = ui_data_read_text(UI_DATA_PATH_BOOKMARKS_BAK, s_bookmarks_bak_buf,
+                               (uint32_t)sizeof(s_bookmarks_bak_buf), &n2);
+    if (r1 < 0) {
+        n1 = 0;
+    }
+    if (r2 < 0) {
+        n2 = 0;
+    }
+    const char *json = s_bookmarks_buf;
+    size_t len = (size_t)n1;
+    if (ui_book_pick_source(s_bookmarks_buf, (size_t)n1, s_bookmarks_bak_buf, (size_t)n2,
+                             &json, &len) < 0) {
+        /* 两份都不可用：当作没有进度（不编造） */
+        json = "";
+        len = 0;
+    }
+    ui_bookmarks_parse(json, len, &s_bookmarks);
+    if (s_bookmarks.schema_version == 0) {
+        s_bookmarks.schema_version = 1;
+    }
+    s_bookmarks_loaded = true;
+}
+
+/** 读护栏配置（/config/profile.json）；读不到就用默认值（22:00 / 06:30 / 45 分钟）。 */
+static void ui_book_load_guard(void)
+{
+    static char buf[1024];
+    uint32_t n = 0;
+
+    ui_book_guard_defaults(&s_book_guard);
+    int rc = ui_data_read_text(UI_DATA_PATH_PROFILE, buf, (uint32_t)sizeof(buf), &n);
+    if (rc >= 0 && n > 0) {
+        ui_book_guard_parse(buf, (size_t)n, &s_book_guard);
+    }
+    s_book_guard_loaded = true;
+}
+
+/** 把进度表写回 /records/bookmarks.json（原子写：.tmp → .bak → 改名，doc/04 §2.3）。 */
+static void ui_book_save_marks(void)
+{
+    int n = ui_bookmarks_format(&s_bookmarks, s_bookmarks_out, sizeof(s_bookmarks_out));
+    if (n <= 0) {
+        return;
+    }
+    ui_data_write_text(UI_DATA_PATH_BOOKMARKS, s_bookmarks_out, (uint32_t)n);
+}
+
+/** 记下当前这本书的进度并落盘（翻页停顿即自动保存 → 下次打开秒回原位）。 */
+static void ui_book_save_progress(void)
+{
+    if (!s_bookmarks_loaded) {
+        ui_book_load_marks();
+    }
+    if (s_reader_path[0] != '\0' && s_reader_size > 0) {
+        const char *name = strrchr(s_reader_path, '/');
+        name = (name != NULL) ? name + 1 : s_reader_path;
+        ui_bookmarks_set(&s_bookmarks, name, s_reader_offset, s_reader_size);
+    }
+    ui_book_save_marks();
+}
+
+/** 跨日清零（doc/07 §2.4）：日期变了就把当日已读秒数清零。 */
+static void ui_book_daily_rollover_check(void)
+{
+    char today[UI_DATA_MAX_DATE_STR];
+
+    if (ui_data_today_str(today, sizeof(today)) != UI_DATA_OK) {
+        return;   /* 没校时：不动计数器，也不编日期 */
+    }
+    if (ui_book_daily_rollover(&s_bookmarks, today)) {
+        ui_book_save_marks();
+    }
+}
+
+/** 把偏移对齐到 UTF-8 字符首字节（doc/07 §3.2：绝不切坏多字节字符）。 */
+static uint32_t ui_reader_align_offset(const char *path, uint32_t offset)
+{
+    uint8_t buf[8];
+    uint32_t got = 0;
+    uint32_t start;
+
+    if (path == NULL || offset < 4u) {
+        return offset;
+    }
+    start = offset - 4u;
+    if (ui_data_read_range(path, start, buf, (uint32_t)sizeof(buf), &got) != UI_DATA_OK ||
+        got == 0) {
+        return offset;
+    }
+    uint32_t rel = ui_data_utf8_align_forward(buf, got, 4u);
+    if (rel >= got) {
+        return offset;
+    }
+    return start + rel;
+}
+
+void ui_pages_set_book_locked_text(const char *title, const char *body)
+{
+    if (s_locked_title != NULL) {
+        lv_label_set_text(s_locked_title, (title != NULL) ? title : "");
+    }
+    if (s_locked_body != NULL) {
+        lv_label_set_text(s_locked_body, (body != NULL) ? body : "");
+    }
+}
+
+bool ui_pages_reader_guard_check(void)
+{
+    int now_min = 0;
+
+    if (!s_bookmarks_loaded) {
+        ui_book_load_marks();
+    }
+    if (!s_book_guard_loaded) {
+        ui_book_load_guard();
+    }
+    ui_book_daily_rollover_check();
+
+    /* 宵禁：跨午夜区间按 now >= start || now < end 判（doc/07 §2.4） */
+    if (ui_data_local_minutes(&now_min) == UI_DATA_OK &&
+        ui_book_curfew_active(&s_book_guard.curfew, now_min)) {
+        ui_pages_set_book_locked_text("该休息啦", "现在是阅读休息时段\n明早再来读书吧");
+        return false;
+    }
+
+    /* 每日课外阅读时长上限 */
+    if (ui_book_daily_limit_reached(&s_book_guard, s_bookmarks.daily_used_sec)) {
+        ui_pages_set_book_locked_text("今天读得够多啦",
+                                      "今天的课外阅读时间用完了\n明天再来读书吧");
+        return false;
+    }
+    return true;
+}
+
+void ui_pages_reader_tick(uint32_t now_ms, bool active)
+{
+    if (!active || !s_reader_counting) {
+        s_reader_tick_last_ms = now_ms;   /* 暂停：不累计 */
+        return;
+    }
+    uint32_t delta = now_ms - s_reader_tick_last_ms;
+    s_reader_tick_last_ms = now_ms;
+    if (delta > 2000u) {
+        return;   /* 停顿或休眠后醒来：不补计 */
+    }
+    s_reader_session_ms += delta;
+    while (s_reader_session_ms >= 1000u) {
+        s_reader_session_ms -= 1000u;
+        s_bookmarks.daily_used_sec += 1u;
+    }
+}
+
+void ui_pages_reader_leave(void)
+{
+    s_reader_counting = false;
+    s_reader_session_ms = 0;
+    ui_book_save_progress();   /* 退出阅读页也保存进度与当日时长 */
+}
+
 /** 重画书架光标标记。 */
 static void ui_bookshelf_render_cursor(void)
 {
@@ -1247,6 +1442,12 @@ void ui_pages_refresh_bookshelf(void)
     lv_obj_t *title = ui_make_label(content, "我的书架", true);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
 
+    /* 进度表与护栏配置：书架要显示每本书的实时进度、今天还能读多久 */
+    ui_book_load_marks();
+    if (!s_book_guard_loaded) {
+        ui_book_load_guard();
+    }
+
     ui_data_file_t files[UI_DATA_MAX_FILES];
     uint32_t count = 0;
     int rc = ui_data_list_files(UI_DATA_DIR_BOOKS, files, UI_DATA_MAX_FILES, &count);
@@ -1266,11 +1467,42 @@ void ui_pages_refresh_bookshelf(void)
         snprintf(s_book_names[s_book_count], UI_DATA_MAX_NAME, "%s", name);
         s_book_sizes[s_book_count] = files[i].size;
         char sub[24];
-        snprintf(sub, sizeof(sub), "%u KB", (unsigned)(files[i].size / 1024u));
+        int pct = -1;
+        int idx = ui_bookmarks_find(&s_bookmarks, name);
+        if (idx >= 0) {
+            uint32_t total = files[i].size;
+            if (total == 0) {
+                total = s_bookmarks.items[idx].total_bytes;
+            }
+            /* 实时重算进度，绝不信 JSON 里的 percent（doc/07 §2.3） */
+            pct = ui_book_progress_percent(s_bookmarks.items[idx].offset, total);
+        }
+        if (pct > 0) {
+            snprintf(sub, sizeof(sub), "%d%%", pct);
+        } else {
+            snprintf(sub, sizeof(sub), "未读");
+        }
         lv_obj_t *row = ui_make_list_item_ex(content, "  ", sub,
                                              &s_book_labels[s_book_count]);
         lv_obj_align(row, LV_ALIGN_TOP_LEFT, 0, 44 + s_book_count * 40);
         s_book_count++;
+    }
+
+    /* 状态栏：今天还能读多久（doc/07 §4.1） */
+    lv_obj_t *status = s_book_pages[PAGE_BOOKSHELF - PAGE_BOOKSHELF].status_label;
+    if (status != NULL) {
+        char sbuf[32];
+        if (s_book_guard.daily_limit_min > 0) {
+            int used_min = (int)(s_bookmarks.daily_used_sec / 60u);
+            int left = s_book_guard.daily_limit_min - used_min;
+            if (left < 0) {
+                left = 0;
+            }
+            snprintf(sbuf, sizeof(sbuf), "今日剩 %d 分", left);
+        } else {
+            snprintf(sbuf, sizeof(sbuf), "今日不限");
+        }
+        lv_label_set_text(status, sbuf);
     }
     if (s_book_count == 0) {
         lv_obj_t *empty = ui_make_label(content, "还没有下载内容", false);
@@ -1392,13 +1624,8 @@ static int ui_reader_render(void)
 
     lv_obj_t *status = s_book_pages[PAGE_READER - PAGE_BOOKSHELF].status_label;
     if (status != NULL) {
-        int pct = 0;
-        if (s_reader_size > 0) {
-            pct = (int)((uint64_t)s_reader_offset * 100u / (uint64_t)s_reader_size);
-            if (pct > 100) {
-                pct = 100;
-            }
-        }
+        /* 实时重算进度，绝不信 JSON 里的 percent（doc/07 §2.3） */
+        int pct = ui_book_progress_percent(s_reader_offset, s_reader_size);
         char sbuf[64];
         const char *chapter = ui_current_chapter_title();
         if (chapter[0] != '\0') {
@@ -1424,6 +1651,21 @@ int ui_pages_bookshelf_open_selected(void)
     s_reader_size = 0;
     ui_data_file_size(s_reader_path, &s_reader_size);
     ui_reader_load_toc();
+
+    /* 恢复上次进度：每本书只维护**唯一最新进度**（翻页停顿即自动保存） */
+    if (!s_bookmarks_loaded) {
+        ui_book_load_marks();
+    }
+    int idx = ui_bookmarks_find(&s_bookmarks, s_book_names[s_book_cursor]);
+    if (idx >= 0 && s_bookmarks.items[idx].offset > 0) {
+        uint32_t off = s_bookmarks.items[idx].offset;
+        if (s_reader_size == 0 || off < s_reader_size) {
+            s_reader_offset = ui_reader_align_offset(s_reader_path, off);
+        }
+    }
+
+    s_reader_counting = true;
+    s_reader_session_ms = 0;
     return ui_reader_render();
 }
 
@@ -1442,6 +1684,7 @@ void ui_pages_reader_next_page(void)
     }
     s_reader_offset += s_reader_consumed;
     ui_reader_render();
+    ui_book_save_progress();   /* 翻页后自动保存进度 */
 }
 
 void ui_pages_reader_prev_page(void)
@@ -1457,6 +1700,7 @@ void ui_pages_reader_prev_page(void)
     }
     s_reader_offset = target;
     ui_reader_render();
+    ui_book_save_progress();   /* 翻页后自动保存进度 */
 }
 
 /* ===================== 状态栏 ===================== */

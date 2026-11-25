@@ -73,6 +73,22 @@ int ui_pages_bookshelf_open_selected(void);
 void ui_pages_reader_next_page(void);
 void ui_pages_reader_prev_page(void);
 
+/* ---------- 阅读护栏（doc/07 §2.3 / §2.4） ---------- */
+/**
+ * 打开书籍前的护栏检查：宵禁时段、或今日课外阅读时长已达上限 → 返回 false，
+ * **不进入阅读**。被锁时把温和的中文提示写进宵禁提示页（由路由切过去）。
+ */
+bool ui_pages_reader_guard_check(void);
+/**
+ * 阅读计时推进（doc/07 §2.4）：只有阅读页在前台、无浮层遮挡、屏幕点亮时
+ * 才累计当日阅读秒数；其余情况一律暂停。
+ */
+void ui_pages_reader_tick(uint32_t now_ms, bool active);
+/** 离开阅读页：保存阅读进度与当日阅读时长（doc/07 §2.3 / §2.4）。 */
+void ui_pages_reader_leave(void);
+/** 设置宵禁/上限提示页的文案（温和中文，不出现技术术语）。 */
+void ui_pages_set_book_locked_text(const char *title, const char *body);
+
 /* ---------- 专注时长设置（PAGE_SETTINGS） ---------- */
 /** 当前专注时长（分钟）。 */
 int ui_pages_focus_minutes(void);

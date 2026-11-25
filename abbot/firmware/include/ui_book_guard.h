@@ -11,6 +11,15 @@
  * 铁律:
  *   1. percent **必须实时重算**（offset * 100 / total），**严禁直接信 JSON 里的 percent**。
  *   2. 宵禁跨午夜区间（start > end）的判定是 `now >= start || now < end`。
+ *
+ * 落盘格式 = doc/07 §2.3 的 bookmarks.json：
+ *   {
+ *     "schema_version": 1,
+ *     "daily_date": "2026-11-23",
+ *     "daily_used_sec": 1320,
+ *     "books": { "shiji_01.txt": { "byte_offset": 15420, "total_bytes": 482900,
+ *                                 "percent": 3, "last_read_ts": 1795412000 } }
+ *   }
  */
 #ifndef ABBOT_UI_BOOK_GUARD_H
 #define ABBOT_UI_BOOK_GUARD_H
@@ -32,6 +41,8 @@ extern "C" {
 #define UI_BOOK_MARK_MAX  16
 /* 书名长度上限（含 '\0'） */
 #define UI_BOOK_MARK_NAME_MAX 64
+/* 日期串长度上限（"YYYY-MM-DD" + '\0'） */
+#define UI_BOOK_DATE_MAX  12
 
 /* ===================== 数据结构 ===================== */
 
@@ -57,21 +68,19 @@ typedef struct {
 /** 一本书的阅读进度（每本书只维护**唯一最新进度**）。 */
 typedef struct {
     char name[UI_BOOK_MARK_NAME_MAX];
-    uint32_t offset;     /**< 当前字节偏移 */
+    uint32_t offset;      /**< 当前字节偏移（doc/07 §2.3 的 byte_offset） */
     uint32_t total_bytes; /**< 全书字节数 */
+    uint32_t last_read_ts;/**< 最后阅读时刻（epoch 秒，0 = 未知） */
 } ui_book_mark_t;
 
 /** 进度表（/records/bookmarks.json 的内存形态）。 */
 typedef struct {
+    int schema_version;              /**< doc/07 §2.3 的 schema_version */
+    char daily_date[UI_BOOK_DATE_MAX];/**< 当日日期 "YYYY-MM-DD" */
+    uint32_t daily_used_sec;         /**< 当日累计阅读秒数（精确计时累加） */
     ui_book_mark_t items[UI_BOOK_MARK_MAX];
     int count;
 } ui_bookmarks_t;
-
-/** 每日阅读时长统计（/records/reading.json 的内存形态）。 */
-typedef struct {
-    char date[12];   /**< "YYYY-MM-DD" */
-    uint32_t seconds; /**< 当日累计阅读秒数（精确计时累加） */
-} ui_book_reading_t;
 
 /* ===================== 时间解析 ===================== */
 /**
@@ -125,15 +134,38 @@ int ui_book_progress_percent(uint32_t offset, uint32_t total_bytes);
 
 /* ===================== 进度表解析与序列化 ===================== */
 /**
- * 解析 /records/bookmarks.json。
+ * 解析 /records/bookmarks.json（doc/07 §2.3）。
  *
- * 结构：`{"books": {"书名": {"offset": 1234, "total_bytes": 5678}}}`。
- * 解析失败或结构不对时 `out->count = 0`（上层当作「没有进度」）。
+ * 结构：
+ *   {"schema_version":1,"daily_date":"YYYY-MM-DD","daily_used_sec":N,
+ *    "books":{"书名":{"byte_offset":1234,"total_bytes":5678,"last_read_ts":1795412000}}}
+ *
+ * `byte_offset` 也接受旧别名 `offset`；**`percent` 字段一律忽略**（只作导出快照）。
+ * 结构不对时 `out->count = 0`（上层当作「没有进度」）。
  */
 void ui_bookmarks_parse(const char *json, size_t len, ui_bookmarks_t *out);
 
 /**
- * 把进度表序列化成 JSON（不含末尾 '\0' 之外的任何杂项）。
+ * 结构上是不是一份合法的 bookmarks.json（有 `books` 对象）。
+ *
+ * 与 `ui_bookmarks_parse` 的区别：合法但**一本书都没有**的进度表
+ * （`{"books":{}}`）是合法文件 —— 用它来判断「主文件坏了要不要退回 .bak」。
+ */
+bool ui_bookmarks_valid(const char *json, size_t len);
+
+/**
+ * 主文件 / 备份文件二选一（.bak 自愈路径，纯逻辑）。
+ *
+ * 主文件结构合法 → 用主文件；主文件坏了而备份合法 → 用备份；
+ * 两份都坏 → 用主文件（上层当作「没有进度」）。
+ *
+ * 返回 0 = 选中主文件，1 = 选中备份，-1 = 两份都不合法。
+ */
+int ui_book_pick_source(const char *primary, size_t primary_len, const char *backup,
+                        size_t backup_len, const char **out_json, size_t *out_len);
+
+/**
+ * 把进度表序列化成 JSON（doc/07 §2.3 的形状）。
  * 长度不足返回 -1。
  */
 int ui_bookmarks_format(const ui_bookmarks_t *marks, char *out, size_t cap);
@@ -148,11 +180,12 @@ int ui_bookmarks_find(const ui_bookmarks_t *marks, const char *name);
 int ui_bookmarks_set(ui_bookmarks_t *marks, const char *name, uint32_t offset,
                      uint32_t total_bytes);
 
-/* ===================== 每日阅读时长统计 ===================== */
-/** 解析 /records/reading.json：`{"date":"YYYY-MM-DD","seconds":123}`。 */
-void ui_book_reading_parse(const char *json, size_t len, ui_book_reading_t *out);
-/** 序列化成 JSON。 */
-int ui_book_reading_format(const ui_book_reading_t *st, char *out, size_t cap);
+/* ===================== 每日阅读时长（doc/07 §2.4） ===================== */
+/**
+ * 跨日清零：日期与 `today` 不同就清零当日秒数并更新日期。
+ * 返回 true = 发生了清零。
+ */
+bool ui_book_daily_rollover(ui_bookmarks_t *marks, const char *today);
 
 #ifdef __cplusplus
 }
