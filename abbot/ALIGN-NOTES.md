@@ -912,3 +912,21 @@ Release `fw-237e82115bb3ed5e88f416857666b3a6c6a90704`，
 - `doc/00` / `doc/05`：删掉不存在的 `ding.wav` 资产说法。
 
 **本轮明确没做：** 学科包 `cards.enc` 解密与卡片学习页、电子书完整阅读体验（目录页 / 跳转页 / 进度落盘 / 防沉迷锁屏）、outbox 离线补传、配对简化、多网关地址、OTA apply 与双分区、真机校准。
+
+---
+
+## 本轮（2026-11-25）· 模拟屏与固件 1.0.1 逐页对齐
+
+模拟屏唯一文件：`abbot/server/web/index.html`（零构建单文件，管理台「真机画面」Tab）。本轮补齐此前缺失的 6 个页面，
+页面枚举与固件 `firmware/include/ui_router.h` 完全一致（差集 0）。
+
+| 项 | 内容 |
+| :--- | :--- |
+| `PAGE_CITY` | 12 城市候选列表，顺序与文案照抄 `firmware/src/ui/ui_weather.c`；屏上显中文名，**上报英文地名**（`Beijing`…），确认后写进模拟屏状态并随下一次 `/api/v1/sync/bootstrap` 带 `city` 字段（服务端已读该字段，无需改服务端） |
+| `PAGE_OOBE` | 首次开机引导：接入进度三态 + 「连接 Wi-Fi 网络 / 重新尝试接入 / 先离线体验」；未绑定虚拟设备时开机先进本页 |
+| `PAGE_BOOK_MENU` / `PAGE_BOOK_TOC` / `PAGE_BOOK_JUMP` | 阅读快捷菜单 / 章节目录 / 百分比进度定位 |
+| `PAGE_BOOK_LOCKED` | 防沉迷锁屏：宵禁 `22:00–06:30`、每日课外阅读上限 `45` 分钟，判定规则照抄 `firmware/src/ui/ui_book_guard.c`（跨午夜 / 同日两种区间、上限已达两种情形），锁屏文案不含技术术语 |
+| 固件版本 | `fw_version` 与 OTA `current_ver` 由 `v1.0.3` 改为 `1.0.1`（对齐 `firmware/include/net_api.h` 的 `NET_FW_VERSION`） |
+| 设置页 | 8 项与固件 `ui_build_settings` 及 `ui_router.cpp` 索引映射一致（第 8 项「所在城市」） |
+
+**保真度契约**：固件 UI 改动必须同批改模拟屏；模拟屏按 `doc/03` 逐页复现（契约已写进 `doc/03` 文首）。

@@ -242,6 +242,10 @@
           </div>
           <label>口述内容（不想说话时直接打字）</label>
           <input id="dsVoiceText" placeholder="例如：这题的第二步为什么这样做">
+          <label>护栏联调 · 今日已读（分钟）</label>
+          <input id="dsUsedMin" type="number" min="0" max="1440" placeholder="0">
+          <label>护栏联调 · 模拟时刻（0-1439，空＝用本机时间）</label>
+          <input id="dsClockMin" type="number" min="0" max="1439" placeholder="本机时间">
           <div class="row" style="margin-top:8px">
             <select id="dsZoom" style="width:auto;flex:0 0 auto"><option value="1">1×</option><option value="1.5" selected>1.5×</option><option value="2">2×</option></select>
           </div>
@@ -415,6 +419,18 @@ $('pwd').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
 const DS = (function(){
   const W=320, H=480, TOP=24, BOT=448;
   const COL={bg:'#F4F6F8',card:'#FFFFFF',fg:'#1E293B',mut:'#64748B',acc:'#2563EB',warn:'#DC2626',line:'#E2E8F0'};
+  // 固件当前版本：与 firmware/include/net_api.h 的 NET_FW_VERSION 一致（不带 v 前缀）
+  const FW_VERSION='1.0.1';
+  // 候选城市表：顺序与文案严格照抄 firmware/src/ui/ui_weather.c 的候选表
+  //   zh ＝ 屏上给用户看的中文名；en ＝ 上报给服务端的地名（固件发什么，这里就发什么）
+  const CITY_CANDIDATES=[
+    {zh:'北京',en:'Beijing'},{zh:'上海',en:'Shanghai'},{zh:'广州',en:'Guangzhou'},
+    {zh:'深圳',en:'Shenzhen'},{zh:'杭州',en:'Hangzhou'},{zh:'成都',en:'Chengdu'},
+    {zh:'南京',en:'Nanjing'},{zh:'武汉',en:'Wuhan'},{zh:"西安",en:"Xi'an"},
+    {zh:'重庆',en:'Chongqing'},{zh:'天津',en:'Tianjin'},{zh:'苏州',en:'Suzhou'},
+  ];
+  // 阅读护栏默认值：与 firmware/include/ui_book_guard.h 一致（宵禁 22:00-06:30，每日上限 45 分钟）
+  const CURFEW_START_MIN=22*60, CURFEW_END_MIN=6*60+30, DAILY_LIMIT_MIN=45;
   const st={
     page:'PAGE_HOME', prev:null, sel:0,
     overlay:null, toast:null, toastT:0,
@@ -430,6 +446,10 @@ const DS = (function(){
     cards:[], cardIdx:0, cardFlip:false, cardSel:0, ota:null,
     devId:'', paired:false, busy:false, lastRaw:null, booted:false, wifiScanned:false,
     backlight:3, volume:3, voiceText:'',
+    city:null, citySel:0, cityScroll:0, focus:25,
+    oobe:{state:'PENDING',sel:0},
+    book:{menuSel:0,tocSel:0,tocPage:0,tocItems:[],jumpPct:50,dailyUsedSec:0,dailyDate:'',
+          marks:{},lockedTitle:'该休息啦',lockedBody:'现在是阅读休息时段\n明早再来读书吧'},
   };
   let cv=null, cx=null, dpr=1;
 
@@ -513,10 +533,13 @@ const DS = (function(){
     await refresh();
   }
   async function refresh(){
-    const d=await devCall('POST','/api/v1/sync/bootstrap',{
-      device_id:st.devId, fw_version:'v1.0.3', battery_pct:st.battery,
+    const payload={
+      device_id:st.devId, fw_version:FW_VERSION, battery_pct:st.battery,
       schedule_updated_at:st.schedule?st.schedule.updated_at:0, local_packs:[], local_books:[],
-    });
+    };
+    // 城市：与固件一致 —— 上报的是英文地名（net 层缓存里那个值）；没设置就不带这个字段
+    if(st.city&&st.city.en) payload.city=st.city.en;
+    const d=await devCall('POST','/api/v1/sync/bootstrap',payload);
     if(!d) return;
     if(d.data&&d.data.weather) st.weather=d.data.weather;
     if(d.data&&typeof d.data.effective_remaining_quota==='number'){
@@ -542,6 +565,26 @@ const DS = (function(){
 
   // ------------------------------------------------------------ 页面
   const PAGES={};
+
+  PAGES.PAGE_OOBE={hint:'上下选择 | 短按确定',draw:function(){
+    text('欢迎使用 · 随身学习终端',8,TOP+18,{bold:true,size:13});
+    card(8,TOP+28,304,34);
+    text(oobeStateText(),18,TOP+50,{size:12.5});
+    text('正在为你连接学习助手，',14,TOP+92,{size:12});
+    text('不用输入任何东西，等一会儿就好。',14,TOP+110,{size:12});
+    menu(14,TOP+140,292,[
+      {label:'连接 Wi-Fi 网络'},{label:'重新尝试接入'},{label:'先离线体验'}
+    ],st.oobe.sel);
+  },onGesture:function(g){
+    if(g==='UP') st.oobe.sel=(st.oobe.sel+2)%3;
+    else if(g==='DOWN') st.oobe.sel=(st.oobe.sel+1)%3;
+    else if(g==='CLICK'){
+      if(st.oobe.sel===0){ st.prev=st.page; st.page='PAGE_WIFI_SCAN'; st.wifiSel=0; }
+      else if(st.oobe.sel===1){ retryOobe(); }
+      else { saveSkipOobe(); st.prev=null; st.page='PAGE_HOME'; st.sel=0; }
+    }
+    // 长按：引导页不响应（固件在 PAGE_OOBE 上长按没有分支）
+  }};
 
   PAGES.PAGE_HOME={hint:'上下移动 | 短按确定 | 长按退出',draw:function(){
     const days=st.schedule&&st.schedule.days?st.schedule.days:{};
@@ -641,7 +684,7 @@ const DS = (function(){
     else if(g==='LONG') back();
   }};
 
-  PAGES.PAGE_SUBJECT_LIST={hint:'上下选择 | 短按确定 | 长按退出',draw:function(){
+  PAGES.PAGE_SUBJECT_LIST={hint:'上下选择 | 短按进入 | 长按退出',draw:function(){
     text('学科卡片',8,TOP+18,{bold:true,size:13});
     if(!st.packs.length){ text('还没有学科包',8,TOP+46,{size:12,color:COL.mut}); text('去管理台「学科包」页生成',8,TOP+64,{size:11,color:COL.mut}); return; }
     st.packs.forEach(function(p,i){
@@ -656,7 +699,7 @@ const DS = (function(){
     else if(g==='LONG') back();
   }};
 
-  PAGES.PAGE_CARD_STUDY={hint:'左右切题 | 上下选菜单 | 短按确定 | 长按退出',draw:function(){
+  PAGES.PAGE_CARD_STUDY={hint:'左右翻卡 | 短按确定 | 长按退出',draw:function(){
     const c=st.cards[st.cardIdx];
     if(!c){ text('正在取卡片…',8,TOP+30,{size:12,color:COL.mut}); return; }
     text('学科卡片  '+((st.cardIdx+1)+'/'+Math.max(1,st.cards.length)),8,TOP+18,{bold:true,size:13});
@@ -684,22 +727,30 @@ const DS = (function(){
     else if(g==='LONG') back();
   }};
 
-  PAGES.PAGE_BOOKSHELF={hint:'上下选择 | 短按确定 | 长按退出',draw:function(){
+  PAGES.PAGE_BOOKSHELF={hint:'上下选书 | 短按确定 | 长按退出',draw:function(){
     text('电子书架',8,TOP+18,{bold:true,size:13});
+    text('今日剩'+remainingReadMin()+'分',W-8,TOP+18,{size:11,align:'right',color:COL.mut});
     if(!st.books.length){ text('书架是空的',8,TOP+46,{size:12,color:COL.mut}); text('去管理台「电子书」页上传一本',8,TOP+64,{size:11,color:COL.mut}); return; }
     st.books.forEach(function(b,i){
+      if(i>6) return;
       const yy=TOP+40+i*34;
       text((i===st.sel?'▶':' ')+' '+b.id,14,yy+18,{size:12,bold:i===st.sel,color:i===st.sel?COL.acc:COL.fg});
-      text('未读',W-14,yy+18,{size:11,align:'right',color:COL.mut});
+      text(bookProgressText(b),W-14,yy+18,{size:11,align:'right',color:COL.mut});
     });
   },onGesture:function(g){
-    if(g==='UP') st.sel=(st.sel+st.books.length-1)%st.books.length;
-    else if(g==='DOWN') st.sel=(st.sel+1)%st.books.length;
-    else if(g==='CLICK'){ st.prev=st.page; st.page='PAGE_READER'; loadBook(); }
+    const n=Math.max(1,st.books.length);
+    if(g==='UP') st.sel=(st.sel+n-1)%n;
+    else if(g==='DOWN') st.sel=(st.sel+1)%n;
+    else if(g==='CLICK'){
+      if(!st.books.length) return;
+      // 宵禁 / 每日上限：被锁就不进入阅读（固件 ui_pages_reader_guard_check）
+      if(!guardCheck()){ st.prev=st.page; st.page='PAGE_BOOK_LOCKED'; return; }
+      st.prev=st.page; st.page='PAGE_READER'; loadBook();
+    }
     else if(g==='LONG') back();
   }};
 
-  PAGES.PAGE_READER={hint:'左右翻页 | 上下调背光 | 长按退回书架',draw:function(){
+  PAGES.PAGE_READER={hint:'左右翻页 | 上下调背光 | 短按菜单 | 长按退回书架',draw:function(){
     const r=st.reader;
     text(r.title||'阅读',8,20,{size:11,color:COL.mut});
     const lines=r.lines.slice(r.page*14,r.page*14+14);
@@ -708,7 +759,11 @@ const DS = (function(){
       text(fitText(ln,300,12),8,y+12,{size:12}); y+=30;
     });
     if(!lines.length) text('这本书还没有内容',8,TOP+30,{size:12,color:COL.mut});
-    text('第 '+(r.page+1)+' 页',W-8,H-42,{size:11,align:'right',color:COL.mut});
+    // 页脚：进度（实时重算）+ 背光档位
+    const pct=readerPct(), bx=128, fill=Math.round(110*pct/100);
+    text('第 '+(r.page+1)+' 页 · 已读 '+pct+'%',8,H-42,{size:11,color:COL.mut});
+    for(let i=0;i<10;i++){ cx.fillStyle=(i*11<fill)?COL.acc:COL.line; cx.fillRect(bx+i*11,H-52,9,6); }
+    text('亮度:'+st.backlight+'档',W-8,H-42,{size:11,align:'right',color:COL.mut});
   },onGesture:function(g){
     const r=st.reader;
     const last=Math.max(0,Math.ceil(r.lines.length/14)-1);
@@ -716,8 +771,90 @@ const DS = (function(){
     else if(g==='RIGHT') r.page=Math.min(last,r.page+1);    // 右推＝下一页
     else if(g==='UP') st.backlight=Math.min(5,st.backlight+1);   // 上推＝背光+1
     else if(g==='DOWN') st.backlight=Math.max(1,st.backlight-1); // 下推＝背光-1
-    else if(g==='CLICK') toast('阅读快捷菜单（固件侧）还没接上');
-    else if(g==='LONG'){ st.prev=st.page; st.page='PAGE_BOOKSHELF'; st.sel=0; }
+    else if(g==='CLICK'){ st.prev=st.page; st.page='PAGE_BOOK_MENU'; st.book.menuSel=0; }
+    else if(g==='LONG'){ leaveReading(); st.prev=null; st.page='PAGE_BOOKSHELF'; st.sel=0; }
+  }};
+
+  PAGES.PAGE_BOOK_MENU={hint:'上下选择 | 短按确定 | 长按退出',draw:function(){
+    text('阅 读 功 能 菜 单',W/2,TOP+20,{size:13,bold:true,align:'center'});
+    card(8,TOP+34,304,152);
+    menu(20,TOP+48,280,[
+      {label:'目录'},
+      {label:'百分比进度定位'},
+      {label:'屏幕亮度: '+st.backlight+' / 5 档'},
+      {label:'返回书架'},
+    ],st.book.menuSel,34);
+  },onGesture:function(g){
+    if(g==='UP') st.book.menuSel=(st.book.menuSel+3)%4;
+    else if(g==='DOWN') st.book.menuSel=(st.book.menuSel+1)%4;
+    else if(g==='LEFT'){ if(st.book.menuSel===2) st.backlight=Math.max(1,st.backlight-1); }
+    else if(g==='RIGHT'){ if(st.book.menuSel===2) st.backlight=Math.min(5,st.backlight+1); }
+    else if(g==='CLICK'){
+      if(st.book.menuSel===0){ st.prev=st.page; st.page='PAGE_BOOK_TOC'; buildToc(); }
+      else if(st.book.menuSel===1){ st.prev=st.page; st.page='PAGE_BOOK_JUMP'; st.book.jumpPct=readerPct(); }
+      else if(st.book.menuSel===2){ toast('用左右键调节亮度'); }
+      else { leaveReading(); st.prev=null; st.page='PAGE_BOOKSHELF'; st.sel=0; }
+    }
+    else if(g==='LONG'){ leaveReading(); st.prev=null; st.page='PAGE_BOOKSHELF'; st.sel=0; }
+  }};
+
+  PAGES.PAGE_BOOK_TOC={hint:'左右翻目录 | 短按跳转 | 长按退出',draw:function(){
+    const items=st.book.tocItems, n=items.length;
+    const pages=Math.max(1,Math.ceil(n/8));
+    if(st.book.tocPage>=pages) st.book.tocPage=pages-1;
+    text('章节目录 (共 '+n+' 章)',8,TOP+18,{bold:true,size:13});
+    text((st.book.tocPage+1)+'/'+pages+'页',W-8,TOP+18,{size:11,align:'right',color:COL.mut});
+    for(let i=0;i<8;i++){
+      const idx=st.book.tocPage*8+i;
+      if(idx>=n) break;
+      const on=(idx===st.book.tocSel);
+      text((on?'▶':' ')+' '+fitText(items[idx].title,250,12),14,TOP+40+i*34+18,
+           {size:12,bold:on,color:on?COL.acc:COL.fg});
+    }
+    if(!n) text('这本书没有章节',8,TOP+46,{size:12,color:COL.mut});
+  },onGesture:function(g){
+    const n=st.book.tocItems.length, pages=Math.max(1,Math.ceil(n/8));
+    if(g==='UP'){
+      if(st.book.tocSel>0) st.book.tocSel--;
+      else if(st.book.tocPage>0){ st.book.tocPage--; st.book.tocSel=Math.min(n-1,st.book.tocPage*8+7); }
+    }
+    else if(g==='DOWN'){
+      if(st.book.tocSel<n-1) st.book.tocSel++;
+      else if(st.book.tocPage<pages-1){ st.book.tocPage++; st.book.tocSel=st.book.tocPage*8; }
+    }
+    else if(g==='LEFT'){ if(st.book.tocPage>0){ st.book.tocPage--; st.book.tocSel=Math.min(st.book.tocSel,st.book.tocPage*8+7); } }
+    else if(g==='RIGHT'){ if(st.book.tocPage<pages-1){ st.book.tocPage++; st.book.tocSel=Math.max(st.book.tocSel,st.book.tocPage*8); } }
+    else if(g==='CLICK'){ jumpToChapter(st.book.tocSel); }
+    else if(g==='LONG'){ leaveReading(); st.prev=null; st.page='PAGE_BOOKSHELF'; st.sel=0; }
+  }};
+
+  PAGES.PAGE_BOOK_JUMP={hint:'左右微调 | 长按退出',draw:function(){
+    const pct=st.book.jumpPct;
+    text('进度定位跳转',8,TOP+18,{bold:true,size:13});
+    text('目标阅读进度: '+pct+'%',W/2,TOP+110,{size:14,align:'center'});
+    const blocks=24, fill=Math.round(pct/100*blocks);
+    let bar='';
+    for(let i=0;i<blocks;i++) bar+=(i<fill)?'█':'░';
+    text('['+bar+']',W/2,TOP+150,{size:12,align:'center',color:COL.acc});
+    text('提示: 左右推微调1%，上下推±10%',W/2,TOP+190,{size:11,align:'center',color:COL.mut});
+    text('短按确认跳转',W/2,TOP+212,{size:11,align:'center',color:COL.mut});
+  },onGesture:function(g){
+    if(g==='UP') st.book.jumpPct=Math.min(100,st.book.jumpPct+10);
+    else if(g==='DOWN') st.book.jumpPct=Math.max(0,st.book.jumpPct-10);
+    else if(g==='LEFT') st.book.jumpPct=Math.max(0,st.book.jumpPct-1);
+    else if(g==='RIGHT') st.book.jumpPct=Math.min(100,st.book.jumpPct+1);
+    else if(g==='CLICK'){ jumpToPct(st.book.jumpPct); }
+    else if(g==='LONG'){ leaveReading(); st.prev=null; st.page='PAGE_BOOKSHELF'; st.sel=0; }
+  }};
+
+  PAGES.PAGE_BOOK_LOCKED={hint:'长按退出',draw:function(){
+    text(st.book.lockedTitle,W/2,TOP+140,{size:16,bold:true,align:'center'});
+    String(st.book.lockedBody||'').split('\n').forEach(function(l,i){
+      text(l,W/2,TOP+172+i*20,{size:12,align:'center',color:COL.mut});
+    });
+    text('短按或长按返回主页',W/2,BOT-14,{size:11,align:'center',color:COL.mut});
+  },onGesture:function(g){
+    if(g==='CLICK'||g==='LONG'){ st.prev=null; st.page='PAGE_HOME'; st.sel=0; }
   }};
 
   PAGES.PAGE_POMODORO={hint:'短按暂停/继续 | 长按结束退出',draw:function(){
@@ -733,7 +870,7 @@ const DS = (function(){
     else if(g==='LONG'){ st.pom.running=false; st.pom.remain=1500; back(); }
   }};
 
-  PAGES.PAGE_OUTBOX={hint:'上下选择 | 短按同步 | 长按退出',draw:function(){
+  PAGES.PAGE_OUTBOX={hint:'上下选择 | 短按确定 | 长按退出',draw:function(){
     text('待问收件箱',8,TOP+18,{bold:true,size:13});
     text('最多 10 条',W-8,TOP+18,{size:11,align:'right',color:COL.mut});
     if(!st.outbox.length){
@@ -752,31 +889,54 @@ const DS = (function(){
     else if(g==='LONG') back();
   }};
 
-  PAGES.PAGE_SETTINGS={hint:'上下选择 | 短按确定 | 长按退出',draw:function(){
+  PAGES.PAGE_SETTINGS={hint:'上下选择 | 左右调时长 | 短按确定 | 长按退出',draw:function(){
     text('系统设置',8,TOP+18,{bold:true,size:13});
+    // 8 项与固件 src/ui/ui_pages.cpp 的设置页、ui_router.cpp 的索引映射完全一致
     const items=[
-      {label:'无线网络配置', right:st.wifiList.length+' 个热点', go:'PAGE_WIFI_SCAN'},
-      {label:'设备配对绑定', right:'重新配对', go:'PAGE_KEYBOARD'},
-      {label:'播报音量调节', right:st.volume+' / 5 档'},
-      {label:'屏幕背光亮度', right:st.backlight+' / 5 档'},
-      {label:'离线手动校时', right:'已校准'},
-      {label:'固件版本与 OTA', right:'v1.0.3', go:'PAGE_OTA'},
+      {label:'无线网络', right:st.wifiList.length+' 个热点', go:'PAGE_WIFI_SCAN'},
+      {label:'音量', right:st.volume+' / 5 档'},
+      {label:'屏幕亮度', right:st.backlight+' / 5 档'},
+      {label:'固件升级', right:FW_VERSION, go:'PAGE_OTA'},
+      {label:'电池与省电', right:'正常'},
+      {label:'关于设备', right:'学伴终端'},
+      {label:'专注时长', right:st.focus+' 分钟'},
+      {label:'所在城市', right:st.city?st.city.zh:'未设置', go:'PAGE_CITY'},
     ];
-    menu(14,TOP+40,292,items,st.sel);
+    menu(14,TOP+40,292,items,st.sel,30);
   },onGesture:function(g){
-    const items=[{go:'PAGE_WIFI_SCAN'},{go:'PAGE_KEYBOARD'},{},{},{},{go:'PAGE_OTA'}];
-    if(g==='UP') st.sel=(st.sel+items.length-1)%items.length;
-    else if(g==='DOWN') st.sel=(st.sel+1)%items.length;
+    const items=[{go:'PAGE_WIFI_SCAN'},{},{},{go:'PAGE_OTA'},{},{},{},{go:'PAGE_CITY'}];
+    if(g==='UP') st.sel=(st.sel+7)%8;
+    else if(g==='DOWN') st.sel=(st.sel+1)%8;
     else if(g==='LEFT'||g==='RIGHT'){
       const d=(g==='LEFT'?-1:1);
-      if(st.sel===2) st.volume=Math.max(1,Math.min(5,st.volume+d));
-      else if(st.sel===3) st.backlight=Math.max(1,Math.min(5,st.backlight+d));
+      if(st.sel===6) st.focus=Math.max(5,Math.min(60,st.focus+d*5));
+      else if(st.sel===1) st.volume=Math.max(1,Math.min(5,st.volume+d));
+      else if(st.sel===2) st.backlight=Math.max(1,Math.min(5,st.backlight+d));
     }
-    else if(g==='CLICK'){ if(items[st.sel].go){ st.prev=st.page; st.page=items[st.sel].go; st.sel=0; } else toast('这个设置项不用配真机也能改'); }
+    else if(g==='CLICK'){ if(items[st.sel].go){ st.prev=st.page; st.page=items[st.sel].go; st.sel=0; } else toast('这个设置还在准备中'); }
     else if(g==='LONG') back();
   }};
 
-  PAGES.PAGE_WIFI_SCAN={hint:'上下选网 | 短按确定 | 长按退出',draw:function(){
+  PAGES.PAGE_CITY={hint:'上下选择 | 短按确定 | 长按退出',draw:function(){
+    text('选择所在城市',8,TOP+18,{bold:true,size:13});
+    if(st.city) text('当前：'+st.city.zh,W-8,TOP+18,{size:11,align:'right',color:COL.mut});
+    const total=CITY_CANDIDATES.length;
+    for(let i=0;i<8;i++){
+      const idx=st.cityScroll+i;
+      if(idx>=total) break;
+      const c=CITY_CANDIDATES[idx], on=(idx===st.citySel);
+      text((on?'▶':' ')+' '+c.zh,14,TOP+40+i*34+18,{size:12,bold:on,color:on?COL.acc:COL.fg});
+    }
+  },onGesture:function(g){
+    const total=CITY_CANDIDATES.length;
+    // 固件 ui_pages_city_move：到顶/到底不循环，列表自己管滚动窗口
+    if(g==='UP'){ if(st.citySel>0){ st.citySel--; if(st.citySel<st.cityScroll) st.cityScroll=st.citySel; } }
+    else if(g==='DOWN'){ if(st.citySel<total-1){ st.citySel++; if(st.citySel>=st.cityScroll+8) st.cityScroll=st.citySel-8+1; } }
+    else if(g==='CLICK'){ confirmCity(); }
+    else if(g==='LONG'){ back(); }
+  }};
+
+  PAGES.PAGE_WIFI_SCAN={hint:'上下选择 | 短按连接 | 长按退出',draw:function(){
     text('选择无线网络',8,TOP+18,{bold:true,size:13});
     const list=st.wifiList.length?st.wifiList:[{ssid:'（没扫到热点）',level:'',rssi:null}];
     list.slice(0,8).forEach(function(ap,i){
@@ -789,11 +949,11 @@ const DS = (function(){
     const n=Math.max(1,st.wifiList.length);
     if(g==='UP') st.wifiSel=(st.wifiSel+n-1)%n;
     else if(g==='DOWN') st.wifiSel=(st.wifiSel+1)%n;
-    else if(g==='CLICK') toast('这是模拟画面，不会真的去连热点');
+    else if(g==='CLICK'){ st.kb.target='Wi-Fi 密码'; st.kb.buf=''; st.kb.cur=0; st.prev=st.page; st.page='PAGE_KEYBOARD'; }
     else if(g==='LONG') back();
   }};
 
-  PAGES.PAGE_KEYBOARD={hint:'摇杆选键 | 短按输入 | 长按退出',draw:function(){
+  PAGES.PAGE_KEYBOARD={hint:'上下选择 | 短按输入 | 长按退出',draw:function(){
     text('输入'+(st.kb.target==='配对码'?'配对码':'密码'),8,TOP+18,{bold:true,size:13});
     text(st.kb.target==='配对码'?'Home_WiFi_5G':'Home_WiFi_5G',8,TOP+38,{size:11.5,color:COL.mut});
     card(8,TOP+46,304,28);
@@ -851,14 +1011,14 @@ const DS = (function(){
         st.kb.buf+=ch;
       } else if(st.kb.cur===40){ st.kb.upper=!st.kb.upper; toast(st.kb.upper?'已切到大写':'已切到小写'); }
       else if(st.kb.cur===41){ st.kb.buf=st.kb.buf.slice(0,-1); }
-      else if(st.kb.cur===42){ toast('配对码已填：'+st.kb.buf); back(); }
+      else if(st.kb.cur===42){ toast(st.kb.target==='配对码'?('配对码已填：'+st.kb.buf):('密码已填：'+st.kb.buf)); back(); }
     }
     else if(g==='LONG') back();
   }};
 
-  PAGES.PAGE_OTA={hint:'短按检查更新 | 长按退出',draw:function(){
+  PAGES.PAGE_OTA={hint:'上下选择 | 短按确定 | 长按退出',draw:function(){
     text('固件版本与 OTA',8,TOP+18,{bold:true,size:13});
-    text('当前版本  v1.0.3',8,TOP+44,{size:12});
+    text('当前版本  '+FW_VERSION,8,TOP+44,{size:12});
     text('设备 ID   '+st.devId,8,TOP+64,{size:11.5,color:COL.mut});
     if(st.ota){
       text(st.ota.has_update?('发现新版本 '+st.ota.latest_ver):'已是最新版本',8,TOP+92,{size:12,color:st.ota.has_update?COL.acc:COL.mut});
@@ -868,13 +1028,154 @@ const DS = (function(){
     }
   },onGesture:function(g){
     if(g==='CLICK'){
-      devCall('GET','/api/v1/ota/check?device_id='+encodeURIComponent(st.devId)+'&current_ver=v1.0.3')
+      devCall('GET','/api/v1/ota/check?device_id='+encodeURIComponent(st.devId)+'&current_ver='+encodeURIComponent(FW_VERSION))
         .then(function(d){ if(d){ st.ota=d.data; toast(d.data.has_update?'有新版固件':'已是最新'); } });
     }
     else if(g==='LONG') back();
   }};
 
   // ------------------------------------------------------------ 动作
+  // ---- 开机引导 ----
+  function oobeStateText(){
+    if(st.paired) return '已经接上啦，可以开始学习了';
+    if(st.oobe.state==='PENDING') return '正在接入学习助手…';
+    if(st.oobe.state==='FAILED') return '暂时没接上，会自动再试一次';
+    return '正在准备中…';
+  }
+  function retryOobe(){
+    st.oobe.state='PENDING';
+    toast('正在重新接入');
+    setTimeout(function(){
+      if(st.oobe.state!=='PENDING') return;
+      if(st.paired){ st.oobe.state='READY'; toast('已经接上啦，可以开始学习了'); }
+      else { st.oobe.state='FAILED'; toast('暂时没接上，会自动再试一次'); }
+    },1200);
+  }
+  function saveSkipOobe(){ try{ localStorage.setItem('abbot_sim_skip_oobe','1'); }catch(e){} }
+  function skipOobe(){ try{ return localStorage.getItem('abbot_sim_skip_oobe')==='1'; }catch(e){ return false; } }
+
+  // ---- 城市（固件：确认后落盘 + 写缓存 + 立刻补发一次心跳）----
+  function saveCity(){ try{ localStorage.setItem('abbot_sim_city',JSON.stringify(st.city)); }catch(e){} }
+  function loadCity(){
+    try{
+      const raw=localStorage.getItem('abbot_sim_city');
+      if(raw){ const c=JSON.parse(raw); if(c&&c.en&&c.zh) st.city=c; }
+    }catch(e){}
+  }
+  function cityNameUsable(name){
+    if(!name) return false;
+    if(/[\x00-\x1f\x7f]/.test(name)) return false;   // 控制字符
+    if(/["\\]/.test(name)) return false;              // JSON 结构字符
+    if(name!==name.replace(/^\s+/,'').replace(/\s+$/,'')) return false; // 首尾空格
+    return true;
+  }
+  async function confirmCity(){
+    const c=CITY_CANDIDATES[st.citySel];
+    if(!c){ toast('这里还没有可选的城市'); return; }
+    if(!cityNameUsable(c.en)){ toast('这个城市名暂时用不了'); return; }
+    st.city={zh:c.zh,en:c.en};
+    saveCity();
+    toast('已保存，稍等就显示当地天气');
+    st.prev=null; st.page='PAGE_SETTINGS'; st.sel=7;
+    await refresh();   // 立刻补发一次心跳：带 city 字段
+  }
+
+  // ---- 阅读护栏（判定规则照抄 firmware/src/ui/ui_book_guard.c）----
+  function curfewActive(nowMin,start,end){
+    if(start<0||start>1439||end<0||end>1439) return false;
+    if(nowMin<0||nowMin>1439) return false;
+    if(start===end) return true;                          // 起止相同：全天锁定
+    if(start<end) return (nowMin>=start && nowMin<end);   // 同日区间
+    return (nowMin>=start || nowMin<end);                 // 跨午夜区间
+  }
+  function dailyLimitReached(usedSec,limitMin){
+    if(limitMin<=0) return false;
+    return usedSec>=limitMin*60;
+  }
+  function nowMinutes(){
+    const el=document.getElementById('dsClockMin');
+    const v=el?parseInt(el.value,10):NaN;
+    if(!isNaN(v)&&v>=0&&v<=1439) return v;
+    const d=new Date(); return d.getHours()*60+d.getMinutes();
+  }
+  function dailyUsedSec(){
+    const el=document.getElementById('dsUsedMin');
+    const base=el?parseInt(el.value,10):0;
+    const extra=(isNaN(base)||base<0)?0:base*60;
+    return Math.round(st.book.dailyUsedSec/1000)+extra;
+  }
+  function remainingReadMin(){
+    const left=DAILY_LIMIT_MIN-Math.floor(dailyUsedSec()/60);
+    return left>0?left:0;
+  }
+  function guardCheck(){
+    const now=nowMinutes();
+    if(curfewActive(now,CURFEW_START_MIN,CURFEW_END_MIN)){
+      st.book.lockedTitle='该休息啦';
+      st.book.lockedBody='现在是阅读休息时段\n明早再来读书吧';
+      return false;
+    }
+    if(dailyLimitReached(dailyUsedSec(),DAILY_LIMIT_MIN)){
+      st.book.lockedTitle='今天读得够多啦';
+      st.book.lockedBody='今天的课外阅读时间用完了\n明天再来读书吧';
+      return false;
+    }
+    return true;
+  }
+  function readerPct(){
+    const r=st.reader, total=r.lines.length;
+    if(!total) return 0;
+    const done=Math.min(total,r.page*14);
+    return Math.max(0,Math.min(100,Math.round(done/total*100)));
+  }
+  function bookProgressText(b){
+    const m=st.book.marks[b.id];
+    if(!m||!m.pct) return '未读';
+    return m.pct+'%';
+  }
+  function leaveReading(){
+    const id=st.reader.bookId;
+    if(id) st.book.marks[id]={pct:readerPct()};
+  }
+  const CHAPTER_RE=/^第[零一二三四五六七八九十百千万0-9]+[章节回卷篇].*$/;
+  function buildToc(){
+    const lines=st.reader.lines||[], items=[];
+    for(let i=0;i<lines.length;i++){
+      const t=String(lines[i]).trim();
+      if(t&&CHAPTER_RE.test(t)) items.push({title:t,line:i});
+    }
+    if(!items.length) items.push({title:'全文',line:0});
+    st.book.tocItems=items; st.book.tocSel=0; st.book.tocPage=0;
+  }
+  function jumpToChapter(idx){
+    const it=st.book.tocItems[idx];
+    if(!it) return;
+    st.reader.page=Math.max(0,Math.floor(it.line/14));
+    st.prev='PAGE_BOOK_TOC'; st.page='PAGE_READER';
+  }
+  function jumpToPct(pct){
+    const total=st.reader.lines.length;
+    if(!total) return;
+    const p=Math.max(0,Math.min(100,pct));
+    const lastPage=Math.max(0,Math.ceil(total/14)-1);
+    st.reader.page=Math.max(0,Math.min(lastPage,Math.floor(total*p/100/14)));
+    st.prev='PAGE_BOOK_JUMP'; st.page='PAGE_READER';
+  }
+  function todayStr(){
+    const d=new Date();
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+  function tickReading(){
+    const now=Date.now();
+    const dt=now-(tickReading.last||now);
+    tickReading.last=now;
+    if(st.page!=='PAGE_READER') return;       // 只在正文页累计
+    const today=todayStr();
+    if(st.book.dailyDate!==today){ st.book.dailyDate=today; st.book.dailyUsedSec=0; }
+    if(dt>2000) return;                      // 停顿不补计
+    st.book.dailyUsedSec+=dt;
+  }
+
   function back(){ if(st.prev){ const p=st.prev; st.prev=null; st.page=p; st.sel=0; } else st.page='PAGE_HOME'; }
   function startRecording(){
     if(!st.audioPcm && !st.voiceText){
@@ -935,7 +1236,15 @@ const DS = (function(){
     const b=st.books[st.sel]; if(!b) return;
     const d=await devCall('GET','/api/v1/content/download?token='+encodeURIComponent(b.token));
     if(!d||!d.data) return;
-    st.reader={title:b.id,lines:String(d.data.text||'').split('\n'),page:0,bytes:d.data.size};
+    const lines=String(d.data.text||'').split('\n');
+    st.reader={title:b.id,bookId:b.id,lines:lines,page:0,bytes:d.data.size};
+    // 恢复上次读到的位置（书签）
+    const m=st.book.marks[b.id];
+    if(m&&m.pct){
+      const lastPage=Math.max(0,Math.ceil(lines.length/14)-1);
+      st.reader.page=Math.max(0,Math.min(lastPage,Math.floor(lines.length*m.pct/100/14)));
+    }
+    st.book.menuSel=0;
   }
   function wrapText(s,maxW,size){
     cx.font=F(size||12,false);
@@ -978,7 +1287,7 @@ const DS = (function(){
     }
     hintBar(p&&p.hint);
   }
-  function loop(){ draw(); requestAnimationFrame(loop); }
+  function loop(){ tickReading(); draw(); requestAnimationFrame(loop); }
 
   // ------------------------------------------------------------ 手势
   // 六手势宪法（03 §3.2）：四向导航 ＋ 短按确定 ＋ 长按退出；无双击。
@@ -1059,6 +1368,9 @@ const DS = (function(){
     cx=cv.getContext('2d'); cx.setTransform(dpr,0,0,dpr,0,0);
     cv.style.width=W+'px'; cv.style.height=H+'px';
     st.devId=(document.getElementById('dsDevId')||{}).value||'esp32s3_web0001';
+    loadCity();
+    // 开机进引导页（固件：未联网未登记时先 PAGE_OOBE）
+    st.page=(st.paired||skipOobe())?'PAGE_HOME':'PAGE_OOBE';
     bindJoystick();
     const z=document.getElementById('dsZoom');
     if(z) z.addEventListener('change',setZoom);
@@ -1080,14 +1392,21 @@ const DS = (function(){
     const r=await api('/admin/api/device-sim/pair',{method:'POST',body:{device_id:id,pair_code:code}});
     if(!r.j.ok){ toast(r.j.msg||'绑定失败'); return; }
     st.paired=true;
+    st.oobe.state='READY';
     document.getElementById('dsPairCode').value='';
     toast('虚拟设备已绑定');
     await boot();
+    st.page='PAGE_HOME';
     draw();
   }
   function reset(){
-    st.page='PAGE_HOME'; st.prev=null; st.sel=0; st.solve=null; st.sid=null; st.hint=0;
-    st.overlay=null; st.toast=null; st.photo=null; st.photoB64=null; st.cards=[]; st.cardSel=0; st.reader={title:'',lines:[],page:0,bytes:0};
+    st.page=(st.paired||skipOobe())?'PAGE_HOME':'PAGE_OOBE';
+    st.prev=null; st.sel=0; st.solve=null; st.sid=null; st.hint=0;
+    st.overlay=null; st.toast=null; st.photo=null; st.photoB64=null; st.cards=[]; st.cardSel=0;
+    st.reader={title:'',bookId:'',lines:[],page:0,bytes:0};
+    st.book={menuSel:0,tocSel:0,tocPage:0,tocItems:[],jumpPct:50,dailyUsedSec:0,dailyDate:'',
+             marks:{},lockedTitle:'该休息啦',lockedBody:'现在是阅读休息时段\n明早再来读书吧'};
+    st.oobe.sel=0; st.oobe.state=st.paired?'READY':'PENDING';
     draw();
   }
   function bindFile(id,handler){
