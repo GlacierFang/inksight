@@ -21,6 +21,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <Preferences.h>
+#include <esp_heap_caps.h>
 #include <time.h>
 
 #include <stdlib.h>
@@ -43,6 +44,7 @@ extern "C" void configTime(long gmtOffset_sec, int daylightOffset_sec,
 #include "net_client.h"
 #include "net_req.h"
 #include "hal_interfaces.h"
+#include "hal_shared.h"
 
 /* ===================== 常量 ===================== */
 
@@ -549,6 +551,336 @@ static bool net_http_exchange(const char *host, const char *method, const char *
         return false;
     }
     return true;
+}
+
+/* ===================== 资产下载 ===================== */
+
+void net_gateway_base(char *out, size_t out_cap)
+{
+    char host[128];
+    char mount[64];
+    net_gateway(host, sizeof host, mount, sizeof mount);
+    snprintf(out, out_cap, "http://%s%s", host, mount);
+}
+
+/** 在响应头里找某个头的值（大小写不敏感）。找不到返回 false。 */
+static bool net_header_value(const char *head, size_t head_len, const char *name,
+                              char *out, size_t out_cap)
+{
+    size_t nlen = strlen(name);
+    size_t pos = 0;
+    while (pos < head_len) {
+        size_t line_end = pos;
+        while (line_end < head_len && head[line_end] != '\n') {
+            line_end++;
+        }
+        size_t line_len = line_end - pos;
+        if (line_len > nlen) {
+            bool match = true;
+            for (size_t i = 0; i < nlen; i++) {
+                char a = head[pos + i];
+                char b = name[i];
+                if (a >= 'A' && a <= 'Z') { a = (char)(a - 'A' + 'a'); }
+                if (b >= 'A' && b <= 'Z') { b = (char)(b - 'A' + 'a'); }
+                if (a != b) { match = false; break; }
+            }
+            if (match && head[pos + nlen] == ':') {
+                size_t v = pos + nlen + 1;
+                while (v < line_end && (head[v] == ' ' || head[v] == '\t')) {
+                    v++;
+                }
+                size_t vend = line_end;
+                while (vend > v && (head[vend - 1] == '\r' || head[vend - 1] == ' ' ||
+                                    head[vend - 1] == '\t')) {
+                    vend--;
+                }
+                size_t vlen = vend - v;
+                if (vlen + 1 > out_cap) {
+                    return false;
+                }
+                memcpy(out, head + v, vlen);
+                out[vlen] = '\0';
+                return true;
+            }
+        }
+        pos = line_end + 1;
+    }
+    return false;
+}
+
+/**
+ * 明文 GET（token 在 query 里，不加签不加密）。
+ * 响应体落 PSRAM 缓冲；`X-File-Sha256` 头一并带出。
+ */
+static bool net_http_get(const char *url, uint8_t **out_body, uint32_t *out_len,
+                          char *out_sha_hex, size_t sha_cap)
+{
+    *out_body = NULL;
+    *out_len = 0;
+    out_sha_hex[0] = '\0';
+
+    const char *scheme = strstr(url, "://");
+    if (scheme == NULL) {
+        return false;
+    }
+    const char *host_start = scheme + 3;
+    const char *slash = strchr(host_start, '/');
+    if (slash == NULL) {
+        return false;
+    }
+    char host[128];
+    size_t host_len = (size_t)(slash - host_start);
+    uint16_t port = 80;
+    const char *colon = (const char *)memchr(host_start, ':', host_len);
+    if (colon != NULL) {
+        host_len = (size_t)(colon - host_start);
+        port = (uint16_t)atoi(colon + 1);
+    }
+    if (host_len == 0 || host_len >= sizeof(host)) {
+        return false;
+    }
+    memcpy(host, host_start, host_len);
+    host[host_len] = '\0';
+    const char *path = slash;
+
+    WiFiClient client;
+    if (!client.connect(host, port, NET_HTTP_TIMEOUT_MS)) {
+        return false;
+    }
+    client.setTimeout(NET_HTTP_TIMEOUT_MS);
+    client.print("GET ");
+    client.print(path);
+    client.print(" HTTP/1.1\r\n");
+    client.print("Host: ");
+    client.print(host);
+    client.print("\r\n");
+    client.print("X-Device-Id: ");
+    client.print(net_device_id());
+    client.print("\r\n");
+    client.print("Connection: close\r\n\r\n");
+
+    /* 读响应头（到空行为止） */
+    char head[512];
+    size_t head_len = 0;
+    bool head_done = false;
+    while (!head_done) {
+        int c = client.read();
+        if (c < 0) {
+            if (!client.connected()) {
+                break;
+            }
+            delay(2);
+            continue;
+        }
+        if (head_len + 1 >= sizeof(head)) {
+            client.stop();
+            return false;
+        }
+        head[head_len++] = (char)c;
+        if (head_len >= 4 && memcmp(head + head_len - 4, "\r\n\r\n", 4) == 0) {
+            head_done = true;
+        }
+    }
+    head[head_len] = '\0';
+    if (!head_done) {
+        client.stop();
+        return false;
+    }
+    if (strncmp(head, "HTTP/1.", 7) != 0) {
+        client.stop();
+        return false;
+    }
+    int status = atoi(head + 9);
+    if (status != 200) {
+        client.stop();
+        return false;
+    }
+    char len_text[24];
+    if (!net_header_value(head, head_len, "Content-Length", len_text, sizeof(len_text))) {
+        client.stop();
+        return false;
+    }
+    long content_length = atol(len_text);
+    if (content_length <= 0) {
+        client.stop();
+        return false;
+    }
+    net_header_value(head, head_len, "X-File-Sha256", out_sha_hex, sha_cap);
+
+    /* 读响应体到 PSRAM */
+    uint8_t *body = (uint8_t *)heap_caps_malloc((size_t)content_length, MALLOC_CAP_SPIRAM);
+    if (body == NULL) {
+        client.stop();
+        return false;
+    }
+    uint32_t got = 0;
+    while (got < (uint32_t)content_length) {
+        int c = client.read();
+        if (c < 0) {
+            if (!client.connected()) {
+                break;
+            }
+            delay(2);
+            continue;
+        }
+        body[got++] = (uint8_t)c;
+    }
+    client.stop();
+    if (got != (uint32_t)content_length) {
+        heap_caps_free(body);
+        return false;
+    }
+    *out_body = body;
+    *out_len = got;
+    return true;
+}
+
+/** 下载并校验，产出 PSRAM 缓冲（内部用）。 */
+static bool net_fetch_signed_asset(const char *signed_url, const char *expected_sha256,
+                                   uint8_t **out_body, uint32_t *out_len)
+{
+    uint8_t *body = NULL;
+    uint32_t len = 0;
+    char sha_hex[NC_SHA256_HEX_LEN + 1];
+    if (!net_http_get(signed_url, &body, &len, sha_hex, sizeof(sha_hex))) {
+        return false;
+    }
+    char calc[NC_SHA256_HEX_LEN + 1];
+    if (nc_sha256_hex(body, len, calc) != NC_OK) {
+        heap_caps_free(body);
+        return false;
+    }
+    const char *expect = (expected_sha256 != NULL && expected_sha256[0] != '\0')
+                             ? expected_sha256
+                             : sha_hex;
+    if (expect[0] == '\0' || strcmp(calc, expect) != 0) {
+        heap_caps_free(body);
+        return false;
+    }
+    *out_body = body;
+    *out_len = len;
+    return true;
+}
+
+bool net_download_signed_asset(const char *signed_url, const char *save_path,
+                               const char *expected_sha256)
+{
+    if (signed_url == NULL || save_path == NULL) {
+        return false;
+    }
+    uint8_t *body = NULL;
+    uint32_t len = 0;
+    if (!net_fetch_signed_asset(signed_url, expected_sha256, &body, &len)) {
+        return false;
+    }
+
+    /* TF 卡归存储任务独占（doc/02 §4.2）—— 交它落盘，等回执。
+     * 作业对象与数据缓冲都由**本函数（网络任务）**释放：存储任务只写文件、
+     * 回填 result、给信号，之后不再碰作业对象，避免网络任务醒来时作业已被释放。 */
+    SemaphoreHandle_t done = xSemaphoreCreateBinary();
+    storage_asset_job_t *job = (storage_asset_job_t *)malloc(sizeof(storage_asset_job_t));
+    if (done == NULL || job == NULL) {
+        if (done != NULL) {
+            vSemaphoreDelete(done);
+        }
+        if (job != NULL) {
+            free(job);
+        }
+        heap_caps_free(body);
+        return false;
+    }
+    memset(job, 0, sizeof(*job));
+    job->data = body;
+    job->len = len;
+    job->result = HAL_ERR_IO;
+    job->done = done;
+
+    storage_req_t req;
+    memset(&req, 0, sizeof(req));
+    req.op = 4;                /* 写资产文件 */
+    snprintf(req.path, sizeof(req.path), "%s", save_path);
+    req.asset = job;
+
+    bool ok = false;
+    if (xQueueSend(hal_storage_req_queue(), &req, 0) != pdTRUE) {
+        goto cleanup;
+    }
+    if (xSemaphoreTake(done, pdMS_TO_TICKS(30000)) == pdTRUE) {
+        ok = (job->result == HAL_OK);
+    }
+cleanup:
+    vSemaphoreDelete(done);
+    if (job->data != NULL) {
+        heap_caps_free(job->data);
+    }
+    free(job);
+    return ok;
+}
+
+/* ===================== 待同步资产 ===================== */
+
+/** 下载单个资产：服务端相对路径 -> 设备路径 -> 下载落盘。 */
+static bool net_download_one(const char *rel_path, const char *token)
+{
+    if (rel_path == NULL || token == NULL) {
+        return false;
+    }
+    char dev_path[96];
+    if (nr_map_rel_path(rel_path, dev_path, sizeof(dev_path)) != 0) {
+        Serial.printf("[%s] 未知资源路径：%s\n", NET_TAG, rel_path);
+        return false;
+    }
+    char base[200];
+    net_gateway_base(base, sizeof(base));
+    char url[320];
+    if (nr_build_download_url(base, token, url, sizeof(url)) != 0) {
+        return false;
+    }
+    if (!net_download_signed_asset(url, dev_path, NULL)) {
+        Serial.printf("[%s] 下载失败：%s\n", NET_TAG, dev_path);
+        return false;
+    }
+    Serial.printf("[%s] 已同步：%s\n", NET_TAG, dev_path);
+    return true;
+}
+
+bool net_sync_pending_assets(const char *bootstrap_json, size_t len)
+{
+    if (bootstrap_json == NULL || len == 0) {
+        return false;
+    }
+    bool parsed = false;
+
+    /* 课表是对象，不是数组 */
+    const char *obj = NULL;
+    size_t obj_len = 0;
+    if (nr_json_get_object(bootstrap_json, len, "schedule_download", &obj, &obj_len) == 0) {
+        char rel[96];
+        char token[256];
+        if (nr_json_get_string(obj, obj_len, "rel_path", rel, sizeof(rel)) > 0 &&
+            nr_json_get_string(obj, obj_len, "token", token, sizeof(token)) > 0) {
+            parsed = true;
+            net_download_one(rel, token);
+        }
+    }
+
+    /* 学科包与电子书是数组 */
+    nr_pending_t items[NR_MAX_PENDING];
+    int count = 0;
+    static const char *kArrays[2] = { "pending_packs", "pending_books" };
+    static const char *kIdKeys[2] = { "pack_id", "book_id" };
+    for (int a = 0; a < 2; a++) {
+        count = 0;
+        if (nr_parse_pending(bootstrap_json, len, kArrays[a], kIdKeys[a], items,
+                            NR_MAX_PENDING, &count) != 0) {
+            continue;
+        }
+        for (int i = 0; i < count; i++) {
+            parsed = true;
+            net_download_one(items[i].rel_path, items[i].token);
+        }
+    }
+    return parsed;
 }
 
 /* ===================== 端云加密通信 ===================== */

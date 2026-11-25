@@ -36,6 +36,10 @@ int net_dispatch(const net_request_t *req, char **out_resp_json)
         break;
     case NET_OP_BOOTSTRAP:
         ok = net_sync_bootstrap_auto(&biz, &resp);
+        if (ok && resp != NULL) {
+            /* 心跳应答里的待下载清单：拉取并落盘（课表 / 学科包 / 电子书） */
+            net_sync_pending_assets(resp, strlen(resp));
+        }
         break;
     case NET_OP_PAIR:
         ok = net_pair_with_code(req->pair_code);

@@ -340,6 +340,100 @@ static void test_solve_result(void)
     }
 }
 
+static void test_pending_assets(void)
+{
+    printf("[9] 待同步资产解析与路径映射\n");
+    /* 心跳应答的真实形状（doc/05 §5） */
+    const char *json =
+        "{\"weather\":{},"
+        "\"schedule_download\":{\"rel_path\":\"schedules/latest.json\","
+        "\"updated_at\":1795400000,\"token\":\"tk-sched\"},"
+        "\"pending_packs\":[{\"pack_id\":\"m7_geo\","
+        "\"rel_path\":\"packs/m7_geo/cards.enc\",\"token\":\"tk-p1\"}],"
+        "\"pending_books\":[{\"book_id\":\"xw\","
+        "\"rel_path\":\"books/xw.txt\",\"token\":\"tk-b1\"}],"
+        "\"effective_remaining_quota\":9,\"server_time\":1795412000}";
+    size_t len = strlen(json);
+
+    /* 数组遍历 */
+    CHECK(nr_array_count(json, len, "pending_packs") == 1, "pending_packs 元素数正确");
+    CHECK(nr_array_count(json, len, "pending_books") == 1, "pending_books 元素数正确");
+    CHECK(nr_array_count(json, len, "nonexistent") == -1, "不存在的键返回 -1");
+
+    /* 取数组元素 */
+    const char *item = NULL;
+    size_t item_len = 0;
+    CHECK(nr_array_item(json, len, "pending_packs", 0, &item, &item_len) == 0, "取到 pending_packs[0]");
+    char pid[16];
+    CHECK(nr_json_get_string(item, item_len, "pack_id", pid, sizeof(pid)) > 0, "pack_id 存在");
+
+    /* 待同步资产解析 */
+    nr_pending_t items[NR_MAX_PENDING];
+    int count = 0;
+    CHECK(nr_parse_pending(json, len, "pending_packs", "pack_id", items, NR_MAX_PENDING, &count) == 0,
+          "pending_packs 解析成功");
+    CHECK(count == 1, "pending_packs 解析出 1 条");
+    CHECK(strcmp(items[0].id, "m7_geo") == 0, "pack_id 正确");
+    CHECK(strcmp(items[0].rel_path, "packs/m7_geo/cards.enc") == 0, "rel_path 正确");
+    CHECK(strcmp(items[0].token, "tk-p1") == 0, "token 正确");
+
+    count = 0;
+    CHECK(nr_parse_pending(json, len, "pending_books", "book_id", items, NR_MAX_PENDING, &count) == 0,
+          "pending_books 解析成功");
+    CHECK(count == 1, "pending_books 解析出 1 条");
+    CHECK(strcmp(items[0].id, "xw") == 0, "book_id 正确");
+
+    /* 课表是对象 —— 平铺查找会拿错 pending_packs 里的 rel_path，所以必须按对象取 */
+    const char *obj = NULL;
+    size_t obj_len = 0;
+    CHECK(nr_json_get_object(json, len, "schedule_download", &obj, &obj_len) == 0,
+          "取到 schedule_download 对象");
+    char rel[96];
+    char token[256];
+    CHECK(nr_json_get_string(obj, obj_len, "rel_path", rel, sizeof(rel)) > 0, "对象内 rel_path 正确");
+    CHECK(strcmp(rel, "schedules/latest.json") == 0, "课表 rel_path 正确");
+    CHECK(nr_json_get_string(obj, obj_len, "token", token, sizeof(token)) > 0, "对象内 token 存在");
+    CHECK(strcmp(token, "tk-sched") == 0, "课表 token 正确");
+
+    /* 服务端相对路径 -> 设备 TF 卡路径 */
+    char dev[96];
+    CHECK(nr_map_rel_path("packs/m7_geo/cards.enc", dev, sizeof(dev)) == 0, "学科包路径映射成功");
+    CHECK(strcmp(dev, "/subjects/m7_geo/cards.enc") == 0, "学科包映射到 /subjects");
+    CHECK(nr_map_rel_path("books/xw.txt", dev, sizeof(dev)) == 0, "电子书路径映射成功");
+    CHECK(strcmp(dev, "/books/xw.txt") == 0, "电子书映射到 /books");
+    CHECK(nr_map_rel_path("schedules/latest.json", dev, sizeof(dev)) == 0, "课表路径映射成功");
+    CHECK(strcmp(dev, "/config/schedule.json") == 0, "课表映射到 /config/schedule.json");
+    CHECK(nr_map_rel_path("unknown/x.bin", dev, sizeof(dev)) == -1, "未知前缀映射失败");
+
+    /* 下载链接拼装 */
+    char url[320];
+    int n = nr_build_download_url("http://host/abbot", "tk-p1", url, sizeof(url));
+    CHECK(n > 0, "下载链接拼装成功");
+    CHECK(strcmp(url, "http://host/abbot/api/v1/content/download?token=tk-p1") == 0, "下载链接正确");
+    CHECK(nr_build_download_url("http://host/abbot", "tk", url, 8) == -1, "链接被截断时返回 -1");
+}
+
+static void test_ota_reply(void)
+{
+    printf("[10] OTA 检查应答解析\n");
+    const char *json =
+        "{\"has_update\":true,\"latest_ver\":\"1.0.1\","
+        "\"sha256\":\"00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\","
+        "\"size\":826368,\"bin_url\":\"http://host/abbot/api/v1/content/download?token=tk\"}";
+    nr_ota_t ota;
+    CHECK(nr_parse_ota(json, strlen(json), &ota) == 0, "OTA 应答解析成功");
+    CHECK(ota.has_update == true, "has_update 为真");
+    CHECK(strcmp(ota.latest_ver, "1.0.1") == 0, "latest_ver 正确");
+    CHECK(strlen(ota.sha256) == 64, "sha256 长度正确");
+    CHECK(ota.size == 826368, "size 正确");
+    CHECK(strstr(ota.bin_url, "content/download") != NULL, "bin_url 正确");
+
+    const char *none = "{\"has_update\":false}";
+    CHECK(nr_parse_ota(none, strlen(none), &ota) == 0, "无更新时解析成功");
+    CHECK(ota.has_update == false, "has_update 为假");
+    CHECK(ota.size == 0, "无更新时 size 为 0");
+}
+
 int main(void)
 {
     printf("=== abbot 设备端请求层测试（net_req）===\n");
@@ -351,6 +445,8 @@ int main(void)
     test_json_get();
     test_http_response();
     test_solve_result();
+    test_pending_assets();
+    test_ota_reply();
     printf("\n=== %d PASS / %d FAIL ===\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -148,6 +148,38 @@ bool net_study_voice(const char *context_page, const char *pack_id, const char *
                      const uint8_t *pcm_data, size_t pcm_len,
                      int *out_biz_code, char **out_resp_json);
 
+/* ===================== 资产下载 ===================== */
+
+/** 网关基址（如 `http://ruohan.site/abbot`），用于拼下载地址。 */
+void net_gateway_base(char *out, size_t out_cap);
+
+/**
+ * 下载一个签名资产、校验完整性并落到 TF 卡（doc/04 §六 第 4 条）。
+ *
+ * - `signed_url`：完整下载地址（token 在 query 里，不加签不加密）；
+ * - `save_path`：设备侧 TF 卡路径（如 `/subjects/m7_geo/cards.enc`）；
+ * - `expected_sha256`：传 NULL 时用响应头 `X-File-Sha256` 作期望值（doc/04 §五）。
+ *
+ * TF 卡由 `task_storage` 独占串行化访问（doc/02 §4.2），所以本函数**不直接写卡**，
+ * 而是把已校验的缓冲交给存储任务落盘并等它回执。
+ * 返回 true 表示已校验且已落盘。
+ */
+bool net_download_signed_asset(const char *signed_url, const char *save_path,
+                               const char *expected_sha256);
+
+/**
+ * 同步心跳应答里「待下载」的资产（课表 / 学科包 / 电子书）。
+ *
+ * `bootstrap_json` 是心跳应答的解密明文。函数会：
+ *   1. 取出 `schedule_download` 与 `pending_packs[]` / `pending_books[]` 里的
+ *      `rel_path` 与 `token`；
+ *   2. 把服务端相对路径映射成设备 TF 卡路径（doc/04 §2.1 目录树）；
+ *   3. 逐个走 `net_download_signed_asset` 下载并落盘（校验 SHA-256）。
+ *
+ * 返回 true 表示清单解析成功（个别资产下载失败只记日志，不影响其余）。
+ */
+bool net_sync_pending_assets(const char *bootstrap_json, size_t len);
+
 /* ===================== 调度层（纯 C，可主机侧单测） ===================== */
 /**
  * 按 `net_request_t.op` 分派到对应端点。

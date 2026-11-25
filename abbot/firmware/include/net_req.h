@@ -115,6 +115,80 @@ int nr_build_bootstrap_plain(const char *device_id, const char *fw_version,
  */
 int nr_parse_profile(const char *json, size_t len, nr_profile_doc_t *out);
 
+/* ---------- JSON 数组遍历（bootstrap 的待同步清单是数组） ---------- */
+
+/** 数组 `key` 的元素个数（空数组返回 0；没有该键返回 -1）。 */
+int nr_array_count(const char *json, size_t len, const char *key);
+
+/**
+ * 取对象字段 `key` 指向的**对象片段**（`{...}` 内部），`*out_start` / `*out_len`
+ * 指向该对象在原 JSON 中的位置。
+ *
+ * 为什么需要它：bootstrap 应答里 `schedule_download` 是对象，而 `rel_path` 这个键
+ * 在 `pending_packs[]` 的每个元素里也出现过 —— 平铺查找会拿错那一条。
+ * 返回 0 成功；-1 没有该键或不是对象。
+ */
+int nr_json_get_object(const char *json, size_t len, const char *key,
+                       const char **out_start, size_t *out_len);
+
+/**
+ * 取数组 `key` 的第 `index` 个元素（0 起），
+ * `*out_start` / `*out_len` 指向该元素在原 JSON 中的位置（不含外层空白）。
+ * 返回 0 成功；-1 下标越界或没有该键。
+ */
+int nr_array_item(const char *json, size_t len, const char *key, int index,
+                  const char **out_start, size_t *out_len);
+
+/* ---------- 待同步资产（bootstrap 应答的 pending_packs / pending_books） ---------- */
+
+#define NR_MAX_PENDING 16
+
+typedef struct {
+    char id[32];      /* pack_id / book_id */
+    char rel_path[80];/* 服务端 storage/ 下的相对路径 */
+    char token[200];  /* 短时签名下载 token（doc/05 §3.3） */
+} nr_pending_t;
+
+/**
+ * 解析待同步资产数组。`array_key` 取 `pending_packs` / `pending_books`，
+ * `id_key` 取 `pack_id` / `book_id`。
+ * 返回 0 成功（`*out_count` 为解析到的条数）；-1 参数非法。
+ */
+int nr_parse_pending(const char *json, size_t len, const char *array_key, const char *id_key,
+                     nr_pending_t *out, int max, int *out_count);
+
+/* ---------- OTA 检查应答（doc/05 §5 的 /api/v1/ota/check） ---------- */
+
+typedef struct {
+    int has_update;
+    char latest_ver[24];
+    char sha256[65];
+    uint32_t size;
+    char bin_url[224];
+} nr_ota_t;
+
+/** 解析 OTA 检查应答。返回 0 成功；-1 参数非法。 */
+int nr_parse_ota(const char *json, size_t len, nr_ota_t *out);
+
+/* ---------- 下载链接拼装 ---------- */
+
+/**
+ * 拼签名资产下载地址：`{base}/api/v1/content/download?token={token}`。
+ * base 是网关基址（`http://<host><mount>`）。返回写入长度，-1 参数非法或被截断。
+ */
+int nr_build_download_url(const char *base, const char *token, char *out, size_t out_cap);
+
+/* ---------- 服务端相对路径 -> 设备 TF 卡路径 ---------- */
+
+/**
+ * 把服务端 `storage/` 下的相对路径映射成设备 TF 卡路径：
+ *   packs/<id>/xxx   -> /subjects/<id>/xxx
+ *   books/<name>.xxx -> /books/<name>.xxx
+ *   schedules/xxx    -> /config/xxx
+ * 返回 0 成功；-1 无法识别的前缀。
+ */
+int nr_map_rel_path(const char *rel_path, char *out, size_t out_cap);
+
 /* ---------- JSON 取值（扁平对象，值为 string / number / bool） ---------- */
 
 /** 取字符串字段（自动解转义）。返回写入长度（不含结尾 NUL），负数为错误。 */

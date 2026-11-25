@@ -124,11 +124,25 @@ typedef struct {
     char path[72]; /* op=4 时的文件路径 */
 } audio_msg_t;
 
+/**
+ * 资产写入作业 —— net 任务把下载好的大文件交给存储任务落盘。
+ *
+ * 为什么绕这一圈：TF 卡由 `task_storage` 独占串行化访问（doc/02 §4.2），
+ * net 任务直接写卡会与存储任务抢总线。
+ */
 typedef struct {
-    uint8_t op; /* 1=写文本文件 2=删除文件 3=读文本文件 */
+    uint8_t *data;            /* 数据缓冲（所有权随作业转移，写完由存储任务释放） */
+    uint32_t len;
+    int32_t result;            /* HAL_OK 或错误码 */
+    SemaphoreHandle_t done;     /* 存储任务写完后 give，net 任务 take */
+} storage_asset_job_t;
+
+typedef struct {
+    uint8_t op; /* 1=写文本文件 2=删除文件 3=读文本文件 4=写资产文件 */
     char path[72];
     char text[1024]; /* 原子写入的正文（profile.json 等档案文件需要这个量级） */
     uint32_t len;
+    storage_asset_job_t *asset; /* op=4：资产写入作业 */
 } storage_req_t;
 
 /* ===================== HAL 内部互调（不在 §六 对外契约里） ===================== */

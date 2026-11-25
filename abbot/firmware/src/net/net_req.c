@@ -373,6 +373,336 @@ int nr_parse_profile(const char *json, size_t len, nr_profile_doc_t *out)
     return 0;
 }
 
+/* ===================== JSON 数组遍历 ===================== */
+
+/** 定位 `key` 对应的数组体，返回数组体起止位置；找不到返回 -1。 */
+static int nr_find_array(const char *json, size_t len, const char *key,
+                         size_t *out_start, size_t *out_end)
+{
+    char pat[64];
+    int pn = snprintf(pat, sizeof(pat), "\"%s\"", key);
+    if (json == NULL || key == NULL || pn <= 0 || (size_t)pn >= sizeof(pat)) {
+        return -1;
+    }
+    const char *end = json + len;
+    const char *p = json;
+    while ((size_t)(end - p) >= (size_t)pn) {
+        const char *hit = NULL;
+        for (const char *q = p; q + pn <= end; q++) {
+            if (memcmp(q, pat, (size_t)pn) == 0) {
+                hit = q;
+                break;
+            }
+        }
+        if (hit == NULL) {
+            return -1;
+        }
+        const char *c = hit + pn;
+        while (c < end && (*c == ' ' || *c == '\t')) {
+            c++;
+        }
+        if (c >= end || *c != ':') {
+            p = hit + pn;
+            continue;
+        }
+        c++;
+        while (c < end && (*c == ' ' || *c == '\t')) {
+            c++;
+        }
+        if (c >= end || *c != '[') {
+            p = hit + pn;
+            continue;
+        }
+        c++;
+        size_t start = (size_t)(c - json);
+        int in_str = 0;
+        int esc = 0;
+        while (c < end) {
+            char ch = *c;
+            if (esc) {
+                esc = 0;
+            } else if (in_str) {
+                if (ch == '\\') {
+                    esc = 1;
+                } else if (ch == '"') {
+                    in_str = 0;
+                }
+            } else if (ch == '"') {
+                in_str = 1;
+            } else if (ch == ']') {
+                *out_start = start;
+                *out_end = (size_t)(c - json);
+                return 0;
+            }
+            c++;
+        }
+        return -1;
+    }
+    return -1;
+}
+
+/**
+ * 在数组体内定位第 index 个元素。
+ * 元素按顶层逗号切分（嵌套的 {} [] 内部逗号不算，字符串内逗号不算）。
+ */
+static int nr_array_locate(const char *json, size_t start, size_t end, int index,
+                            const char **out_start, size_t *out_len)
+{
+    const char *p = json + start;
+    const char *endp = json + end;
+    int idx = 0;
+    int in_str = 0;
+    int esc = 0;
+    int depth = 0;
+    const char *elem_begin = p;
+    while (p <= endp) {
+        int at_end = (p == endp);
+        char ch = at_end ? ',' : *p;
+        {
+            /* at_end 时 ch 被当成 ','，让最后一个元素也能走同一条「顶层逗号 -> 收尾」分支。
+             * 之前这里用 `if (!at_end)` 包着，数组末尾直接 break，最后一个元素永远吐不出来。 */
+            if (esc) {
+                esc = 0;
+            } else if (in_str) {
+                if (ch == '\\') {
+                    esc = 1;
+                } else if (ch == '"') {
+                    in_str = 0;
+                }
+            } else if (ch == '"') {
+                in_str = 1;
+            } else if (ch == '{' || ch == '[') {
+                depth++;
+            } else if (ch == '}' || ch == ']') {
+                depth--;
+            } else if (ch == ',' && depth == 0) {
+                /* 顶层逗号 -> 当前元素结束 */
+                const char *b = elem_begin;
+                while (b < p && (*b == ' ' || *b == '\t' || *b == '\n' || *b == '\r')) {
+                    b++;
+                }
+                const char *e = p;
+                while (e > b && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\n' || e[-1] == '\r')) {
+                    e--;
+                }
+                if (e > b) {
+                    if (idx == index) {
+                        *out_start = b;
+                        *out_len = (size_t)(e - b);
+                        return 0;
+                    }
+                    idx++;
+                }
+                elem_begin = p + 1;
+                p++;
+                continue;
+            }
+        }
+        if (at_end) {
+            break;
+        }
+        p++;
+    }
+    return -1;
+}
+
+int nr_json_get_object(const char *json, size_t len, const char *key,
+                       const char **out_start, size_t *out_len)
+{
+    if (json == NULL || key == NULL || out_start == NULL || out_len == NULL) {
+        return -1;
+    }
+    char pat[64];
+    int pn = snprintf(pat, sizeof(pat), "\"%s\"", key);
+    if (pn <= 0 || (size_t)pn >= sizeof(pat)) {
+        return -1;
+    }
+    const char *end = json + len;
+    const char *p = json;
+    while ((size_t)(end - p) >= (size_t)pn) {
+        const char *hit = NULL;
+        for (const char *q = p; q + pn <= end; q++) {
+            if (memcmp(q, pat, (size_t)pn) == 0) {
+                hit = q;
+                break;
+            }
+        }
+        if (hit == NULL) {
+            return -1;
+        }
+        const char *c = hit + pn;
+        while (c < end && (*c == ' ' || *c == '\t')) {
+            c++;
+        }
+        if (c >= end || *c != ':') {
+            p = hit + pn;
+            continue;
+        }
+        c++;
+        while (c < end && (*c == ' ' || *c == '\t')) {
+            c++;
+        }
+        if (c >= end || *c != '{') {
+            p = hit + pn;
+            continue;
+        }
+        c++;
+        const char *start = c;   /* 对象体的起点（指针，不是偏移） */
+        int in_str = 0;
+        int esc = 0;
+        int depth = 1;
+        while (c < end) {
+            char ch = *c;
+            if (esc) {
+                esc = 0;
+            } else if (in_str) {
+                if (ch == '\\') {
+                    esc = 1;
+                } else if (ch == '"') {
+                    in_str = 0;
+                }
+            } else if (ch == '"') {
+                in_str = 1;
+            } else if (ch == '{') {
+                depth++;
+            } else if (ch == '}') {
+                depth--;
+                if (depth == 0) {
+                    *out_start = start;
+                    *out_len = (size_t)(c - start);
+                    return 0;
+                }
+            }
+            c++;
+        }
+        return -1;
+    }
+    return -1;
+}
+
+int nr_array_count(const char *json, size_t len, const char *key)
+{
+    size_t start = 0;
+    size_t end = 0;
+    if (nr_find_array(json, len, key, &start, &end) != 0) {
+        return -1;
+    }
+    int count = 0;
+    const char *s = NULL;
+    size_t l = 0;
+    for (int i = 0; nr_array_locate(json, start, end, i, &s, &l) == 0; i++) {
+        count++;
+    }
+    return count;
+}
+
+int nr_array_item(const char *json, size_t len, const char *key, int index,
+                  const char **out_start, size_t *out_len)
+{
+    if (json == NULL || key == NULL || out_start == NULL || out_len == NULL || index < 0) {
+        return -1;
+    }
+    size_t start = 0;
+    size_t end = 0;
+    if (nr_find_array(json, len, key, &start, &end) != 0) {
+        return -1;
+    }
+    return nr_array_locate(json, start, end, index, out_start, out_len);
+}
+
+/* ===================== 待同步资产 ===================== */
+
+int nr_parse_pending(const char *json, size_t len, const char *array_key, const char *id_key,
+                     nr_pending_t *out, int max, int *out_count)
+{
+    if (json == NULL || array_key == NULL || id_key == NULL || out == NULL || out_count == NULL || max <= 0) {
+        return -1;
+    }
+    *out_count = 0;
+    for (int i = 0; i < max; i++) {
+        const char *item = NULL;
+        size_t item_len = 0;
+        if (nr_array_item(json, len, array_key, i, &item, &item_len) != 0) {
+            break;
+        }
+        nr_pending_t p;
+        memset(&p, 0, sizeof(p));
+        if (nr_json_get_string(item, item_len, id_key, p.id, sizeof(p.id)) <= 0) {
+            continue;
+        }
+        if (nr_json_get_string(item, item_len, "rel_path", p.rel_path, sizeof(p.rel_path)) <= 0) {
+            continue;
+        }
+        if (nr_json_get_string(item, item_len, "token", p.token, sizeof(p.token)) <= 0) {
+            continue;
+        }
+        out[*out_count] = p;
+        (*out_count)++;
+    }
+    return 0;
+}
+
+/* ===================== OTA 检查应答 ===================== */
+
+int nr_parse_ota(const char *json, size_t len, nr_ota_t *out)
+{
+    if (json == NULL || out == NULL) {
+        return -1;
+    }
+    memset(out, 0, sizeof(*out));
+    out->has_update = (nr_json_get_bool(json, len, "has_update", false) != 0);
+    if (nr_json_get_string(json, len, "latest_ver", out->latest_ver, sizeof(out->latest_ver)) < 0) {
+        out->latest_ver[0] = '\0';
+    }
+    if (nr_json_get_string(json, len, "sha256", out->sha256, sizeof(out->sha256)) < 0) {
+        out->sha256[0] = '\0';
+    }
+    out->size = (uint32_t)nr_json_get_int(json, len, "size", 0);
+    if (nr_json_get_string(json, len, "bin_url", out->bin_url, sizeof(out->bin_url)) < 0) {
+        out->bin_url[0] = '\0';
+    }
+    return 0;
+}
+
+/* ===================== 服务端相对路径 -> 设备路径 ===================== */
+
+int nr_build_download_url(const char *base, const char *token, char *out, size_t out_cap)
+{
+    if (base == NULL || token == NULL || out == NULL || out_cap == 0) {
+        return -1;
+    }
+    int n = snprintf(out, out_cap, "%s/api/v1/content/download?token=%s", base, token);
+    if (n <= 0 || (size_t)n >= out_cap) {
+        return -1;
+    }
+    return n;
+}
+
+int nr_map_rel_path(const char *rel_path, char *out, size_t out_cap)
+{
+    if (rel_path == NULL || out == NULL || out_cap == 0) {
+        return -1;
+    }
+    if (strncmp(rel_path, "packs/", 6) == 0) {
+        snprintf(out, out_cap, "/subjects/%s", rel_path + 6);
+        return 0;
+    }
+    if (strncmp(rel_path, "books/", 6) == 0) {
+        snprintf(out, out_cap, "/books/%s", rel_path + 6);
+        return 0;
+    }
+    if (strcmp(rel_path, "schedules/latest.json") == 0) {
+        /* 网关侧叫 latest.json，设备侧档案文件名是 schedule.json（doc/04 §3.2） */
+        snprintf(out, out_cap, "/config/schedule.json");
+        return 0;
+    }
+    if (strncmp(rel_path, "schedules/", 10) == 0) {
+        snprintf(out, out_cap, "/config/%s", rel_path + 10);
+        return 0;
+    }
+    return -1;
+}
+
 /* ===================== JSON 取值 ===================== */
 
 static const char *nr_find_value(const char *json, size_t len, const char *key)
@@ -456,8 +786,15 @@ int nr_json_get_string(const char *json, size_t len, const char *key,
     p++;
     size_t pos = 0;
     while (*p != '\0') {
-        /* 边界检查：一次循环最多写 4 字节（UTF-8 最长），先确认放得下再写 */
-        if (out != NULL && pos + 4 > out_cap) {
+        /* 边界检查：单字节字符要 1 字节 + 结尾 NUL；`\uXXXX` 最多 4 字节 + NUL。
+         * 之前一律按 4 字节留余量，导致「64 字符 sha256 装 65 字节缓冲」被误判放不下。 */
+        size_t need = 1;
+        if (*p == '\\' && *(p + 1) == 'u') {
+            need = 4;
+        }
+        /* 结束引号不写任何字节，不占容量 —— 必须先放过它，
+         * 否则「64 字符 sha256 装 65 字节缓冲」会在最后一个字符处被误判放不下。 */
+        if (out != NULL && *p != '"' && (out_cap - pos) < (need + 1)) {
             return -2;
         }
         if (*p == '"') {

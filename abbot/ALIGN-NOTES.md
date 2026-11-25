@@ -801,7 +801,7 @@ Release `fw-237e82115bb3ed5e88f416857666b3a6c6a90704`，
 4. **本机拉不到 Actions 的 logs / artifacts**（blob 存储被出口代理挡成 403）。因此定位失败**只能读代码 + 读 ci-logs 分支**，不能去拉 Actions 日志 —— 这也是本节加 `manifest.txt` / `steps.txt` 的原因。
 5. **本机巡检脚本曾按字母序取"最新"日志** —— 日志文件名是 commit SHA，字母序 ≠ 时间序，于是连盯了三轮旧报错，误以为固件编译不过。已改为按 git 历史排序并比对当前 main 的 SHA。
 
-**尚未做：** 网络任务封装（`task_net_worker` 现在只是占位，尚未接 `net_client` 的端云信封，也没接真实 HTTP 传输）、UI 页面与真实数据源的绑定（各页目前是静态线框，没接拍题/解析/卡片包/书目数据）、页面级方向键的焦点移动与列表滚动。**实体硬件未到位**，摄像头取图 / 摇杆 ADC 阈值 / 屏幕刷屏 / TF 挂载这四项只有编译期保证，真机行为要等硬件做逐像素、逐交互黄金样校准。
+**尚未做（2026-11-25 更新）：** 上句已过时 —— 网络任务封装、UI 接真实数据、页面级方向键焦点移动与列表滚动都已随 D1–D5 落地（见 §9.17）。**现在只剩真机校准**：实体硬件未到位，摄像头取图 / 摇杆 ADC 阈值 / 屏幕刷屏 / TF 挂载这四项只有编译期保证，真机行为要等硬件做逐像素、逐交互黄金样校准。
 
 **这一轮 Actions 踩的坑（已修，别回头再踩）：**
 
@@ -813,6 +813,27 @@ Release `fw-237e82115bb3ed5e88f416857666b3a6c6a90704`，
 11. **`fold -w1` 会按字节切碎 UTF-8** —— 拼字库符号集时用它，中文全被切坏，`lv_font_conv` 收到乱码后只吐出 95 个 ASCII 字形（生成文件只有 39KB，一眼能看出不对）。要用 Python 按**字符**处理。
 12. **`fw-bin` 分支是 force push** —— 本机 `git fetch` 普通 refspec 会被拒，核验产物时要用 `+refs/heads/fw-bin:<新 ref 名>`。
 
-- **真实 MiniMax 视觉/ASR/TTS 接口验证**（`ai.provider` 仍为 `mock`）—— 独立任务卡。
-- **固件侧网络层 C 接口与 `05` 字段对齐**（`net_study_solve()` 缺 `edu_stage`/`enrollment_year`/`device_remaining_quota` 入参）—— 独立任务卡。
-- **`pypdf` vs `python-docx` 中文教材抽取质量对比** —— 独立任务卡。
+### 9.17 D1–D5 全线完成：固件只等硬件（2026-11-25）
+
+**独立仓 `GlacierFang/abbot-firmware` 最终状态：** `main` = `f1e622ebfaa651efe211d5d8d2dc50b8422d9619`，Actions run `45535356694` 全绿，`fw-bin` = `9e8107f9589d12d47dfbc7b2b5ff9e4d8a4a5eca`，`ci-logs` = `10b51c6a3273e49689e87ba972139a2e109af5b6`，Release `fw-f1e622ebfaa651efe211d5d8d2dc50b8422d9619`。
+
+| 阶段 | 内容 | 证据 |
+| :--- | :--- | :--- |
+| D1 契约先行 | `doc/04 §六` 拆成 `net_client.h`（纯 C 密码学原语）+ `net_api.h`（业务层）；新增 `NetProfileContext` 注入 `edu_stage`/`enrollment_year`/`device_remaining_quota` | `include/net_api.h` |
+| D2 固件网络层 | `net_client.c` / `net_req.c` / `net_dispatch.c` / `net_api.cpp` 四层；`task_net_worker` 从占位改成真发请求，相机抓拍后把 JPEG 所有权转给它 | 主机侧 18 / 74 / 26 PASS，run `45529895774` |
+| D3 UI 接真实数据 | 拍题主线接通（相机页短按 → 抓拍 → 上传 → 验签解密 → 解析结果页显示真实步骤）；页面级方向键焦点移动与列表滚动 | run `45532098173` |
+| D4 资产下载与待同步落盘 | `net_download_signed_asset()`（完整地址 + `X-File-Sha256` 校验，交给存储任务串行写卡）+ `net_sync_pending_assets()`（心跳应答里的 `schedule_download` / `pending_packs[]` / `pending_books[]` → TF 目录树路径） | 独立仓 `17825e9` → 修复 `f1e622e`，run `45535356694` |
+| D5 协议层闭环 | 主机侧「设备模拟器」复用固件 `net_client.c` + `net_req.c`，对本机真实网关发真实签名请求 | 14 PASS / 0 FAIL |
+
+**D4 那轮 CI 失败与修复（别回头再踩）：** `17825e9` 的 run `45534819221` 失败 —— 主机侧 stub 把信号量删除编成了假名，**把真机编译错掩盖了**（真机是 `vSemaphoreDelete`）。改成真名后 run `45535356694` 全绿。**教训：stub 必须逐字抄真实头文件，编错名字等于把真机 bug 藏进 stub。**
+
+**最终产物（`fw-bin` 实测）：** `firmware.bin` **1273872 字节**（sha256 `c6238106565d73444616a5a3a1c900b9a1624d3970d31691a7ffb7d56a0d3774`）、`bootloader.bin` 15104 字节（`2a71d69b…a363`）、`partitions.bin` 3072 字节（`aaae2888…edd`），三个 sha256 与 `manifest.txt` 逐一吻合。
+
+**剩余任务卡（2026-11-25 收口）：**
+
+- **真机四项校准** —— 摄像头取图 / 摇杆 ADC 阈值 / 屏幕刷屏 / TF 挂载。**等实体硬件**，当前只有编译期保证。
+- **多模态与语音链路最终验收汇报** —— 已写成 `doc/08`，待并入正式汇报。
+- ~~扫描件 OCR~~ —— **已实测判定不做**：181 本 PDF 里 176 本有文字层、仅 5 本纯扫描；拍题走 M3 视觉不需要 OCR，OCR 的错公式给孩子读比明确报错更糟。
+- ~~假麦克风 harness~~ —— **已叫停**，不入库，17/3 不作验收依据。
+- ~~`pypdf` vs `python-docx` 中文教材抽取质量对比~~ —— 带文字层 PDF/DOCX 实测均 100% 字符召回，结论已出。
+- ~~固件网络层与 `05` 字段对齐（`net_study_solve()` 缺 `edu_stage`/`enrollment_year`/`device_remaining_quota`）~~ —— 已由 D1 的 `NetProfileContext` 自动注入解决。

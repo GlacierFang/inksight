@@ -18,8 +18,10 @@
  *   - 任务栈分配在内部 SRAM，大块缓冲走 PSRAM
  */
 #include <Arduino.h>
+#include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <string.h>
 
@@ -226,6 +228,18 @@ static void task_storage(void *arg)
         switch (req.op) {
         case 1: /* 写文本文件（原子四步） */
             hal_storage_atomic_write_text(req.path, req.text, req.len);
+            break;
+        case 4: /* 写资产文件（net 任务下载好、交给本任务落盘） */
+            if (req.asset != NULL) {
+                hal_status_t st = hal_storage_write_binary(req.path, req.asset->data,
+                                                           req.asset->len);
+                req.asset->result = (int32_t)st;
+                /* 只回填结果 + 给信号；**不释放** data 与作业对象 ——
+                 * 它们归网络任务，网络任务醒来后自己释放。 */
+                if (req.asset->done != NULL) {
+                    xSemaphoreGive(req.asset->done);
+                }
+            }
             break;
         case 2: /* 删除文件 */
             hal_storage_delete_file(req.path);
