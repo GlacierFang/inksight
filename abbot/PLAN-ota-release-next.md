@@ -85,6 +85,22 @@
 - 结论：设备查更新不会因为路径口径不一致而 4001。真机联调时若仍失败，优先查**时间戳偏差**（窗口 60 秒，
   设备 RTC 未校准就会飘）与 `device_secret` 是否已登记。
 
+## 真机联调前还要逐条核对的（发版后）
+
+1. ~~**下载端点必须回 `Content-Length`**~~ → **已核，服务端满足**：`app/main.py` 的
+   `/api/v1/content/download` 用 `StreamingResponse(stream(), headers={"Content-Length": str(size), "X-File-Sha256": sha})`，
+   `Content-Length` 显式给了（虽然 body 是分块 yield 的），固件 `ota_download_write_and_activate()`
+   取得到这个头、且会与 check 应答的 `size` 逐一比对。`X-File-Sha256` 也带。
+2. **下载请求必须带 `X-Device-Id`** → **已确认**：固件 `net_http_get()`（`net_api.cpp:1081`）与
+   OTA 直连下载路径（`ota_client_esp.cpp` 内）都带这个头，服务端下载端点用它定位设备密钥。
+3. **版本比较口径** → **已对齐**：固件 `ota_version_compare()` 按数字段比（`1.0.10 > 1.0.9`）；
+   服务端 `check_update()` 取清单 `latest` 与设备 `current_ver` 比，固件侧再用 `ota_should_update()`
+   二次判定，两边都以「无 `v` 前缀的数字段版本串」为口径。
+4. **时间戳窗口 60 秒**：设备 RTC 没校准就会飘 → 表现为“连接有点不稳”（业务码 4001）。
+5. **回滚前提**：设备跑在 app1 时 `esp_ota_set_boot_partition(app0)` 才能退回去。
+6. **OTA check 的下发开关**：服务端 `check_update()` 支持 `ALL / CANARY / PAUSED` 三档策略 +
+   连续失败熔断（`ota.circuit_breaker_threshold`，默认 3）→ 下一版出问题时可只放行白名单设备。
+
 ## 坑位备忘
 
 - **设备侧上报的版本串必须与清单 `latest` 完全一致**（含无 `v` 前缀）。
