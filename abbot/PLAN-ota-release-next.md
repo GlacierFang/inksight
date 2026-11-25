@@ -1,7 +1,52 @@
 # 下一步：固件版本抬号 + OTA 清单重发（Wi-Fi 与天气固件落地后执行）
 
-> 触发条件：`Wi-Fi 真扫描` 与 `天气显示` 两个固件子会话都完成并合入 `main` 之后。
+> **状态（2026-11-25 21:55）**：✅ **已全部完成**。1.0.1 已发布并双向验证通过。
+> 本文件保留为**发版流程的 SOP**，下次发版照着走就行。
+
+## 本次发版实际执行记录（照着抄就行）
+
+```bash
+# 1. 抬版本号 + 修注释（同一个提交）→ 推 main → 等 CI 绿
+#    include/net_api.h: NET_FW_VERSION "1.0.0" -> "1.0.1"
+#    src/net/ota_client_esp.cpp: 修正「esp_ota_end() 会切启动分区」的错误注释
+# 2. 取产物（CI 绿之后）
+cd /tmp/abbot-firmware
+GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes" \
+  git fetch '+refs/heads/fw-bin:refs/remotes/origin/fw-bin'
+# 3. 一条命令发布 + 自检（脚本内部：取产物 → 校 sha256 → 发布 → 版本串一致性 → 自检）
+cd /home/open/.openclaw/workspace/abbot/server
+bash scripts/ota_release.sh 1.0.1 "<changelog 文本>"
+```
+
+结果：`fw-bin` = `778f3ae`，`firmware.bin` 1330928 字节 / `6848d630…57f3ce`，
+本地与外网（`ruohan.site`）两处都跑通「下载内容 sha256 == 响应头 `X-File-Sha256` == 清单 sha256」。
+
+## 触发条件：`Wi-Fi 真扫描` 与 `天气显示` 两个固件子会话都完成并合入 `main` 之后。
 > 顺序不能颠倒 —— 抬号太早会把不含新功能的产物发出去。
+
+## 2026-11-25 21:15 现状盘点（续做时先看这里）
+
+- ✅ **Wi-Fi 真扫描 + 虚拟键盘**：已落发布仓 `main`（`46c5367` + `d56f1d4`），CI `45599597419` 绿，
+  `fw-bin` = `6776a02`。本机独立复跑主机测试全过、静态 SSID 列表已清空。
+- ✅ **OTA 客户端**：已落 `main`（到 `be17983`），CI `45597096139` 绿。
+- ✅ **阅读进度 + 防沉迷**：已落 `main`（`1a6eef5` 那轮）。
+- ✅ **服务端天气**：`a37b248`（workspace 本地）。实跑：上报城市 5 秒生效、缓存 23 秒自重建、
+  城市不符返回 `{}`。**固件侧要带的字段 = `city`，放心跳加密明文。**
+- ⚠️ **固件天气显示 + 设置城市入口：代码已写完但**【未提交、未推、字库未扩充、CI 未接】**。
+  成果留在 `abbot/firmware/` 工作区里（未提交），实施笔记：`abbot/firmware/NOTES-weather-city.md`。
+  剩四件事（见下面「天气固件收尾」）。
+
+## 天气固件收尾（接手时按这四步做，别重写已有代码）
+
+1. **字库扩充（阻塞级）**：新文案里的「气」「市」「℃」和大部分天气词/城市名**字库里没有** →
+   屏幕上是空白。用 `tools/gen_font.sh` 重生成（字符集文件 `tools/font_charset.txt`，
+   本机工具链：fonttools + NotoSansCJK + `/tmp/lvtest/node_modules/.bin/lv_font_conv`）。
+   先用 `tools/check_charset.py` 找出缺哪些字。
+2. **CI 接新测试**：`.github/workflows/build.yml` 加 `test_ui_weather` 步骤
+   （gcc 命令见 `NOTES-weather-city.md` 的「主机侧测试命令」段），并把 `test_ui_data` 的城市/天气缓存用例补上。
+3. **提交 → 同步 → 推**：workspace `abbot/firmware/` 提交后，同步到 `/tmp/abbot-firmware`，
+   推 `main`（`scripts/gh-push.sh /tmp/abbot-firmware main`），等 CI 绿，核 `fw-bin` 三个 bin 的 sha256。
+4. **抬号 + 发 OTA**：见下面「下一个提交要一起做的两件事」。
 
 ## 现状（2026-11-25 19:30 实测）
 
