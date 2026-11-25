@@ -19,6 +19,7 @@
 #include "net_req.h"
 #include "ui_data.h"
 #include "ui_pages.h"
+#include "ui_ota_page.h"
 
 #include "hal_interfaces.h"   /* 背光、音频（Arduino.h 也从这里进来） */
 
@@ -147,6 +148,10 @@ void ui_router_go(ui_page_t page)
     case PAGE_SUBJECT_LIST:
         /* 学科包列表是**真实**已下载的包 —— 进页时重新读一遍卡 */
         ui_pages_refresh_subject_list();
+        break;
+    case PAGE_OTA:
+        /* 固件升级页正文是真实状态 —— 进页时立刻刷新一次 */
+        ui_ota_page_refresh();
         break;
     default:
         break;
@@ -332,7 +337,17 @@ static void ui_page_action(ui_page_t page)
         ui_toast("连接热点还在准备中");
         break;
     case PAGE_OTA:
-        ui_toast("检查更新还在准备中");
+        /* 短按 = 检查更新：UI 只发请求，实际网络活儿由网络任务做（doc/04） */
+        {
+            net_request_t req = {};
+            req.op = NET_OP_OTA_CHECK;
+            if (hal_net_request_queue() == NULL ||
+                xQueueSend(hal_net_request_queue(), &req, 0) != pdTRUE) {
+                ui_toast("网络还在准备中，等一下就好");
+            } else {
+                ui_toast("正在检查更新");
+            }
+        }
         break;
     default:
         break;

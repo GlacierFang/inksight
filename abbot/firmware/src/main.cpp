@@ -18,6 +18,7 @@
 #include "board_config.h"
 #include "hal_interfaces.h"
 #include "hal_shared.h"
+#include "ota_client.h"
 
 static const char *TAG = "abbot";
 
@@ -39,12 +40,20 @@ void setup()
                   LCD_WIDTH, LCD_HEIGHT, LCD_PIN_BL);
     Serial.printf("[%s] long-press threshold = %dms (HAL only)\n", TAG, LONG_PRESS_MS);
 
+    /*
+     * 外设初始化结果汇总 —— 升级后的健康自检要看它（doc/04）。
+     * TF 卡**不算**：没插卡是合法状态（纯在线模式），而固件升级不碰卡，
+     * 不能因为没插卡就把一次成功的升级判成失败。
+     */
+    bool peripherals_ok = true;
+
     /* 1. 共享设施：总线锁 + 队列 + I2C 总线 */
     hal_shared_init();
 
     /* 2. 屏幕 */
     if (hal_display_init() != HAL_OK) {
         Serial.printf("[%s] display init failed\n", TAG);
+        peripherals_ok = false;
     } else {
         Serial.printf("[%s] display ready\n", TAG);
         /* 逐档点亮背光：真机首刷时能肉眼确认 5 档亮度梯度 */
@@ -65,21 +74,40 @@ void setup()
     /* 4. 摄像头 */
     if (hal_camera_init() != HAL_OK) {
         Serial.printf("[%s] camera init failed\n", TAG);
+        peripherals_ok = false;
     }
 
     /* 5. 音频 */
-    hal_audio_init();
+    if (hal_audio_init() != HAL_OK) {
+        Serial.printf("[%s] audio init failed\n", TAG);
+        peripherals_ok = false;
+    }
 
     /* 6. 摇杆：开机 300ms 动态中点校准 */
     if (hal_joystick_init() != HAL_OK) {
         Serial.printf("[%s] joystick init failed\n", TAG);
+        peripherals_ok = false;
     }
 
     /* 7. 电量计 */
-    hal_power_init();
+    if (hal_power_init() != HAL_OK) {
+        Serial.printf("[%s] power init failed\n", TAG);
+        peripherals_ok = false;
+    }
 
     /* 8. 双核任务 */
     abbot_tasks_start();
+
+    /*
+     * 9. 升级自检（doc/04）——
+     *    只在「本次是待验证升级」时才真正跑：查 NVS 标记 ->
+     *    外设初始化成功 + 稳定 20 秒 + 界面核心跳 >= 50 ->
+     *    才确认新版本；否则把启动分区指回旧分区并重启。
+     *
+     *    本函数在 setup() 里**阻塞执行**：setup() 不返回，
+     *    「Arduino 核心在 setup() 之后自动 mark valid」那条路径就没有机会插手。
+     */
+    ota_boot_selfcheck_run(peripherals_ok);
 
     Serial.printf("[%s] ready\n", TAG);
 }

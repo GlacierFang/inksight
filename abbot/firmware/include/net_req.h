@@ -174,10 +174,12 @@ int nr_parse_pending(const char *json, size_t len, const char *array_key, const 
 
 typedef struct {
     int has_update;
+    int force_update;      /* 网关要求必须升级 */
     char latest_ver[24];
     char sha256[65];
     uint32_t size;
     char bin_url[224];
+    char changelog[256];   /* 更新说明（超长截断） */
 } nr_ota_t;
 
 /** 解析 OTA 检查应答。返回 0 成功；-1 参数非法。 */

@@ -699,6 +699,10 @@ int nr_parse_ota(const char *json, size_t len, nr_ota_t *out)
     if (nr_json_get_string(json, len, "bin_url", out->bin_url, sizeof(out->bin_url)) < 0) {
         out->bin_url[0] = '\0';
     }
+    out->force_update = (nr_json_get_bool(json, len, "force_update", false) != 0);
+    if (nr_json_get_string_trunc(json, len, "changelog", out->changelog, sizeof(out->changelog)) < 0) {
+        out->changelog[0] = '\0';
+    }
     return 0;
 }
 

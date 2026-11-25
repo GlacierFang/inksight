@@ -19,7 +19,9 @@ public:
     void end();
     size_t putString(const char *key, const char *value);
     size_t putString(const char *key, String value);
+    size_t putInt(const char *key, int value);
     String getString(const char *key, String defaultValue = String());
+    int getInt(const char *key, int defaultValue = 0);
     bool remove(const char *key);
     bool clear();
 };

@@ -24,6 +24,11 @@ void ui_pages_init(lv_obj_t *parent);
 
 lv_obj_t *ui_page_root(ui_page_t page);
 lv_obj_t *ui_page_content(ui_page_t page);
+/**
+ * 建一个正文 / 标题标签（样式与页面内一致）。
+ * 给需要自己持有并刷新文字的 UI 模块用（如固件升级页）。
+ */
+lv_obj_t *ui_pages_make_label(lv_obj_t *parent, const char *text, bool title);
 lv_obj_t *ui_page_root_book(ui_book_page_t page);
 lv_obj_t *ui_page_content_book(ui_book_page_t page);
 

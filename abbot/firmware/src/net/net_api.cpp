@@ -1220,6 +1220,106 @@ bool net_post_encrypted_json(const char *api_path, const char *plain_req_json,
     return ok;
 }
 
+/* ===================== OTA 检查（doc/04 固件升级章节） ===================== */
+
+/**
+ * `GET /api/v1/ota/check?device_id=&current_ver=` —— 走标准设备签名 Header。
+ *
+ * GET 没有请求体，签名串里的 `SHA256(raw_body)` 就是**空串**的摘要
+ * （e3b0c442…，与 doc/05 §3.4 的空 body 向量同一组）。
+ * 签名 PATH 恒为纯 API 路径 `/api/v1/ota/check`（doc/05 §3.2 铁律）。
+ */
+bool net_ota_check(nr_ota_t *out)
+{
+    if (out == NULL) {
+        return false;
+    }
+    memset(out, 0, sizeof(*out));
+
+    uint8_t secret[NC_SECRET_LEN];
+    if (!net_load_secret(secret)) {
+        return false;
+    }
+    char host[128];
+    char mount[64];
+    net_gateway(host, sizeof host, mount, sizeof mount);
+
+    char url[384];
+    if (nr_build_ota_url(host, mount, net_device_id(), NET_FW_VERSION, url, sizeof url) < 0) {
+        return false;
+    }
+
+    char ts[24];
+    time_t now = 0;
+    time(&now);
+    snprintf(ts, sizeof ts, "%ld", (long)now);
+
+    /* 签名：METHOD\nPATH\nX-Timestamp\nSHA256(raw_body) */
+    char body_sha[NC_SHA256_HEX_LEN + 1];
+    if (nc_sha256_hex((const uint8_t *)"", 0, body_sha) != NC_OK) {
+        return false;
+    }
+    char sign_str[256];
+    int sn = snprintf(sign_str, sizeof sign_str, "GET\n%s\n%s\n%s",
+                      NR_PATH_OTA_CHECK, ts, body_sha);
+    if (sn <= 0 || (size_t)sn >= sizeof sign_str) {
+        return false;
+    }
+    char sig[NC_SIGNATURE_HEX_LEN + 1];
+    if (nc_hmac_sha256_hex(secret, NC_SECRET_LEN, (const uint8_t *)sign_str,
+                           (size_t)sn, sig) != NC_OK) {
+        return false;
+    }
+
+    size_t resp_len = 0;
+    nr_http_response_t parsed;
+    /* GET 无请求体 */
+    if (!net_http_exchange(host, "GET", url, ts, sig, NULL, 0, true,
+                           &resp_len, &parsed)) {
+        return false;
+    }
+
+    int biz_code = nr_json_get_int(parsed.body, parsed.body_len, "code", -1);
+    if (parsed.resp_signature[0] == '\0') {
+        /* 没签名头 = 网关在鉴权阶段就拒了 */
+        Serial.printf("[%s] OTA 应答无签名（未接入？）code=%d\n", NET_TAG, biz_code);
+        return false;
+    }
+    if (nc_verify_response(ts, (const uint8_t *)parsed.body, parsed.body_len,
+                           parsed.resp_signature, secret) != NC_OK) {
+        Serial.printf("[%s] OTA 应答验签失败\n", NET_TAG);
+        return false;
+    }
+    if (biz_code != 0) {
+        Serial.printf("[%s] OTA 检查业务码 %d\n", NET_TAG, biz_code);
+        return false;
+    }
+
+    char *payload_b64 = (char *)malloc(NET_RESP_BUF_SIZE);
+    if (payload_b64 == NULL) {
+        return false;
+    }
+    nc_status_t pst = nc_extract_payload_field(parsed.body, parsed.body_len,
+                                               payload_b64, NET_RESP_BUF_SIZE);
+    size_t plen = (pst == NC_OK) ? strlen(payload_b64) : 0;
+    bool ok = false;
+    if (plen > 0) {
+        size_t out_cap = plen * 2 + 64;
+        char *plain = (char *)malloc(out_cap);
+        if (plain != NULL) {
+            size_t out_len = 0;
+            if (nc_decrypt_envelope(payload_b64, secret, (uint8_t *)plain,
+                                    out_cap, &out_len) == NC_OK) {
+                plain[out_len] = '\0';
+                ok = (nr_parse_ota(plain, out_len, out) == 0);
+            }
+            free(plain);
+        }
+    }
+    free(payload_b64);
+    return ok;
+}
+
 /* ===================== 业务高级封装 ===================== */
 
 bool net_sync_bootstrap(const char *bootstrap_req_json, int *out_biz_code, char **out_resp_json)

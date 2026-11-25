@@ -34,3 +34,15 @@ gcc -fsyntax-only \
     src/ui/ui_data.c
 
 echo "OK: src/ui/ui_data.c 通过主机侧语法检查"
+
+# OTA 设备侧（ota_client_esp.cpp）—— 依赖 Arduino / WiFi / Preferences / ESP-IDF，
+# 全部走 host_stubs。stub 头里的签名逐条抄自真实头文件，
+# 所以这一步能在本机把「类型不匹配 / 格式串 / 签名写错」一次抓出来。
+echo "=== OTA 设备侧主机侧语法检查（stub 头，非固件编译）==="
+g++ -fsyntax-only \
+    -Wall -Wextra -Werror \
+    -Wformat=2 \
+    -I test/host_stubs -I include -I src \
+    src/net/ota_client_esp.cpp
+
+echo "OK: src/net/ota_client_esp.cpp 通过主机侧语法检查"

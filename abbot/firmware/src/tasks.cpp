@@ -29,6 +29,7 @@
 #include "hal_interfaces.h"
 #include "hal_shared.h"
 #include "net_req.h"
+#include "ota_client.h"
 #include "lvgl.h"
 #include "ui_display_port.h"
 #include "ui_router.h"
@@ -93,6 +94,9 @@ static void task_ui_fsm(void *arg)
         lv_timer_handler();
         /* 番茄钟等需要持续推进的界面状态（毫秒计数） */
         ui_router_tick();
+        /* 升级自检心跳（doc/04）：界面核每转一圈打一个点。
+           升级后的健康自检要看到心跳数 >= 50 才肯确认新版本。 */
+        ota_selfcheck_heartbeat();
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(5));
     }
 }
@@ -419,6 +423,16 @@ static void task_net_worker(void *arg)
                 ccmd.payload = (char *)pack; /* 所有权转移给 UI */
                 ccmd.payload_len = (pack != NULL) ? (uint32_t)sizeof(card_pack_t) : 0;
                 xQueueSend(hal_ui_command_queue(), &ccmd, 0);
+                continue;
+            }
+
+            if (req.op == NET_OP_OTA_CHECK) {
+                /*
+                 * 固件升级（doc/04 固件升级章节）：整个流程在**网络任务**里跑 ——
+                 * 查更新、下载、校验、写备用分区都在这一处完成。
+                 * UI 只读状态（ota_get_status），不碰网络、也不碰密钥。
+                 */
+                ota_start();
                 continue;
             }
 

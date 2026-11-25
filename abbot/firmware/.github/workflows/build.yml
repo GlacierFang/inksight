@@ -104,6 +104,11 @@ jobs:
           # Arduino 层（net_api.cpp）的语法检查 —— 用 stub 头在主机上跑。
           # 这一步不替代下面的 PlatformIO 固件编译：它只是让「一轮只暴露一个
           # 编译错误」变成「一轮暴露全部」，省掉反复试错。
+          # OTA 客户端（三重校验原语 / 版本比较 / 分区容量）—— 纯 C，主机侧可测
+          gcc -Wall -Wextra -Werror -I include -I src \
+              test/test_ota.c src/net/ota_client.c src/net/net_client.c \
+              -o /tmp/test_ota -lmbedtls -lmbedcrypto
+          /tmp/test_ota
           bash test/host_check_arduino.sh
 
       - name: 编译固件
@@ -142,6 +147,40 @@ jobs:
               esc=$(printf '%s' "$l" | sed -e 's/%/%25/g' -e 's/\r//g' | cut -c1-300)
               echo "::notice::$esc"
             done
+
+      # 查清一个关键事实：**Arduino ESP32 核心会不会在 setup() 之后自动调
+      # esp_ota_mark_app_valid_cancel_rollback()**。
+      # 若核心自动标记为 VALID，「新固件崩溃 -> 重启 -> 引导器回滚」这条保护就失效了。
+      #
+      # 本机没有 PlatformIO（硬线：不许为读它去装），也拉不到 Actions 日志
+      # （blob 被出口代理挡 403）—— 所以这一步在 CI 里把框架源码里相关的行
+      # 抓出来，写进 ci-logs 分支，本机从 git 通道读。
+      - name: 探测框架的 OTA 自动标记行为
+        if: always()
+        working-directory: .
+        run: |
+          set +e
+          FW="$HOME/.platformio/packages/framework-arduinoespressif32"
+          F="$FW/cores/esp32/main.cpp"
+          SDK="$FW/tools/sdk/esp32s3/sdkconfig"
+          {
+            echo "### 框架 package.json"
+            head -20 "$FW/package.json" 2>/dev/null
+            echo
+            echo "### main.cpp 里与 OTA / 回滚 / 标记有效相关的全部行"
+            grep -n -i -E 'ota|rollback|mark_app_valid|pending_verify|verify' "$F" 2>/dev/null
+            echo
+            echo "### main.cpp 全文"
+            cat "$F" 2>/dev/null
+            echo
+            echo "### sdkconfig 里的回滚开关"
+            grep -n -E 'APP_ROLLBACK|APP_ANTI_ROLLBACK' "$SDK" 2>/dev/null
+            echo
+            echo "### esp_ota_ops.h 是否存在"
+            ls -l "$FW/tools/sdk/esp32s3/include/esp_system/include/esp_ota_ops.h" 2>/dev/null
+          } > framework-ota-probe.txt
+          echo "探针输出 $(wc -c < framework-ota-probe.txt) 字节"
+          grep -n -i -E 'mark_app_valid|rollback|pending_verify' framework-ota-probe.txt | head -20
 
       # 产物清单 —— 收集 build 目录里真实存在的文件。
       #
@@ -295,11 +334,12 @@ jobs:
           export GIT_INDEX_FILE=$TMPIDX
           if [ -n "$BASE" ]; then git read-tree "$BASE^{tree}"; else git read-tree --empty; fi
           # 回写三样东西：编译日志、产物清单、以及这轮的所有步骤结论
-          for f in build.log dist/manifest.txt steps.txt; do
+          for f in build.log dist/manifest.txt steps.txt framework-ota-probe.txt; do
             [ -f "$f" ] || continue
             case "$f" in
               build.log)  NAME="build-$SHA.log" ;;
               dist/manifest.txt) NAME="manifest-$SHA.txt" ;;
+              framework-ota-probe.txt) NAME="framework-ota-probe.txt" ;;
               *)          NAME="steps-$SHA.txt" ;;
             esac
             BLOB=$(git hash-object -w "$f")

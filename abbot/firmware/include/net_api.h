@@ -20,6 +20,7 @@
 #include <stdint.h>
 
 #include "cards.h"
+#include "net_req.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,6 +34,7 @@ extern "C" {
 #define NET_OP_PROFILE   5 /* 档案同步（学段/配额基准，由存储任务读 TF 卡后投递） */
 #define NET_OP_REGISTER  6 /* 自动登记（无码配对，doc/04 §1.2） */
 #define NET_OP_CARDS    7 /* 学科卡片包（本地解密 + 解析） */
+#define NET_OP_OTA_CHECK 8 /* 固件升级检查（doc/04 固件升级章节） */
 
 /** 固件版本号（心跳上报与 OTA 比对用）。 */
 #define NET_FW_VERSION "1.0.0"
@@ -173,6 +175,23 @@ bool net_study_solve(const char *session_id, const uint8_t *jpg_data, size_t jpg
 bool net_study_voice(const char *context_page, const char *pack_id, const char *card_id,
                      const uint8_t *pcm_data, size_t pcm_len,
                      int *out_biz_code, char **out_resp_json);
+
+/* ===================== 固件升级（doc/04 固件升级章节） ===================== */
+
+/**
+ * 查更新：`GET /api/v1/ota/check?device_id=&current_ver=`（走标准设备签名 Header）。
+ *
+ * GET 没有请求体 —— 签名串里的 `SHA256(raw_body)` 取**空串**的摘要
+ * （e3b0c442…，与 doc/05 §3.4 的空 body 向量同一组）；签名 PATH 恒为纯 API 路径
+ * `/api/v1/ota/check`（不含域名 / query / 挂载前缀）。
+ *
+ * 应答是加密信封，解开后是 doc/05 §5 约定的字段形状
+ * （has_update / latest_ver / force_update / sha256 / size / bin_url / changelog）。
+ *
+ * 返回 true 表示**已拿到并解开应答**（has_update 为 0 也算成功 ——
+ * 「当前已是最新版本」是正常结果，不是错误）。
+ */
+bool net_ota_check(nr_ota_t *out);
 
 /* ===================== 离线队列（outbox，doc/04 §3.5） ===================== */
 /**

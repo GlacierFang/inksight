@@ -55,6 +55,9 @@ public:
     int available();
     int read();
     int read(uint8_t *buf, size_t size);
+    /* 抄自 cores/esp32/Stream.h 的 readBytes 家族 */
+    size_t readBytes(uint8_t *buffer, size_t length);
+    size_t readBytes(char *buffer, size_t length);
     void stop();
     uint8_t connected();
     size_t print(const char *s);

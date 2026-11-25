@@ -16,6 +16,8 @@ extern "C" {
 typedef void *SemaphoreHandle_t;
 
 SemaphoreHandle_t xSemaphoreCreateBinary(void);
+/* xSemaphoreCreateMutex 是真实 FreeRTOS semphr.h 里的 API（互斥量） */
+SemaphoreHandle_t xSemaphoreCreateMutex(void);
 BaseType_t xSemaphoreTake(SemaphoreHandle_t s, TickType_t wait);
 BaseType_t xSemaphoreGive(SemaphoreHandle_t s);
 void vSemaphoreDelete(SemaphoreHandle_t s);

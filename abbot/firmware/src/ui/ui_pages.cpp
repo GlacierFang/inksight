@@ -21,6 +21,7 @@
 #include "hal_interfaces.h"
 #include "ui_book_guard.h"
 #include "ui_data.h"
+#include "ui_ota_page.h"
 
 /* ===================== 颜色（中性骨架，落地前按 doc/03 §一 核对） ===================== */
 #define UI_C_BG        lv_color_hex(0xFFFFFF)
@@ -301,6 +302,18 @@ static lv_obj_t *ui_make_card(lv_obj_t *parent)
     lv_obj_add_style(card, &s_style_card, LV_PART_MAIN);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
     return card;
+}
+
+/* ===================== 公开接口：给别的 UI 模块建标签 ===================== */
+
+/**
+ * 建一个正文 / 标题标签（样式与页面内一致）。
+ *
+ * 供 src/ui/ui_ota_page.cpp 用 —— 它要自己持有这个标签并定时刷新它的文字。
+ */
+lv_obj_t *ui_pages_make_label(lv_obj_t *parent, const char *text, bool title)
+{
+    return ui_make_label(parent, text, title);
 }
 
 /* 列表项: 文案 + 右侧副文案, 返回可点击的整行对象 */
@@ -606,14 +619,17 @@ static void ui_build_keyboard(lv_obj_t *content)
     }
 }
 
-/* 11. 固件升级 (PAGE_OTA) */
+/* 11. 固件升级 (PAGE_OTA)
+ *
+ * 正文（当前版本 / 最新版本 / 更新说明 / 下载进度 / 结果提示）是**真实数据**：
+ * 由 src/ui/ui_ota_page.cpp 持有并定时刷新，数据源是网络任务写的 OTA 状态。
+ */
 static void ui_build_ota(lv_obj_t *content)
 {
     lv_obj_t *title = ui_make_label(content, "固件升级", true);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
 
-    lv_obj_t *body = ui_make_label(content, "当前已是最新版本\n\n上次检查：刚刚", false);
-    lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 40);
+    ui_ota_page_build(content);
 
     lv_obj_t *item = ui_make_list_item(content, "> [ 检查更新 ]", NULL);
     lv_obj_align(item, LV_ALIGN_BOTTOM_MID, 0, 0);
