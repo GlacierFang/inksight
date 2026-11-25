@@ -5,7 +5,7 @@
 用法：
     cd server
     python3 scripts/publish_ota.py --bin /tmp/fw/firmware.bin \
-        --version v1.0.0 --changelog "首次发布" [--force-update]
+        --version 1.0.0 --changelog "首次发布" [--force-update]
 
 说明：
 * **本机不编译固件**，固件产物由 GitHub Actions 编译后推到 `fw-bin` 分支；
@@ -31,7 +31,11 @@ from app.ota_manager import OtaManager, OtaError  # noqa: E402
 def main() -> int:
     ap = argparse.ArgumentParser(description="发布固件到 abbot OTA 仓库")
     ap.add_argument("--bin", required=True, help="firmware.bin 路径")
-    ap.add_argument("--version", required=True, help="版本号，如 v1.0.0")
+    ap.add_argument(
+        "--version",
+        required=True,
+        help="版本号，如 1.0.0（**不要带 v 前缀**）",
+    )
     ap.add_argument("--changelog", default="", help="更新说明")
     ap.add_argument("--force-update", action="store_true", help="强制升级（版本相同也下发）")
     ap.add_argument("--ota-dir", default="", help="OTA 目录，默认取服务端配置")

@@ -17,9 +17,29 @@
 - 清单里的 `changelog` 写了「Wi-Fi 扫描、OTA 客户端」——**OTA 客户端现在有了，Wi-Fi 扫描还没落地**。
   下一版必须按**实际内容**重写，不能沿用。
 
-## 步骤
+## 下一个提交要一起做的两件事（别拆开）
 
-1. **抬固件版本**：`include/net_api.h` 的 `NET_FW_VERSION` 从 `"1.0.0"` 改成 `"1.0.1"`。
+### A. 修一处**会误导后来人**的注释（重要）
+
+`firmware/src/net/ota_client_esp.cpp` 约 528 行，NVS「待验证」标记写入处的注释写着：
+
+> 写在 `esp_ota_end()` **之前**：`esp_ota_end()` 会把启动分区切到新分区
+
+**这句是错的**。ESP‑IDF 4.4 的 `esp_ota_end()` 只做「校验镜像 + 结束写入」，**不切启动分区**；
+切分区的是 `esp_ota_set_boot_partition()`（同文件 544 行，代码已经正确调用了）。
+
+不改的后果：后来人照注释以为 `esp_ota_set_boot_partition()` 是多余的，删掉它 → **升级后永远启动老固件**，
+而且现象是「OTA 显示成功但版本不变」，极难查。
+
+改成如实描述：
+
+> 写在 `esp_ota_end()` 之前：`esp_ota_end()` 只校验镜像并结束写入，**不切启动分区**；
+> 真正切分区的是后面的 `esp_ota_set_boot_partition()`。
+> 标记先写，是为了「已写入备用分区但还没切换」时中断也能在下次启动识别出来。
+
+### B. 抬固件版本
+
+`include/net_api.h` 的 `NET_FW_VERSION` 从 `"1.0.0"` 改成 `"1.0.1"`。
    - 版本串**不带 `v` 前缀**（`check_update()` 判字符串相等，`v1.0.1` ≠ `1.0.1`，设备永远看不到更新）。
    - 改完提交到 `main`，**跑一轮 CI**。
 2. **取新产物**：CI 绿后
@@ -29,12 +49,18 @@
      git fetch '+refs/heads/fw-bin:refs/remotes/origin/fw-bin'
    ```
    取出三个 bin，**自己算 sha256 与 `manifest.txt` 逐一比对**（`gh api` 不受影响，可交叉验证）。
-3. **重发 OTA 仓库**：
+3. **重发 OTA 仓库**（参数已核实，命令就这一条）：
    ```bash
-   python3 abbot/server/scripts/publish_ota.py --version 1.0.1 --bin <firmware.bin> ...
+   cd /home/open/.openclaw/workspace/abbot/server
+   ../.venv/bin/python scripts/publish_ota.py \
+     --bin /tmp/_fw_1.0.1.bin \
+     --version 1.0.1 \
+     --changelog "<按实际内容写>"
    ```
-   具体参数以 `publish_ota.py --help` 为准。产物落到 `storage/ota/fw_1.0.1.bin`，
-   `manifest.json` 的 `latest` 变 `"1.0.1"`。
+   产物落到 `storage/ota/fw_1.0.1.bin`，`manifest.json` 的 `latest` 变 `"1.0.1"`。
+   - ⚠️ `--version` **不要带 `v` 前缀**。`publish_ota.py` 的 `--help` 原文写的是「版本号，如 v1.0.0」
+     —— 那是**错的引导**（`ota_manager.publish()` 直接拿它当落盘名 `fw_{version}.bin` 与清单 key，
+     不会剥 `v`）。已把 help 文案改成「如 1.0.0（**不要带 v 前缀**）」。
    - `changelog` **只写这一版真正包含的东西**。
    - 旧的 `fw_1.0.0.bin` 可以留着（设备可回退），但别让它当 latest。
 4. **自检**：
