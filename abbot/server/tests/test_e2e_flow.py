@@ -204,7 +204,13 @@ def main() -> int:
 
     # 用一个设备专属的会话标识，便于核对配额
     session_id = f"e2e_{int(time.time())}"
-    image_b64 = base64.b64encode(b"\xff\xd8\xff\xe0fake-jpeg-for-e2e").decode()
+    # 必须是**真 JPEG**：真实 MiniMax 视觉端点会解码图片字节，
+    # 伪 JPEG（b"\xff\xd8\xff\xe0fake-jpeg-for-e2e"）会被上游以
+    # base_resp=2013 invalid image content 拒绝，服务端收敛成 5001，
+    # 连带让后面「剩余配额=9」的断言全假失败。
+    # 资产里是一道真题（2x + 7 = 19），与真机拍照路径同构。
+    _asset = Path(__file__).resolve().parent / "assets" / "solve_sample.jpg"
+    image_b64 = base64.b64encode(_asset.read_bytes()).decode()
 
     print("\n=== 3) 拍题导学：阶梯 0（草稿初筛）===")
     resp, env = sim._post(
@@ -249,6 +255,10 @@ def main() -> int:
         )
 
         print("\n=== 5) 拍题导学：阶梯 1（应当扣费）===")
+        # 必须带学生口述思路：04 铁律 1 规定「卷面空白 且 学生没有有效语音思路
+        # → 一律 NEED_DRAFT」（任何层级都适用）。只发一张干净题面而不带
+        # voice_text，模型按铁律就会回 NEED_DRAFT、不扣配额 —— 这是**正确行为**，
+        # 旧测试用 mock（mock 的层级判定与铁律不一致）才误以为 level 1 必然扣费。
         resp2, env2 = sim._post(
             "/api/v1/study/solve",
             {
@@ -258,6 +268,7 @@ def main() -> int:
                 "enrollment_year": 2026,
                 "hint_level": 1,
                 "device_remaining_quota": 10,
+                "voice_text": "我打算把 7 移到右边，但不确定接下来怎么算。",
             },
         )
         if env2.get("code") == 0:
@@ -279,6 +290,7 @@ def main() -> int:
                     "enrollment_year": 2026,
                     "hint_level": 2,
                     "device_remaining_quota": 10,
+                    "voice_text": "我把 7 移到右边了，得到 2x=12，然后两边除以 2。",
                 },
             )
             check("同题追问未因配额被拒", env3.get("code") == 0, resp3.text[:200])

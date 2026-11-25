@@ -37,6 +37,10 @@ ai:
   max_tokens: 8192
   timeout_seconds: 60
   max_concurrency_per_device: 1
+  # 上游临时性错误（429/5xx/529 负载高）重试：MiniMax 集群繁忙时返回
+  # 529 overloaded_error，不重试就会把一次抖动变成整条拍题失败（连带不扣配额）。
+  max_retries: 2
+  retry_backoff_seconds: 2.0
 
 speech:
   asr:

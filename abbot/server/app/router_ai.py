@@ -276,6 +276,57 @@ class RouterAI:
     def _ai_cfg(self) -> Dict[str, Any]:
         return settings.ai
 
+    # ------------------------------------------------------------ 上游重试
+    #
+    # MiniMax 集群繁忙时返回 HTTP 529，body 是
+    # {"type":"error","error":{"type":"overloaded_error","message":"当前服务集群负载较高，请稍后重试…(2064)"}}
+    # —— 这是**临时**状态，同一请求过一两秒重发就能过。
+    # 不重试的话，用户看到的是「云端有点忙，稍后再试一次」，而实际上只是上游抖了一下；
+    # 更糟的是拍题链路失败 → 不扣配额 → 设备侧账本与本地账本对不上。
+    #
+    # 只重试明确的临时错误：429 / 500 / 502 / 503 / 504 / 529。
+    # 4xx（鉴权、参数、审核）不重试 —— 重试只会浪费配额和时间。
+    _RETRY_STATUS = (429, 500, 502, 503, 504, 529)
+
+    def _post_upstream(
+        self,
+        cfg: Dict[str, Any],
+        url: str,
+        headers: Dict[str, str],
+        body: Dict[str, Any],
+    ) -> httpx.Response:
+        """
+        POST 到上游，临时性错误按退避重试。
+
+        返回**最终响应**（不判断状态码），由调用方按业务语义处理。
+        重试次数与退避间隔走配置，默认 2 次 / 2 秒。
+        """
+        retries = int(cfg.get("max_retries", 2) or 0)
+        backoff = float(cfg.get("retry_backoff_seconds", 2.0) or 2.0)
+        timeout = float(cfg.get("timeout_seconds", 60))
+        attempt = 0
+        while True:
+            try:
+                with httpx.Client(timeout=timeout, trust_env=False) as client:
+                    resp = client.post(url, headers=headers, json=body)
+            except httpx.TimeoutException:
+                if attempt < retries:
+                    attempt += 1
+                    time.sleep(backoff * attempt)
+                    continue
+                raise RouterError("模型响应超时了", CODE_UPSTREAM) from None
+            except httpx.HTTPError as exc:
+                if attempt < retries:
+                    attempt += 1
+                    time.sleep(backoff * attempt)
+                    continue
+                raise RouterError(f"模型请求失败：{exc}", CODE_UPSTREAM) from exc
+            if resp.status_code in self._RETRY_STATUS and attempt < retries:
+                attempt += 1
+                time.sleep(backoff * attempt)
+                continue
+            return resp
+
     def _text_call(self, system_prompt: str, user_content: Any) -> Dict[str, Any]:
         """调用轻量纯文本模型（第二级 / 第三级文本兜底）。"""
         cfg = self._ai_cfg()
@@ -298,20 +349,15 @@ class RouterAI:
         }
         body["max_tokens"] = int(cfg.get("max_tokens", 4096) or 4096)
         text_path = cfg.get("text_path") or "/v1/text/chatcompletion_v2"
-        try:
-            with httpx.Client(timeout=float(cfg.get("timeout_seconds", 60)), trust_env=False) as client:
-                resp = client.post(
-                    f"{base_url}{text_path}",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=body,
-                )
-        except httpx.TimeoutException:
-            raise RouterError("模型响应超时了", CODE_UPSTREAM) from None
-        except httpx.HTTPError as exc:
-            raise RouterError(f"模型请求失败：{exc}", CODE_UPSTREAM) from exc
+        resp = self._post_upstream(
+            cfg,
+            f"{base_url}{text_path}",
+            {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            body,
+        )
 
         if resp.status_code >= 400:
             raise RouterError(f"模型服务返回错误：{resp.status_code}", CODE_UPSTREAM)
@@ -360,20 +406,15 @@ class RouterAI:
         }
         body["max_tokens"] = int(cfg.get("max_tokens", 4096) or 4096)
         vision_path = cfg.get("vision_path") or "/v1/text/chatcompletion_v2"
-        try:
-            with httpx.Client(timeout=float(cfg.get("timeout_seconds", 60)), trust_env=False) as client:
-                resp = client.post(
-                    f"{base_url}{vision_path}",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=body,
-                )
-        except httpx.TimeoutException:
-            raise RouterError("模型响应超时了", CODE_UPSTREAM) from None
-        except httpx.HTTPError as exc:
-            raise RouterError(f"模型请求失败：{exc}", CODE_UPSTREAM) from exc
+        resp = self._post_upstream(
+            cfg,
+            f"{base_url}{vision_path}",
+            {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            body,
+        )
 
         if resp.status_code >= 400:
             raise RouterError(f"模型服务返回错误：{resp.status_code}", CODE_UPSTREAM)
