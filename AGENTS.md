@@ -158,6 +158,11 @@ Markdown
 - `nominatim.openstreetmap.org` 在本网络不可达（代理与直连都超时），已从白名单移除，代码侧改为快速失败并降级到 Open-Meteo 地理编码
 - Python 走代理时 `SSL_CERT_FILE` 必须保留出口代理 trust-bundle；被覆盖成 certifi 会导致 MITM 链路 `CERTIFICATE_VERIFY_FAILED`
 - 取外部数据走 `web_fetch` 工具：它在工具层出网且有超时，不会挂住 shell
+- ⚠️ **Python 脚本调本机回环地址会被出口代理挡成 403**（2026-11-26 实测）：`urllib` / `requests` 默认继承 `http_proxy`，把 `127.0.0.1:18843` 也送进代理 → 403，表现为"服务明明在跑但调不通"。回环调用必须显式绕过：
+  ```python
+  opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # 绕开代理
+  ```
+  同一规律的白名单版见上方「外网访问纪律」：白名单只约束代理链路，回环不属于白名单管辖
 - 实测被挡（**走代理**）：`registry.npmjs.org`（`npm ping` / `npm view` 均 403 Forbidden，curl 返回 000）、`raw.githubusercontent.com`（curl 无返回）
 - 后果：npm 装包路径不通，`openclaw update` 的安装步骤会断在 `global-install-failed`；curl 挂住 → 转后台 → 退出时往对话投系统事件
 - 这两个域名用 `web_fetch` 都能正常读到
