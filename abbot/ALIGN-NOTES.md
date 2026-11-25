@@ -620,6 +620,50 @@ PCM 样本是**有符号 16 位**，`>> 8` 是**算术右移** —— 负样本�
 
 **本评估的边界（别当普适结论）：** 夹具 PDF 由 MuPDF 生成，ToUnicode 映射规范。**部分真实中文 PDF 的 ToUnicode CMap 残缺，pypdf 会抽出乱码** —— 这类文件只能靠人工核对或换解析器（`fitz` 本机已装 1.27.2.3，可作对照），本评估未覆盖。
 
+### 9.16 D3：UI 接真实数据 + 方向键光标 + 拍题链路闭环（2026-11-25）
+
+**这一轮把「拍题」这条主线从 UI 到云端真正接通**（此前 `q_photo_request` **连生产者都没有**，
+整条链路断在第一步）：
+
+```
+PAGE_CAMERA 短按
+  → hal_photo_request_submit(session_id)            UI核 → 相机任务（doc/02 §4.2）
+  → 相机任务抓 UXGA JPEG
+  → net_request_t{NET_OP_SOLVE, jpg 所有权转移}     相机任务 → 网络任务
+  → net_dispatch → net_study_solve → 明文+加签+加密 → 网关
+  → 响应验签 + 解密 → q_ui_command(kind=2, 业务码+明文指针)
+  → ui_router_handle_net_reply → nr_parse_solve_result
+  → ui_pages_set_solve_result → 解析结果页显示真实解题步骤与费曼反问
+```
+
+**四个设计决定：**
+1. **协议字段名只存在于 `net_req.c`** —— UI 拿的是 `nr_solve_result_t` 结构体，
+   不认识 `display_markdown` 这类线上字段名。UI 层的边界是「结构体」，不是「JSON」。
+2. **大块数据不进队列，只传指针 + 长度** —— JPEG 与解密后的明文都是**所有权随队列转移**：
+   相机任务交出 JPEG 后不再释放（网络任务用完释放），网络任务交出明文后由 UI 层持有与释放。
+3. **方向键 = 页内导航，短按 = 确认，长按 = 退出**（doc/03 §三 仲裁表）：
+   列表页上推/下推移动光标（行首 `> ` / `  ` 标记重绘），解析结果页上推/下推滚正文；
+   短按按页分派（相机页 = 拍照，首页 = 跳对应页）。
+4. **没打通的入口给温和提示，不做假动作** —— 语音提问、连接热点、检查更新等
+   目前给「还在准备中」，而不是假装成功。
+
+**顺手修掉的两个真 bug（不修的话真机一定跑不通）：**
+- **TF 卡脚手架的 `profile.json` 字段与 doc/04 §3.1 对不上** —— 脚手架写的是 `"grade": "m7"`，
+  而档案解析认的是 `edu_stage` / `enrollment_year`。两边对不上意味着 `edu_stage` **永远注入不进去**，
+  网关必然回 `4004`，拍题链路一步也走不通。脚手架改成 doc/04 §3.1 的档案 schema。
+- **档案没人投给 net 层** —— `net_profile_set()` 至今没有调用方。
+  现在由**存储任务**开机读一次 `/config/profile.json` 并投递 `NET_OP_PROFILE` 给网络任务：
+  TF 卡只此一处访问（doc/02 §4.2：net 任务不得直接扫盘），net 层只收三个值。
+
+**新增接口（doc/02 §六 同步改了，它是 hal_interfaces.h 的真相源）：**
+`hal_status_t hal_photo_request_submit(const char *session_id, uint8_t want_uxga, uint8_t with_voice)`
+—— UI 可见的抓拍请求提交入口，队列满回 `HAL_ERR_NO_SPACE`，由 UI 出温和提示。
+
+**产物：** 独立仓 `41c0b3e`，Actions run `45532098173` 全绿，
+Release `fw-41c0b3e4d892ebc90d489d7a14db12835090008e`（3 asset），
+`firmware.bin` **1269808 字节**（D3 前 1266576），三个 bin 的 sha256 与 manifest 实测逐一吻合。
+主机侧回归：`test_net_client` 18 PASS / `test_net_req` **74 PASS**（新增拍题应答解析用例）/ `test_net_dispatch` 26 PASS。
+
 ### 9.15 固件网络层接通：task_net_worker 从占位到真跑（2026-11-25）
 
 **这一轮把「能编译」变成「会发请求」** —— `task_net_worker` 之前只会回一句「网络通道尚未接通」，
