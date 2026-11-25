@@ -46,6 +46,42 @@ void ui_pages_set_solve_result(const char *markdown, const char *question);
 /** 正文滚动（delta=+1 下一屏，-1 上一屏）。返回是否真的滚动了。 */
 bool ui_pages_solve_scroll(int delta);
 
+/* ---------- 番茄钟（真计时器，doc/03 §五 第 8 页） ---------- */
+/**
+ * 进入番茄钟：读本地设置的时长并开始倒计时。
+ * 短按 = 暂停 / 继续，长按 = 结束并退出（doc/03 §3.2）。
+ */
+void ui_pages_pomodoro_enter(void);
+/** 计时推进（由 UI 任务每轮调用，now_ms 为毫秒计数）。到点时出声并进入「已完成」态。 */
+void ui_pages_pomodoro_tick(uint32_t now_ms);
+/** 短按：暂停 / 继续（已完成后再按一次则重新开始）。 */
+void ui_pages_pomodoro_toggle(void);
+/** 长按：结束并退出（停止计时，不弹提示）。 */
+void ui_pages_pomodoro_stop(void);
+
+/* ---------- 本地内容（读 TF 卡，doc/04 §二） ---------- */
+/** 刷新首页「今日课程」（读 `/config/schedule.json`）。读不到时出温和空态。 */
+void ui_pages_refresh_home(void);
+/** 刷新书架列表（读 `/books/` 下的真实书籍）。 */
+void ui_pages_refresh_bookshelf(void);
+/** 书架光标移动（-1 上一项 / +1 下一项）。返回移动后的索引。 */
+int ui_pages_bookshelf_move(int delta);
+/** 打开光标所在的那本书并渲染第一页。成功返回 0。 */
+int ui_pages_bookshelf_open_selected(void);
+/** 阅读页翻页：下一页 / 上一页（UTF-8 边界安全）。 */
+void ui_pages_reader_next_page(void);
+void ui_pages_reader_prev_page(void);
+
+/* ---------- 专注时长设置（PAGE_SETTINGS） ---------- */
+/** 当前专注时长（分钟）。 */
+int ui_pages_focus_minutes(void);
+/** 调整专注时长（delta = -1 减一档 / +1 加一档，步长 5 分钟），并立即落盘。 */
+void ui_pages_focus_adjust(int delta);
+
+/* ---------- 状态栏 ---------- */
+/** 设置某页状态栏文字（例如离线提示）。 */
+void ui_pages_set_status(ui_page_t page, const char *text);
+
 lv_obj_t *ui_overlay_root(ui_overlay_t overlay);
 void ui_overlay_set_text(ui_overlay_t overlay, const char *text);
 void ui_overlay_set_visible(ui_overlay_t overlay, bool visible);

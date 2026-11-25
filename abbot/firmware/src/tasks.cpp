@@ -84,6 +84,8 @@ static void task_ui_fsm(void *arg)
 
         lv_tick_inc(5);
         lv_timer_handler();
+        /* 番茄钟等需要持续推进的界面状态（毫秒计数） */
+        ui_router_tick();
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(5));
     }
 }
@@ -166,6 +168,9 @@ static void task_audio(void *arg)
         case 4: /* 播放 WAV 文件 */
             hal_audio_play_wav_file(msg.path);
             break;
+        case 5: /* 设备端合成提示音（不阻塞 UI 任务：UI 只投递，音频任务出声） */
+            hal_audio_play_tone(msg.freq_hz, msg.duration_ms);
+            break;
         default:
             break;
         }
@@ -210,6 +215,27 @@ static void storage_publish_profile(void)
                   doc.enrollment_year, remaining);
 }
 
+/**
+ * 列目录回调（跑在存储任务里，所以能直接调 hal_storage_get_file_size）。
+ * 每个文件名一行，'\n' 分隔；超出缓冲就停。
+ */
+static void storage_list_cb(const char *name, void *ctx)
+{
+    storage_io_t *io = (storage_io_t *)ctx;
+    if (io == NULL || io->list_buf == NULL || name == NULL) {
+        return;
+    }
+    size_t n = strlen(name);
+    if (io->out_len + n + 2u > io->list_cap) {
+        return;
+    }
+    memcpy(io->list_buf + io->out_len, name, n);
+    io->out_len += (uint32_t)n;
+    io->list_buf[io->out_len++] = '\n';
+    io->list_buf[io->out_len] = '\0';
+    io->list_count++;
+}
+
 /** 存储任务：TF 卡访问在此单线程串行化 */
 static void task_storage(void *arg)
 {
@@ -247,8 +273,70 @@ static void task_storage(void *arg)
         case 3: /* 读文本文件 */
             hal_storage_read_text(req.path, req.text, (uint32_t)sizeof(req.text), &req.len);
             break;
+        case 5: /* 读文本（带应答）：UI 数据读取层用 */
+            if (req.io != NULL) {
+                uint32_t n = 0;
+                hal_status_t st = HAL_ERR_INVALID;
+                if (req.io->buf != NULL && req.io->buf_cap >= 2) {
+                    st = hal_storage_read_text(req.path, (char *)req.io->buf,
+                                               req.io->buf_cap, &n);
+                }
+                req.io->out_len = n;
+                req.io->result = (int32_t)st;
+            }
+            break;
+        case 6: /* 读区间（带应答）：分页用 */
+            if (req.io != NULL) {
+                uint32_t got = 0;
+                hal_status_t st = HAL_ERR_INVALID;
+                if (req.io->buf != NULL && req.io->buf_cap > 0) {
+                    st = hal_storage_read_range(req.path, req.offset, req.io->buf,
+                                                req.io->buf_cap, &got);
+                }
+                req.io->out_len = got;
+                req.io->result = (int32_t)st;
+            }
+            break;
+        case 7: /* 列目录（带应答）：文件名以 '\n' 分隔 */
+            if (req.io != NULL) {
+                hal_status_t st = hal_storage_list_files(req.path, storage_list_cb, req.io);
+                req.io->result = (int32_t)st;
+            }
+            break;
+        case 8: /* 取文件大小（带应答） */
+            if (req.io != NULL) {
+                uint32_t size = 0;
+                hal_status_t st = hal_storage_get_file_size(req.path, &size);
+                req.io->out_size = size;
+                req.io->result = (int32_t)st;
+            }
+            break;
+        case 9: /* 原子写文本（带应答） */
+            if (req.io != NULL) {
+                hal_status_t st = hal_storage_atomic_write_text(req.path, req.text, req.len);
+                req.io->result = (int32_t)st;
+            }
+            break;
+        case 10: /* 目录占用（带应答） */
+            if (req.io != NULL) {
+                uint64_t bytes = 0;
+                hal_status_t st = hal_storage_get_dir_usage(req.path, &bytes);
+                req.io->dir_bytes = bytes;
+                req.io->result = (int32_t)st;
+            }
+            break;
+        case 11: /* 是否挂载（带应答） */
+            if (req.io != NULL) {
+                req.io->mounted = hal_storage_is_mounted() ? 1u : 0u;
+                req.io->result = HAL_OK;
+            }
+            break;
         default:
             break;
+        }
+        /* 带应答的操作：回执信号量在结果写好之后才给（调用方 take 到即数据已就绪） */
+        if (req.reply != NULL) {
+            xSemaphoreGive(req.reply);
         }
     }
 }

@@ -338,3 +338,102 @@ void hal_audio_set_muted(bool muted)
 {
     s_muted = muted;
 }
+
+/* ===================== 设备端合成提示音 =====================
+ *
+ * 为什么合成而不是放文件：仓库里没有 LittleFS 分区，也没有 ding.wav 资产
+ * （doc/04 §二 的存储铁律与实现曾经矛盾，本轮已按实现修正）。
+ * 提示音直接在设备上算出来推到 MAX98357，不依赖任何文件。
+ */
+
+/** 四分之一周期正弦表（64 段，幅度 0~32767），共 256 点一圈。 */
+static const int16_t kToneQuarter[65] = {
+    0, 804, 1608, 2410, 3212, 4011, 4808, 5602, 6393, 7179, 7962, 8739, 9512, 10278,
+    11039, 11793, 12539, 13279, 14010, 14732, 15446, 16151, 16846, 17530, 18204, 18868,
+    19519, 20159, 20787, 21403, 22005, 22594, 23170, 23731, 24279, 24811, 25329, 25832,
+    26319, 26790, 27245, 27683, 28105, 28510, 28898, 29268, 29621, 29956, 30273, 30571,
+    30852, 31113, 31356, 31580, 31785, 31971, 32137, 32285, 32412, 32521, 32609, 32678,
+    32728, 32757, 32767,
+};
+
+/** 取一圈正弦的一个样点（phase 为 0~255 的整数相位）。 */
+static inline int16_t tone_sine(uint16_t phase)
+{
+    uint8_t quad = (uint8_t)(phase >> 6);   /* 0~3 */
+    uint8_t idx = (uint8_t)(phase & 0x3F);  /* 0~63 */
+    switch (quad) {
+    case 0:
+        return kToneQuarter[idx];
+    case 1:
+        return kToneQuarter[64 - idx];
+    case 2:
+        return (int16_t)-kToneQuarter[idx];
+    default:
+        return (int16_t)-kToneQuarter[64 - idx];
+    }
+}
+
+hal_status_t hal_audio_play_tone(uint16_t freq_hz, uint16_t duration_ms)
+{
+    if (freq_hz < 100 || freq_hz > 8000 || duration_ms == 0) {
+        return HAL_ERR_INVALID;
+    }
+    /* 录音过程中不出声 —— 半双工纪律（doc/02 §3.3） */
+    if (s_state != AUDIO_IDLE) {
+        return HAL_ERR_INVALID;
+    }
+
+    /* 半双工纪律：先彻底释放可能存在的 RX，再装 TX */
+    i2s_driver_uninstall(I2S_NUM_0);
+    i2s_config_t cfg;
+    audio_fill_config(&cfg, (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX), I2S_BITS_PER_SAMPLE_16BIT);
+    i2s_pin_config_t pins;
+    audio_fill_pins(&pins, true);
+    esp_err_t err = i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL);
+    if (err == ESP_OK) {
+        err = i2s_set_pin(I2S_NUM_0, &pins);
+    }
+    if (err != ESP_OK) {
+        i2s_driver_uninstall(I2S_NUM_0);
+        Serial.printf("[%s] tone i2s setup failed: %s\n", TAG, esp_err_to_name(err));
+        return HAL_ERR_IO;
+    }
+    s_state = AUDIO_PLAYING;
+
+    const int gain = kVolumeGain[s_volume];
+    /* 每采样点的相位步进 = 频率 / 采样率 * 256 */
+    uint32_t phase_step = ((uint32_t)freq_hz * 256u) / AUDIO_SAMPLE_RATE;
+    uint16_t phase = 0;
+    uint32_t total = (uint32_t)AUDIO_SAMPLE_RATE * duration_ms / 1000u;
+    uint32_t done = 0;
+
+    int16_t pcm[AUDIO_CHUNK_MAX];
+    while (done < total) {
+        uint32_t n = total - done;
+        if (n > AUDIO_CHUNK_MAX) {
+            n = AUDIO_CHUNK_MAX;
+        }
+        for (uint32_t i = 0; i < n; i++) {
+            int32_t v = tone_sine(phase);
+            phase = (uint16_t)(phase + phase_step);
+            /* 起始与末尾渐弱，避免「啪」声爆音 */
+            if (done + i < 160) {
+                v = v * (int32_t)(done + i) / 160;
+            }
+            if (s_muted) {
+                v = 0;
+            } else if (gain < 5) {
+                v = v * gain / 5;
+            }
+            pcm[i] = (int16_t)v;
+        }
+        size_t written = 0;
+        i2s_write(I2S_NUM_0, pcm, n * sizeof(int16_t), &written, pdMS_TO_TICKS(200));
+        done += n;
+    }
+
+    /* 播完回到 IDLE：卸载 TX，功放静音 */
+    i2s_driver_uninstall(I2S_NUM_0);
+    s_state = AUDIO_IDLE;
+    return HAL_OK;
+}

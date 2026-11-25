@@ -69,6 +69,28 @@ hal_status_t hal_photo_request_submit(const char *session_id, uint8_t want_uxga,
     return HAL_OK;
 }
 
+/* ---------- 音频提示音请求（UI 核 → 音频任务） ---------- */
+
+/**
+ * 投递一次提示音请求（不阻塞 UI）。
+ * UI 只管发请求，真正出声在音频任务里做（hal_audio_play_tone）。
+ */
+hal_status_t hal_audio_request_tone(uint16_t freq_hz, uint16_t duration_ms)
+{
+    if (s_q_audio == NULL) {
+        return HAL_ERR_INVALID;
+    }
+    audio_msg_t msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.op = 5; /* 设备端合成提示音 */
+    msg.freq_hz = freq_hz;
+    msg.duration_ms = duration_ms;
+    if (xQueueSend(s_q_audio, &msg, 0) != pdTRUE) {
+        return HAL_ERR_NO_SPACE;
+    }
+    return HAL_OK;
+}
+
 /** 安装共享 I2C 总线：GPIO 4/5 @ 100kHz（doc/02 §2.1 强制） */
 static void hal_i2c_install(void)
 {

@@ -17,7 +17,10 @@
 
 #include "lvgl.h"
 #include "net_req.h"
+#include "ui_data.h"
 #include "ui_pages.h"
+
+#include "hal_interfaces.h"   /* 背光、音频（Arduino.h 也从这里进来） */
 
 static ui_page_t s_current = PAGE_OOBE;
 static ui_book_page_t s_current_book = PAGE_BOOKSHELF;
@@ -37,6 +40,13 @@ static int32_t s_last_biz = -1;
 /* 提醒弹窗打断前的页面, 供短按关闭后精准恢复 */
 static ui_page_t s_reminder_restore_page = PAGE_HOME;
 static bool s_reminder_had_page = false;
+
+/* 是否已配对（读 /config/profile.json）：未配对时端云功能给温和提示，
+ * 本地页（番茄钟/设置/书架/课表）照常可用。 */
+static int s_paired = 0;
+
+/* 读配对标志（定义在“页面动作”段） */
+static void ui_paired_refresh(void);
 
 /* ===================== 浮层 ===================== */
 
@@ -119,6 +129,18 @@ void ui_router_go(ui_page_t page)
 {
     ui_show_page(page);
     ui_pages_cursor_reset(page);
+    switch (page) {
+    case PAGE_POMODORO:
+        /* 进入就开始倒计时（时长取本地设置） */
+        ui_pages_pomodoro_enter();
+        break;
+    case PAGE_HOME:
+        ui_paired_refresh();
+        ui_pages_refresh_home();
+        break;
+    default:
+        break;
+    }
 }
 
 void ui_router_go_book(ui_book_page_t page)
@@ -138,6 +160,10 @@ void ui_router_go_book(ui_book_page_t page)
     ui_overlay_sync_visibility();
     s_current_book = page;
     s_in_book = true;
+    if (page == PAGE_BOOKSHELF) {
+        /* 书架内容来自 TF 卡，进页时重新读一遍 */
+        ui_pages_refresh_bookshelf();
+    }
 }
 
 ui_page_t ui_router_current(void)
@@ -151,6 +177,17 @@ bool ui_router_in_book_module(void)
 }
 
 /* ===================== 页面动作 ===================== */
+
+/** 读配对标志（/config/profile.json）。读不到就按未配对处理。 */
+static void ui_paired_refresh(void)
+{
+    int paired = 0;
+    if (ui_data_read_paired(&paired) == UI_DATA_OK) {
+        s_paired = paired;
+    } else {
+        s_paired = 0;
+    }
+}
 
 /**
  * 页面级「确定」动作（doc/03 §三 仲裁表的短按列）。
@@ -176,7 +213,14 @@ static void ui_page_action(ui_page_t page)
     }
     case PAGE_HOME:
         switch (idx) {
-        case 0: ui_router_go(PAGE_CAMERA); break;
+        case 0:
+            /* 拍题导学要靠云端解题：没配对时先给一句温和提示 */
+            if (!s_paired) {
+                ui_toast("还没连上学习助手，请先完成配对");
+                break;
+            }
+            ui_router_go(PAGE_CAMERA);
+            break;
         case 2: ui_router_go(PAGE_SUBJECT_LIST); break;
         case 3: ui_router_go_book(PAGE_BOOKSHELF); break;
         case 4: ui_router_go(PAGE_POMODORO); break;
@@ -190,8 +234,13 @@ static void ui_page_action(ui_page_t page)
         switch (idx) {
         case 0: ui_router_go(PAGE_WIFI_SCAN); break;
         case 3: ui_router_go(PAGE_OTA); break;
+        case 6: ui_toast("用左右键调整专注时长"); break;
         default: ui_toast("这个设置还在准备中"); break;
         }
+        break;
+    case PAGE_POMODORO:
+        /* 短按 = 暂停/继续（已完成后再按 = 重新开始） */
+        ui_pages_pomodoro_toggle();
         break;
     case PAGE_SUBJECT_LIST:
         if (idx >= 0) {
@@ -221,6 +270,84 @@ static void ui_page_nav(ui_page_t page, int delta)
         return;
     }
     ui_pages_cursor_move(page, delta);
+}
+
+/**
+ * 左右键：设置页调专注时长；其它页面的左右暂不作用途。
+ * 不新增手势 —— 四向导航里左右本来就是「减/加」。
+ */
+static void ui_page_side(ui_page_t page, int delta)
+{
+    if (page == PAGE_SETTINGS) {
+        if (ui_pages_cursor_index(page) == 6) {
+            ui_pages_focus_adjust(delta);
+            return;
+        }
+    }
+}
+
+/* ===================== 电子书模块手势（doc/07） ===================== */
+
+/** 调背光（阅读页上下键用）。 */
+static void ui_brightness(int delta)
+{
+    uint8_t level = hal_display_get_backlight();
+    int next = (int)level + delta;
+    if (next < 0) {
+        next = 0;
+    }
+    if (next > 5) {
+        next = 5;
+    }
+    if ((uint8_t)next == level) {
+        return;
+    }
+    hal_display_set_backlight((uint8_t)next);
+}
+
+static void ui_book_gesture(ui_gesture_t gesture)
+{
+    switch (gesture) {
+    case GESTURE_UP:
+        if (s_current_book == PAGE_BOOKSHELF) {
+            ui_pages_bookshelf_move(-1);
+        } else if (s_current_book == PAGE_READER) {
+            ui_brightness(-1);
+        }
+        break;
+    case GESTURE_DOWN:
+        if (s_current_book == PAGE_BOOKSHELF) {
+            ui_pages_bookshelf_move(1);
+        } else if (s_current_book == PAGE_READER) {
+            ui_brightness(1);
+        }
+        break;
+    case GESTURE_LEFT:
+        if (s_current_book == PAGE_READER) {
+            ui_pages_reader_prev_page();
+        }
+        break;
+    case GESTURE_RIGHT:
+        if (s_current_book == PAGE_READER) {
+            ui_pages_reader_next_page();
+        }
+        break;
+    case GESTURE_CLICK:
+        if (s_current_book == PAGE_BOOKSHELF) {
+            if (ui_pages_bookshelf_open_selected() == 0) {
+                ui_router_go_book(PAGE_READER);
+            } else {
+                ui_toast("暂时读不到内容");
+            }
+        } else if (s_current_book == PAGE_READER) {
+            ui_router_go_book(PAGE_BOOK_MENU);
+        }
+        break;
+    case GESTURE_LONG:
+    default:
+        /* 长按退出在主分支里统一处理 */
+        break;
+    }
 }
 
 /* ===================== 手势 ===================== */
@@ -282,20 +409,36 @@ void ui_router_handle_gesture(ui_gesture_t gesture)
     switch (gesture) {
     case GESTURE_CLICK:
         if (s_in_book) {
-            /* 阅读模块的确认动作由电子书子页处理 */
+            ui_book_gesture(gesture);
             break;
         }
         ui_page_action(s_current);
         break;
     case GESTURE_UP:
-        if (!s_in_book) {
+        if (s_in_book) {
+            ui_book_gesture(gesture);
+            break;
+        }
+        if (s_current != PAGE_POMODORO) {
             ui_page_nav(s_current, -1);
         }
         break;
     case GESTURE_DOWN:
-        if (!s_in_book) {
+        if (s_in_book) {
+            ui_book_gesture(gesture);
+            break;
+        }
+        if (s_current != PAGE_POMODORO) {
             ui_page_nav(s_current, 1);
         }
+        break;
+    case GESTURE_LEFT:
+    case GESTURE_RIGHT:
+        if (s_in_book) {
+            ui_book_gesture(gesture);
+            break;
+        }
+        ui_page_side(s_current, (gesture == GESTURE_LEFT) ? -1 : 1);
         break;
     case GESTURE_LONG:
         /* 退出: 退回上一级 */
@@ -313,6 +456,10 @@ void ui_router_handle_gesture(ui_gesture_t gesture)
                 ui_router_go(PAGE_HOME);
                 break;
             }
+        } else if (s_current == PAGE_POMODORO) {
+            /* 番茄钟: 长按 = 结束并退出 */
+            ui_pages_pomodoro_stop();
+            ui_router_go(PAGE_HOME);
         } else if (s_current != PAGE_HOME && s_current != PAGE_OOBE) {
             ui_router_go(PAGE_HOME);
         }
@@ -381,8 +528,9 @@ void ui_router_init(void)
 
 void ui_router_tick(void)
 {
-    /* LVGL 5ms 心跳由 task_ui_fsm 的 lv_timer_handler 驱动; 这里留一个空钩子,
-     * 供后续接 toast 自动消失与倒计时刷新。 */
+    /* LVGL 5ms 心跳由 task_ui_fsm 的 lv_timer_handler 驱动;
+     * 番茄钟的倒计时挂在这里 —— 用毫秒计数，不做秒级累加。 */
+    ui_pages_pomodoro_tick((uint32_t)millis());
 }
 
 /* ===================== 云端应答 ===================== */

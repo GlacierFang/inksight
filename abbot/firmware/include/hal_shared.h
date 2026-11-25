@@ -15,6 +15,7 @@
 
 #include "hal_interfaces.h"
 #include "net_api.h"
+#include "storage_io.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -99,7 +100,8 @@ QueueHandle_t hal_ui_command_queue(void);
 QueueHandle_t hal_photo_request_queue(void);
 QueueHandle_t hal_audio_pcm_queue(void);
 QueueHandle_t hal_net_request_queue(void);
-QueueHandle_t hal_storage_req_queue(void);
+/* hal_storage_req_queue() 与 storage_req_t 已在 storage_io.h 里声明 —— 
+ * 那是 UI 读卡层（纯 C）唯一需要看到的存储契约。 */
 
 /* ---------- 内部消息类型 ---------- */
 typedef struct {
@@ -118,32 +120,17 @@ typedef struct {
 } photo_request_t;
 
 typedef struct {
-    uint8_t op;     /* 1=播放 PCM 分块 2=开始录音 3=结束录音 4=播放 WAV 文件 */
+    uint8_t op;     /* 1=播放 PCM 分块 2=开始录音 3=结束录音 4=播放 WAV 文件
+                     * 5=播放设备端合成提示音（freq_hz / duration_ms） */
     uint16_t len;   /* op=1 时的采样点数 */
     int16_t samples[320];
     char path[72]; /* op=4 时的文件路径 */
+    uint16_t freq_hz;     /* op=5 时的提示音频率 */
+    uint16_t duration_ms; /* op=5 时的提示音时长 */
 } audio_msg_t;
 
-/**
- * 资产写入作业 —— net 任务把下载好的大文件交给存储任务落盘。
- *
- * 为什么绕这一圈：TF 卡由 `task_storage` 独占串行化访问（doc/02 §4.2），
- * net 任务直接写卡会与存储任务抢总线。
- */
-typedef struct {
-    uint8_t *data;            /* 数据缓冲（所有权随作业转移，写完由存储任务释放） */
-    uint32_t len;
-    int32_t result;            /* HAL_OK 或错误码 */
-    SemaphoreHandle_t done;     /* 存储任务写完后 give，net 任务 take */
-} storage_asset_job_t;
-
-typedef struct {
-    uint8_t op; /* 1=写文本文件 2=删除文件 3=读文本文件 4=写资产文件 */
-    char path[72];
-    char text[1024]; /* 原子写入的正文（profile.json 等档案文件需要这个量级） */
-    uint32_t len;
-    storage_asset_job_t *asset; /* op=4：资产写入作业 */
-} storage_req_t;
+/* storage_asset_job_t / storage_req_t / hal_storage_req_queue() 已移入 storage_io.h：
+ * 那里只依赖 FreeRTOS 与标准 C，UI 侧纯 C 读卡层可以直接包含。 */
 
 /* ===================== HAL 内部互调（不在 §六 对外契约里） ===================== */
 /* LVGL 绘制缓冲 -> 屏幕的像素搬运 (RGB565)。UI 层不碰 SPI, 只能走这里。 */

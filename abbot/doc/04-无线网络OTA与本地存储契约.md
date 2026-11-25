@@ -28,14 +28,19 @@
 
 ## 二、 TF 卡全目录结构与开箱自愈规范
 
-> **存储架构铁律**：板载 `LittleFS` 仅存放只读的静态中文字库、内置提示音 `ding.wav` 及静态 UI 图标资产；**所有用户配置、学习记录、加密题库、离线队列、音频缓存与电子书必须全部存放在外部 TF 卡（`/sdcard`）**，确保固件 OTA 升级绝不擦除用户数据。
+> **存储架构铁律**：**所有用户配置、学习记录、加密题库、离线队列、音频缓存与电子书必须全部存放在外部 TF 卡（`/sdcard`）**，确保固件 OTA 升级绝不擦除用户数据。
+>
+> * **静态资源不再走 LittleFS**：中文字库以 C 数组**编译进固件**（`src/ui/fonts/ui_font_cn_16.c`），UI 图标为内联样式，提示音**由设备端合成**（`hal_audio_play_tone` / `hal_audio_request_tone`）；固件**不划分 LittleFS 分区**（`platformio.ini` 用 `huge_app.csv`，无 littlefs 分区表）。
+> * **为什么不引 LittleFS**：一句提示音只需要一个固定频率的短音；为它单独开分区要多占 Flash、多一条挂载与容错路径（挂载失败 / 文件损坏时的降级分支），而合成一声正弦音只要几行 PCM 生成代码。中文字库直接编译进固件，省掉「文件读不到就变方块」的失败模式。**零 LittleFS 依赖 = 零分区表 = 零挂载失败分支**。
+> * **仓库里不存在任何 `.wav` 资产**，文档与实现均不得再提 `ding.wav`；需要提示音的地方一律走设备端合成。
 
 ### 2.1 标准目录树结构
 ```text
 /sdcard/
 ├── config/
 │   ├── profile.json            # 全局档案、学段锚点、每日配额、电子书宵禁与音量亮度
-│   └── schedule.json           # 每周课表、节次起止时间及准点提醒规则
+│   ├── schedule.json           # 每周课表、节次起止时间及准点提醒规则
+│   └── settings.json           # 设备本地设置（当前：番茄钟专注时长 focus_minutes）
 ├── subjects/
 │   ├── manifest.json           # 本地已安装学科包索引清单
 │   └── <pack_id>/              # 独立学科包目录（如 demo_pack、m7_geo）
@@ -63,7 +68,7 @@
 开机挂载 `SD_MMC`（1-Bit 模式）后，固件自动检查上述目录与核心配置文件是否存在；若插上一张全新空白 FAT32 卡，自动创建全套目录并生成默认初始化文件（含内置示例学科包 `/subjects/demo_pack/`，其 `meta.json` 标记 `"key_type": "demo"`，使用内置默认密钥 `STUDY_DEMO_KEY_16` 解密）。
 
 ### 2.3 防掉电原子写入契约（Atomic Write）
-所有核心 JSON 文件（包括 `profile.json`、`schedule.json`、`progress.json`、`bookmarks.json`、`manifest.json` 及 **`/outbox/queue.json`**）在写入时必须严格执行四步原子替换协议：
+所有核心 JSON 文件（包括 `profile.json`、`schedule.json`、`settings.json`、`progress.json`、`bookmarks.json`、`manifest.json` 及 **`/outbox/queue.json`**）在写入时必须严格执行四步原子替换协议：
 1. 先将完整新内容写入同目录临时文件 `<filename>.tmp` 并执行 `flush()`；
 2. 校验临时文件实际写入字节数与预期长度一致（若 TF 卡空间已满导致写入不全，立即删除 `.tmp` 并**保留原正式文件不覆盖**）；
 3. 若正式文件已存在，将其重命名为 `<filename>.bak`（先删除旧 `.bak`）；
@@ -151,7 +156,7 @@
 * **调度与去重规则**：
   1. **日期优先级**：若当日日期命中 `override_days`，优先按调课表执行；否则若命中 `holidays` 或 `weekend`（周六/周日），自动标记为休息日（不触发上课铃与早晚课表播报）；
   2. **单双周计算**：`week_type` 支持 `"ALL"`（每周）、`"ODD"`（单周）、`"EVEN"`（双周），依据 `semester_start_date` 计算当前教学周奇偶性；
-  3. **准点提醒与防重**：当 `class_bell_enabled == true` 时，每节课 `start` 时间自动触发轻量课程开始提示（播放本地 `ding.wav` 并弹出 `OVERLAY_REMINDER`）；内存中记录 `last_triggered_date_id` 防止同一分钟重复弹窗；处于 `mute_window` 午休静音窗内自动静默；错过提醒时间超过 `15 分钟` 才开机则不再补弹过期提醒。
+  3. **准点提醒与防重**：当 `class_bell_enabled == true` 时，每节课 `start` 时间自动触发轻量课程开始提示（播放**设备端合成的提示音**并弹出 `OVERLAY_REMINDER`）；内存中记录 `last_triggered_date_id` 防止同一分钟重复弹窗；处于 `mute_window` 午休静音窗内自动静默；错过提醒时间超过 `15 分钟` 才开机则不再补弹过期提醒。
 
 ### 3.3 `/subjects/manifest.json` 与 `<pack_id>/meta.json`
 ```json

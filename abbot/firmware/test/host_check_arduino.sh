@@ -25,3 +25,12 @@ g++ -fsyntax-only \
     "$SRC"
 
 echo "OK: $SRC 通过主机侧语法检查"
+
+# UI 数据层是纯 C（不依赖 Arduino.h），一并做主机侧语法检查。
+echo "=== UI 数据层主机侧语法检查 ==="
+gcc -fsyntax-only \
+    -Wall -Wextra -Werror \
+    -I test/host_stubs -I include -I src \
+    src/ui/ui_data.c
+
+echo "OK: src/ui/ui_data.c 通过主机侧语法检查"

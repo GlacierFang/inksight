@@ -23,11 +23,19 @@ echo "[gen_font] source: $SRC_TTF  size=$SIZE bpp=$BPP"
 
 python3 "$ROOT/tools/subset_font.py" "$SRC_TTF" "$TMP/subset.ttf" "$ROOT/tools/font_charset.txt"
 
-if [ ! -d "$TMP/node_modules/lv_font_conv" ]; then
+if [ -n "${LV_FONT_CONV:-}" ] && [ -x "${LV_FONT_CONV}" ]; then
+    # 已经装好了就不必再走 npm（本机 npm 直连才能成，装一次就够）
+    CONV="${LV_FONT_CONV}"
+elif [ -x /tmp/lvtest/node_modules/.bin/lv_font_conv ]; then
+    CONV=/tmp/lvtest/node_modules/.bin/lv_font_conv
+else
     # npm 走直连: 本机出口代理会把 registry 挡成 403
     (cd "$TMP" && env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
         -u all_proxy -u ALL_PROXY npm install --silent lv_font_conv@1.5.3)
+    CONV="$TMP/node_modules/.bin/lv_font_conv"
 fi
+
+echo "[gen_font] lv_font_conv: $CONV"
 
 # --symbols 需要的是**字符本身**, 不是码位。
 # 注意: 不能用 `fold -w1` 拆字符 —— 它按**字节**切, 会把 UTF-8 中文切碎,
@@ -45,7 +53,7 @@ sys.stdout.write("".join(sorted(chars)))
 PY
 )
 
-(cd "$TMP" && ./node_modules/.bin/lv_font_conv \
+(cd "$TMP" && "$CONV" \
     --font "$TMP/subset.ttf" \
     --size "$SIZE" --bpp "$BPP" --format lvgl --lv-include lvgl.h \
     --no-compress --no-kerning --lv-font-name ui_font_cn_16 \

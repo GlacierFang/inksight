@@ -68,6 +68,20 @@ hal_status_t hal_audio_start_record(void);                         // 16kHz/16bi
 hal_status_t hal_audio_stop_record(void);
 hal_status_t hal_audio_play_wav_file(const char *path);            // 校验 RIFF 头，跳过 44 字节
 hal_status_t hal_audio_set_volume(uint8_t level);                  // 1~5 档
+/**
+ * 设备端合成提示音（不依赖 LittleFS / ding.wav 资产）。
+ * 在功放上直接推出 freq_hz 的正弦音，时长 duration_ms 毫秒。
+ * 音量沿用 hal_audio_set_volume 的 1~5 档。
+ * 必须在音频任务里调用（本函数是阻塞的，会占住 I2S 播放通道）。
+ */
+hal_status_t hal_audio_play_tone(uint16_t freq_hz, uint16_t duration_ms);
+
+/**
+ * 投递一次提示音请求（UI 核 → 音频任务，**不阻塞 UI**）。
+ * 音频任务收到后调 hal_audio_play_tone() 真正出声。
+ * 队列满时返回 `HAL_ERR_NO_SPACE`，由 UI 层给出温和中文提示。
+ */
+hal_status_t hal_audio_request_tone(uint16_t freq_hz, uint16_t duration_ms);
 
 /* ---------- hal_joystick：双轴摇杆五向事件 ---------- */
 hal_status_t hal_joystick_init(void);                              // 开机 300ms 中点校准
