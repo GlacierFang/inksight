@@ -42,6 +42,7 @@ extern "C" void configTime(long gmtOffset_sec, int daylightOffset_sec,
 #include "net_api.h"
 #include "net_client.h"
 #include "net_req.h"
+#include "hal_interfaces.h"
 
 /* ===================== 常量 ===================== */
 
@@ -191,7 +192,7 @@ static bool hex_decode(const char *hex, uint8_t *out, size_t out_len)
 }
 
 /** 设备唯一标识：取芯片 eFuse MAC，形如 `esp32s3_a1b2c3d4`。 */
-static const char *net_device_id(void)
+const char *net_device_id(void)
 {
     if (g_device_id[0] == '\0') {
         uint64_t mac = ESP.getEfuseMac();
@@ -655,6 +656,36 @@ bool net_post_encrypted_json(const char *api_path, const char *plain_req_json,
 bool net_sync_bootstrap(const char *bootstrap_req_json, int *out_biz_code, char **out_resp_json)
 {
     return net_post_encrypted_json(NR_PATH_BOOTSTRAP, bootstrap_req_json, out_biz_code, out_resp_json);
+}
+
+bool net_sync_bootstrap_auto(int *out_biz_code, char **out_resp_json)
+{
+    /* 电量来自 HAL（MAX17043）—— 读不到就报 0，不因此中断心跳 */
+    float volts = 0.0f;
+    uint8_t soc = 0;
+    if (hal_power_read_battery(&volts, &soc) != HAL_OK) {
+        soc = 0;
+    }
+    /* 本地已装学科包 / 电子书清单：TF 卡目录树归 task_storage 独占串行化访问，
+     * net 任务不得直接扫盘（doc/02 §4.2），故这里报空数组 ——
+     * 服务端据此下发全部待同步项，语义正确。 */
+    int need = nr_build_bootstrap_plain(net_device_id(), NET_FW_VERSION, (int)soc, 0,
+                                        "[]", "[]", NULL, 0);
+    if (need <= 0) {
+        return false;
+    }
+    char *plain = (char *)malloc((size_t)need);
+    if (plain == NULL) {
+        return false;
+    }
+    if (nr_build_bootstrap_plain(net_device_id(), NET_FW_VERSION, (int)soc, 0,
+                                 "[]", "[]", plain, (size_t)need) < 0) {
+        free(plain);
+        return false;
+    }
+    bool ok = net_post_encrypted_json(NR_PATH_BOOTSTRAP, plain, out_biz_code, out_resp_json);
+    free(plain);
+    return ok;
 }
 
 bool net_study_solve(const char *session_id, const uint8_t *jpg_data, size_t jpg_len,

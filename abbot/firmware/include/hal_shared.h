@@ -14,6 +14,7 @@
 #include <freertos/semphr.h>
 
 #include "hal_interfaces.h"
+#include "net_api.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -103,12 +104,17 @@ QueueHandle_t hal_storage_req_queue(void);
 /* ---------- 内部消息类型 ---------- */
 typedef struct {
     uint8_t kind; /* 1=提示 2=网络应答 3=刷新页面 4=文件已落盘 */
-    char text[128];
+    int32_t biz_code; /* kind=2 时的业务码（0 成功；-1 网络/协议失败；4004 学段未设置等） */
+    char text[128];   /* 提示文案，或网络应答的中文摘要 */
+    /* kind=2 时：解密后的业务明文（堆内存，**所有权随队列转移给接收方，由 UI 释放） */
+    char *payload;
+    uint32_t payload_len;
 } ui_command_t;
 
 typedef struct {
     uint8_t want_uxga; /* 1=UXGA 抓拍, 0=HVGA 预览 */
     uint8_t with_voice; /* 边说边拍 */
+    char session_id[32]; /* 本题会话号（doc/05 §5.1：同题追问沿用同一个） */
 } photo_request_t;
 
 typedef struct {
@@ -121,16 +127,9 @@ typedef struct {
 typedef struct {
     uint8_t op; /* 1=写文本文件 2=删除文件 3=读文本文件 */
     char path[72];
-    char text[128];
+    char text[1024]; /* 原子写入的正文（profile.json 等档案文件需要这个量级） */
     uint32_t len;
 } storage_req_t;
-
-typedef struct {
-    const char *path;
-    uint8_t method; /* 1=GET 2=POST */
-    const uint8_t *body;
-    uint32_t body_len;
-} net_request_t;
 
 /* ===================== HAL 内部互调（不在 §六 对外契约里） ===================== */
 /* LVGL 绘制缓冲 -> 屏幕的像素搬运 (RGB565)。UI 层不碰 SPI, 只能走这里。 */

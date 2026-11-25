@@ -1,21 +1,65 @@
 /**
- * net_api.h —— 设备端云业务请求层（Arduino / ESP32 侧）
+ * net_api.h —— 设备端云业务请求层（设备侧接口契约）
  *
  * 与 `include/net_client.h` 的分工（doc/04 §六）：
- *   - net_client.h ：纯 C 安全信封原语（SHA-256 / HMAC / AES-CTR / Base64 / 签名 / 验签 / 解密），
- *                    **不依赖 Arduino.h**，可在固件与主机侧 native 测试中编译；
- *   - net_api.h    ：本文件。Wi-Fi / NTP / 配对 / 加密 POST / 资产下载等**业务请求层**，
- *                    依赖 Arduino 侧能力，供 `task_net_worker` 调用。
+ *   - net_client.h ：纯 C 安全信封原语（SHA-256 / HMAC / AES-128-CTR / Base64 / 签名 / 验签 / 解密）。
+ *                    **不依赖 Arduino.h**，同一份实现可在固件与主机侧 native 测试中编译。
+ *   - net_api.h    ：本文件。Wi-Fi 连接、NTP 校时、配对握手、加密 POST 等**业务请求层**接口，
+ *                    由 `task_net_worker` 调用。
  *
- * 业务明文的字段形状真相源是 doc/05 §5.1；本层不得自行改变字段语义。
+ * 业务明文的**字段形状真相源是 doc/05 §5.1**，本层不得自行改变字段语义。
  * 签名 PATH 恒为**纯 API 路径**（如 "/api/v1/study/solve"），与网关挂载前缀无关（doc/05 §3.2）。
+ *
+ * 本头文件**不依赖 Arduino.h** —— 这样 `src/net/net_dispatch.c` 这类调度逻辑可以在主机侧编译与单测。
  */
 #ifndef ABBOT_NET_API_H
 #define ABBOT_NET_API_H
 
-#include <Arduino.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* ---------- 网络请求的 op（UI 核 / 相机任务 → 网络任务） ---------- */
+#define NET_OP_SOLVE     1 /* 拍题（带图） */
+#define NET_OP_VOICE     2 /* 语音问答 */
+#define NET_OP_BOOTSTRAP 3 /* 心跳同步 */
+#define NET_OP_PAIR      4 /* 配对 */
+#define NET_OP_PROFILE   5 /* 档案同步（学段/配额基准，由存储任务读 TF 卡后投递） */
+
+/** 固件版本号（心跳上报与 OTA 比对用）。 */
+#define NET_FW_VERSION "1.0.0"
+
+/**
+ * 网络请求（UI 核 / 相机任务 → 网络任务）。
+ *
+ * 载荷是**业务参数**，不是密文 —— 加签、加密、信封封装全部在网络任务内完成
+ * （doc/05 §5.1：net 层是注入与加密的唯一职责，UI 不感知、也不得自行拼装）。
+ * 解密后的业务明文由网络任务经 `q_ui_command`（kind=2）投回 Core 1。
+ *
+ * `jpg` 的**所有权随本请求转移**：相机任务交出后不再释放，由网络任务用完释放。
+ */
+typedef struct {
+    uint8_t op;          /* 见 NET_OP_* */
+    uint8_t hint_level;  /* 0=首次求解 1/2=阶梯提示 */
+    uint8_t with_voice;  /* 1=边说边拍（携带 PCM） */
+    uint8_t reserved;
+    char session_id[32]; /* 本题会话号 */
+    uint8_t *jpg;        /* 图像缓冲：所有权随请求转移，用完由网络任务释放 */
+    uint32_t jpg_len;
+    const int16_t *pcm;  /* 16kHz PCM（可为空） */
+    uint32_t pcm_samples;
+    char context_page[16]; /* NET_OP_VOICE：当前页面 */
+    char pack_id[24];      /* NET_OP_VOICE */
+    char card_id[24];      /* NET_OP_VOICE */
+    char pair_code[8];     /* NET_OP_PAIR：6 位配对码 */
+    char edu_stage[16];    /* NET_OP_PROFILE：学段 */
+    int enrollment_year;   /* NET_OP_PROFILE：入学年 */
+    int remaining_quota;   /* NET_OP_PROFILE：本地估算的剩余配额（仅供对账） */
+} net_request_t;
 
 /* ===================== 档案注入上下文（doc/05 §5.1） ===================== */
 /**
@@ -26,15 +70,13 @@
  *   - device_remaining_quota 仅供服务端对账，不参与放行判定（doc/05 §4.2）
  * UI 状态机不得自行拼装这三个字段。
  */
-struct NetProfileContext {
+typedef struct {
     char edu_stage[16];         /* 例："JUNIOR" */
     int enrollment_year;        /* 例：2026 */
     int device_remaining_quota; /* 本地估算上报值，服务端不信任 */
-};
+} NetProfileContext;
 
-bool net_profile_load(NetProfileContext* out);
-/** 以网关下发的 `effective_remaining_quota` 覆盖本地显示值（doc/04 §3.1）。 */
-bool net_profile_update_quota(int effective_remaining_quota);
+bool net_profile_load(NetProfileContext *out);
 /**
  * 注入档案上下文（`edu_stage` / `enrollment_year` / 本地估算的剩余配额）。
  *
@@ -43,9 +85,14 @@ bool net_profile_update_quota(int effective_remaining_quota);
  * 因此由读档案的一侧解析完 `profile.json` 后调本函数写入 net 层缓存，
  * net 层只负责在组装明文时**自动注入**（doc/05 §5.1）。
  */
-bool net_profile_set(const char* edu_stage, int enrollment_year, int remaining_quota);
+bool net_profile_set(const char *edu_stage, int enrollment_year, int remaining_quota);
+/** 以网关下发的 `effective_remaining_quota` 覆盖本地显示值（doc/04 §3.1）。 */
+bool net_profile_update_quota(int effective_remaining_quota);
 /** 读取最近一次由网关覆盖的剩余配额（未联网过则返回 -1）。 */
 int net_profile_remaining_quota(void);
+
+/** 设备唯一标识（`esp32s3_xxxxxxxx`），心跳与配对用。 */
+const char *net_device_id(void);
 
 /* ===================== Wi-Fi ===================== */
 struct WifiApInfo {
@@ -63,37 +110,58 @@ enum WifiConnState {
     WIFI_STATE_AUTH_FAILED
 };
 
-void net_wifi_init_auto_connect();
-void net_wifi_start_async_scan();
-int net_wifi_get_scan_results(WifiApInfo* out_list, int max_count);
-bool net_wifi_connect_and_save(const char* ssid, const char* password);
-WifiConnState net_wifi_get_state();
-int8_t net_wifi_get_rssi();
+void net_wifi_init_auto_connect(void);
+void net_wifi_start_async_scan(void);
+int net_wifi_get_scan_results(struct WifiApInfo *out_list, int max_count);
+bool net_wifi_connect_and_save(const char *ssid, const char *password);
+enum WifiConnState net_wifi_get_state(void);
+int8_t net_wifi_get_rssi(void);
 
 /* ===================== 配对与时间 ===================== */
-bool net_sync_ntp_time();
-bool net_pair_with_code(const char* six_digit_code);
+bool net_sync_ntp_time(void);
+bool net_pair_with_code(const char *six_digit_code);
 
 /* ===================== 端云加密通信 ===================== */
 /**
  * 内部自动完成：明文 AES-128-CTR 加密 -> 请求签名 -> HTTP POST ->
  * 响应签名校验 -> 信封解密。api_path 必须是**纯 API 路径**。
- * out_resp_plain_json 为解密后的业务明文（调用方负责 free）。
+ * out_resp_plain_json 为解密后的业务明文（**堆内存，调用方负责 free**）。
  */
-bool net_post_encrypted_json(const char* api_path, const char* plain_req_json,
-                             int* out_biz_code, char** out_resp_plain_json);
+bool net_post_encrypted_json(const char *api_path, const char *plain_req_json,
+                             int *out_biz_code, char **out_resp_plain_json);
 
 /* 业务高级封装（内部组装 JSON 并调用 net_post_encrypted_json，HTTP 超时锁定 20s） */
-bool net_sync_bootstrap(const char* bootstrap_req_json, int* out_biz_code, char** out_resp_json);
+bool net_sync_bootstrap(const char *bootstrap_req_json, int *out_biz_code, char **out_resp_json);
+/**
+ * 心跳同步（自组装请求明文）：设备标识、固件版本、电量、已装学科包与电子书列表
+ * 全部由本层内部采集与填充，调用方不感知。
+ */
+bool net_sync_bootstrap_auto(int *out_biz_code, char **out_resp_json);
 /**
  * 支持纯拍照(pcm_data=NULL)与边说边拍(pcm_data 为 16kHz PCM 缓冲，内部 Base64 编码至 pcm_base64)。
- * edu_stage / enrollment_year / device_remaining_quota 由本层从 profile.json 自动注入。
+ * edu_stage / enrollment_year / device_remaining_quota 由本层从 profile 缓存自动注入。
  */
-bool net_study_solve(const char* session_id, const uint8_t* jpg_data, size_t jpg_len,
-                     const uint8_t* pcm_data, size_t pcm_len, uint8_t hint_level,
-                     int* out_biz_code, char** out_resp_json);
-bool net_study_voice(const char* context_page, const char* pack_id, const char* card_id,
-                     const uint8_t* pcm_data, size_t pcm_len,
-                     int* out_biz_code, char** out_resp_json);
+bool net_study_solve(const char *session_id, const uint8_t *jpg_data, size_t jpg_len,
+                     const uint8_t *pcm_data, size_t pcm_len, uint8_t hint_level,
+                     int *out_biz_code, char **out_resp_json);
+bool net_study_voice(const char *context_page, const char *pack_id, const char *card_id,
+                     const uint8_t *pcm_data, size_t pcm_len,
+                     int *out_biz_code, char **out_resp_json);
+
+/* ===================== 调度层（纯 C，可主机侧单测） ===================== */
+/**
+ * 按 `net_request_t.op` 分派到对应端点。
+ *
+ * 返回值：**业务码**（0 成功；4004 学段未设置等业务错误；-1 网络/协议失败）。
+ * `*out_resp_json` 为解密后的业务明文（**堆内存，调用方负责 free**；无数据时置 NULL）。
+ *
+ * 调度与「注入 + 加签 + 加密」的职责边界（doc/05 §5.1）：本函数只选端点、传参数；
+ * 明文组装与加密一律由 net_api 层完成，UI 不参与。
+ */
+int net_dispatch(const net_request_t *req, char **out_resp_json);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* ABBOT_NET_API_H */

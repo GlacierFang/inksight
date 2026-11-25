@@ -19,6 +19,8 @@
 #ifndef ABBOT_UI_ROUTER_H
 #define ABBOT_UI_ROUTER_H
 
+#include <stdint.h>
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -108,6 +110,20 @@ void ui_toast(const char *text);
 
 /* 渲染循环：由 task_ui_fsm 调用，内部用 lv_timer 驱动，不阻塞。 */
 void ui_router_tick(void);
+
+/**
+ * 收到云端应答（Core 1 侧入口，由 task_ui_fsm 调用）。
+ *
+ * `payload` 是解密后的业务明文，**所有权转移给 UI 层**（本函数负责释放旧缓冲，
+ * 新缓冲由本层持有并最终释放）。业务码语义：
+ *   0    成功
+ *   4004 学段未设置（doc/05 §5.1：显示「请先在设置里完成学段选择」）
+ *   其他 网关业务码或 -1 网络/协议失败
+ */
+void ui_router_handle_net_reply(int32_t biz_code, char *payload, uint32_t len);
+
+/** 取最近一次云端应答的业务明文（供页面渲染；无应答时返回 NULL）。 */
+const char *ui_router_last_reply(uint32_t *out_len);
 
 #ifdef __cplusplus
 }

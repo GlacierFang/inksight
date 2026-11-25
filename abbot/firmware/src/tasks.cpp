@@ -72,6 +72,10 @@ static void task_ui_fsm(void *arg)
         if (qcmd != NULL && xQueueReceive(qcmd, &cmd, 0) == pdTRUE) {
             if (cmd.kind == 1) {
                 ui_toast(cmd.text);
+            } else if (cmd.kind == 2) {
+                /* 云端应答：所有权转给 UI 层（UI 负责释放与渲染） */
+                ui_router_handle_net_reply(cmd.biz_code, cmd.payload, cmd.payload_len);
+                cmd.payload = NULL;
             }
         }
 
@@ -114,7 +118,24 @@ static void task_camera(void *arg)
             snprintf(cmd.text, sizeof(cmd.text), "%s", path);
             xQueueSend(hal_ui_command_queue(), &cmd, 0);
         }
-        hal_camera_release_jpeg(jpg);
+
+        if (req.want_uxga) {
+            /* 抓拍（UXGA）：JPEG 所有权转给网络任务，由它上传后释放 */
+            net_request_t nreq = {};
+            nreq.op = NET_OP_SOLVE;
+            nreq.hint_level = 0;
+            nreq.with_voice = req.with_voice;
+            snprintf(nreq.session_id, sizeof(nreq.session_id), "%s", req.session_id);
+            nreq.jpg = jpg;
+            nreq.jpg_len = (uint32_t)len;
+            if (xQueueSend(hal_net_request_queue(), &nreq, 0) != pdTRUE) {
+                Serial.printf("[%s] net queue full, jpg dropped\n", TAG);
+                hal_camera_release_jpeg(jpg);
+            }
+        } else {
+            /* 预览帧（HVGA）：不上传，直接释放 */
+            hal_camera_release_jpeg(jpg);
+        }
     }
 }
 
@@ -176,23 +197,41 @@ static void task_storage(void *arg)
 }
 
 /**
- * 网络任务：请求投递口。
- * HTTP/TLS 传输尚未接入（Phase 2 剩余项），这里把请求接住并如实回报，
- * 不假装成功。
+ * 网络任务：端云请求的**实际执行者**（Core 0，doc/02 §4.1）。
+ *
+ * 职责：取请求 → 交给 net 层加签 / 加密 / 收发 / 验签 / 解密 →
+ * 把解密后的业务明文经 q_ui_command（kind=2）投回 Core 1。
+ * UI 层不碰协议细节，net 层也不碰 UI（doc/02 §4.1 双核铁律）。
  */
 static void task_net_worker(void *arg)
 {
     (void)arg;
     QueueHandle_t q = hal_net_request_queue();
+
+    /* 上电先联网：Wi-Fi 连接 + NTP 校时（doc/04 §1）。 */
+    net_wifi_init_auto_connect();
+    net_sync_ntp_time();
+
     for (;;) {
         net_request_t req;
         if (q == NULL || xQueueReceive(q, &req, portMAX_DELAY) != pdTRUE) {
             continue;
         }
         hal_power_note_activity();
+
+        char *resp = NULL;
+        int biz = net_dispatch(&req, &resp);
+
+        /* JPEG 所有权随请求转移过来 —— 用完必须在这里释放 */
+        if (req.jpg != NULL) {
+            hal_camera_release_jpeg(req.jpg);
+        }
+
         ui_command_t cmd = {};
-        cmd.kind = 1;
-        snprintf(cmd.text, sizeof(cmd.text), "网络通道尚未接通");
+        cmd.kind = 2;
+        cmd.biz_code = biz;
+        cmd.payload = resp;              /* 所有权转移给 Core 1 */
+        cmd.payload_len = resp ? (uint32_t)strlen(resp) : 0;
         xQueueSend(hal_ui_command_queue(), &cmd, 0);
     }
 }

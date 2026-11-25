@@ -11,6 +11,9 @@
  */
 #include "ui_router.h"
 
+#include <stdlib.h>
+#include <string.h>
+
 #include "lvgl.h"
 #include "ui_pages.h"
 
@@ -20,6 +23,11 @@ static bool s_in_book = false;
 
 /* 浮层可见状态, 索引即优先级(高->低) */
 static bool s_overlay_visible[OVERLAY_COUNT] = {false, false, false};
+
+/* 最近一次云端应答（解密后的业务明文）—— 由网络任务经队列投递过来 */
+static char *s_last_reply = NULL;
+static uint32_t s_last_reply_len = 0;
+static int32_t s_last_biz = -1;
 
 /* 提醒弹窗打断前的页面, 供短按关闭后精准恢复 */
 static ui_page_t s_reminder_restore_page = PAGE_HOME;
@@ -282,4 +290,38 @@ void ui_router_tick(void)
 {
     /* LVGL 5ms 心跳由 task_ui_fsm 的 lv_timer_handler 驱动; 这里留一个空钩子,
      * 供后续接 toast 自动消失与倒计时刷新。 */
+}
+
+/* ===================== 云端应答 ===================== */
+
+void ui_router_handle_net_reply(int32_t biz_code, char *payload, uint32_t len)
+{
+    /* 旧缓冲先释放 —— 所有权始终在 UI 层 */
+    if (s_last_reply != NULL) {
+        free(s_last_reply);
+        s_last_reply = NULL;
+        s_last_reply_len = 0;
+    }
+    s_last_biz = biz_code;
+    if (payload != NULL) {
+        s_last_reply = payload;
+        s_last_reply_len = len;
+    }
+
+    /* 文案一律由 UI 层出（doc/03 §四）：HAL / net 层不拼面向用户的中文 */
+    if (s_last_biz == 0) {
+        ui_toast("已收到云端应答");
+    } else if (s_last_biz == 4004) {
+        ui_toast("请先在设置里完成学段选择");
+    } else {
+        ui_toast("网络请求未成功");
+    }
+}
+
+const char *ui_router_last_reply(uint32_t *out_len)
+{
+    if (out_len != NULL) {
+        *out_len = s_last_reply_len;
+    }
+    return s_last_reply;
 }

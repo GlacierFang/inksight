@@ -307,6 +307,72 @@ int nr_build_pair_plain(const char *device_id, const char *pair_code,
     return (int)(sb.len + 1);
 }
 
+static void fill_bootstrap_plain(nr_sb_t *sb, const char *device_id, const char *fw_version,
+                                 int battery_pct, uint32_t schedule_updated_at,
+                                 const char *local_packs_json, const char *local_books_json)
+{
+    sb_putc(sb, '{');
+    sb_puts(sb, "\"device_id\":");
+    sb_json_str(sb, device_id);
+    sb_puts(sb, ",\"fw_version\":");
+    sb_json_str(sb, fw_version);
+    sb_printf(sb, ",\"battery_pct\":%d", battery_pct);
+    sb_printf(sb, ",\"schedule_updated_at\":%lu", (unsigned long)schedule_updated_at);
+    sb_puts(sb, ",\"local_packs\":");
+    sb_puts(sb, (local_packs_json != NULL) ? local_packs_json : "[]");
+    sb_puts(sb, ",\"local_books\":");
+    sb_puts(sb, (local_books_json != NULL) ? local_books_json : "[]");
+    sb_putc(sb, '}');
+}
+
+int nr_build_bootstrap_plain(const char *device_id, const char *fw_version,
+                             int battery_pct, uint32_t schedule_updated_at,
+                             const char *local_packs_json, const char *local_books_json,
+                             char *out, size_t out_cap)
+{
+    if (device_id == NULL || fw_version == NULL) {
+        return -1;
+    }
+    if (out == NULL) {
+        nr_sb_t sb;
+        sb_init(&sb, NULL, 0);
+        fill_bootstrap_plain(&sb, device_id, fw_version, battery_pct, schedule_updated_at,
+                             local_packs_json, local_books_json);
+        return (int)(sb.len + 1);
+    }
+    nr_sb_t sb;
+    sb_init(&sb, out, out_cap);
+    fill_bootstrap_plain(&sb, device_id, fw_version, battery_pct, schedule_updated_at,
+                         local_packs_json, local_books_json);
+    if (sb.overflow) {
+        return -2;
+    }
+    out[sb.len] = '\0';
+    return (int)(sb.len + 1);
+}
+
+int nr_parse_profile(const char *json, size_t len, nr_profile_doc_t *out)
+{
+    if (json == NULL || out == NULL) {
+        return -1;
+    }
+    memset(out, 0, sizeof *out);
+    char stage[16];
+    int stage_len = nr_json_get_string(json, len, "edu_stage", stage, sizeof stage);
+    if (stage_len <= 0) {
+        return -1;
+    }
+    int year = nr_json_get_int(json, len, "enrollment_year", -1);
+    if (year <= 0) {
+        return -1;
+    }
+    snprintf(out->edu_stage, sizeof out->edu_stage, "%s", stage);
+    out->enrollment_year = year;
+    out->daily_quota = nr_json_get_int(json, len, "daily_quota", 0);
+    out->quota_used_count = nr_json_get_int(json, len, "quota_used_count", 0);
+    return 0;
+}
+
 /* ===================== JSON 取值 ===================== */
 
 static const char *nr_find_value(const char *json, size_t len, const char *key)

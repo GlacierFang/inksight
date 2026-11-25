@@ -40,6 +40,14 @@ typedef struct {
     int device_remaining_quota; /* 仅供对账，不参与放行判定 */
 } nr_profile_t;
 
+/** `/config/profile.json` 解析结果（设备本地档案，doc/04 §3.1）。 */
+typedef struct {
+    char edu_stage[16];
+    int enrollment_year;
+    int daily_quota;
+    int quota_used_count;
+} nr_profile_doc_t;
+
 /* ---------- HTTP 响应解析结果 ---------- */
 typedef struct {
     int status_code;             /* HTTP 状态码，未解析出时为 0 */
@@ -81,6 +89,18 @@ int nr_build_voice_plain(const nr_profile_t *prof, const char *context_page,
 /** `POST /api/v1/pair` 明文（**明文请求，不加签不加密**，此时双方都还没有密钥）。 */
 int nr_build_pair_plain(const char *device_id, const char *pair_code,
                         char *out, size_t out_cap);
+
+/** `POST /api/v1/sync/bootstrap` 明文（心跳同步，doc/05 §5）。 */
+int nr_build_bootstrap_plain(const char *device_id, const char *fw_version,
+                             int battery_pct, uint32_t schedule_updated_at,
+                             const char *local_packs_json, const char *local_books_json,
+                             char *out, size_t out_cap);
+
+/**
+ * 解析 `/config/profile.json`，取学段与配额基准。
+ * 返回 0 成功；-1 解析失败（缺字段或格式不对）。
+ */
+int nr_parse_profile(const char *json, size_t len, nr_profile_doc_t *out);
 
 /* ---------- JSON 取值（扁平对象，值为 string / number / bool） ---------- */
 
