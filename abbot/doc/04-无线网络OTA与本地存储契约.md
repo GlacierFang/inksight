@@ -247,12 +247,36 @@
 
 ---
 
-## 六、 无线网络、业务请求与 OTA 底层接口契约（`include/net_client.h`）
+## 六、 无线网络、业务请求与 OTA 底层接口契约（`include/net_api.h`）
+
+> **头文件分工（2026-11-25 补记）：** 设备端网络栈拆成两层，互不重叠：
+> * **`include/net_client.h`** —— 端云安全信封的**纯 C 原语层**（SHA-256 / HMAC / AES-128-CTR / Base64 / 请求签名 / 响应验签 / 信封解密）。**不依赖 `Arduino.h`**，同一份实现可在 ESP32 固件与主机侧 native 测试中编译，禁止混入任何 Wi-Fi / NVS / HTTP 调用。
+> * **`include/net_api.h`** —— 设备端**业务请求层**（Wi-Fi 连接、NTP 校时、配对握手、加密 POST、资产下载、OTA），依赖 Arduino 侧能力，向 `task_net_worker` 提供业务级接口。
+>
+> 业务明文的**字段形状真相源是 `05` §5.1**，本节只声明设备侧调用接口。
 
 ```cpp
 #pragma once
 #include <Arduino.h>
 
+/* ===== 0. 档案注入上下文（doc/05 §5.1：由 net 层自动注入，调用方不得自行拼装） ===== */
+/**
+ * net 层内部职责：从 TF 卡 `/config/profile.json` 读取并维护下面三个字段，
+ * 组装 `/api/v1/study/solve` 与 `/api/v1/study/voice` 明文时**自动注入**。
+ *   - edu_stage            缺省或不在枚举内 -> 服务端 4004 -> 屏幕显示「请先在设置里完成学段选择」
+ *   - enrollment_year     同上，必填
+ *   - device_remaining_quota 仅供服务端对账，不参与放行判定（05 §4.2）
+ * UI 状态机不得自行拼装这三个字段。
+ */
+struct NetProfileContext {
+    char edu_stage[16];        /* 例："JUNIOR" */
+    int enrollment_year;       /* 例：2026 */
+    int device_remaining_quota;/* 上报值，服务端不信任 */
+};
+bool net_profile_load(NetProfileContext* out);
+bool net_profile_update_quota(int effective_remaining_quota); /* 以网关下发值覆盖本地显示值 */
+
+/* ===== 1. Wi-Fi 异步扫描与多热点管理 ===== */
 struct WifiApInfo {
     char ssid[33];
     int32_t rssi;
@@ -268,7 +292,6 @@ enum WifiConnState {
     WIFI_STATE_AUTH_FAILED
 };
 
-// 1. Wi-Fi 异步扫描与多热点管理
 void net_wifi_init_auto_connect();
 void net_wifi_start_async_scan();
 int net_wifi_get_scan_results(WifiApInfo* out_list, int max_count);
@@ -276,17 +299,24 @@ bool net_wifi_connect_and_save(const char* ssid, const char* password);
 WifiConnState net_wifi_get_state();
 int8_t net_wifi_get_rssi();
 
-// 2. 配对握手与时间同步
+/* ===== 2. 配对握手与时间同步 ===== */
 bool net_sync_ntp_time();
 bool net_pair_with_code(const char* six_digit_code);
 
-// 3. 双向 HMAC-SHA256 + AES-128-CTR 业务通信封装 (供 task_net_worker 调用)
-// 内部自动完成明文加密、请求头签名(保存请求 X-Timestamp)、响应头验签 (X-Resp-Signature) 及响应解密
+/* ===== 3. 双向 HMAC-SHA256 + AES-128-CTR 业务通信封装 (供 task_net_worker 调用) ===== */
+/**
+ * 内部自动完成明文加密、请求头签名(保存请求 X-Timestamp)、响应头验签 (X-Resp-Signature) 及响应解密。
+ * api_path 必须是**纯 API 路径**（如 "/api/v1/study/solve"）：签名 PATH 与网关挂载前缀无关，
+ * 而实际 URL 由本层按 NVS 中的网关域名 + 挂载前缀拼装（05 §3.2）。
+ */
 bool net_post_encrypted_json(const char* api_path, const char* plain_req_json, int* out_biz_code, char** out_resp_plain_json);
 
-// 业务高级封装（内部组装 JSON 并调用 net_post_encrypted_json，HTTP 超时锁定 20s）
+/* 业务高级封装（内部组装 JSON 并调用 net_post_encrypted_json，HTTP 超时锁定 20s） */
 bool net_sync_bootstrap(const char* bootstrap_req_json, int* out_biz_code, char** out_resp_json);
-// 支持纯拍照(pcm_data=NULL)与边说边拍(pcm_data 传入 16kHz PCM 缓冲，内部 Base64 编码至 pcm_base64)
+/**
+ * 支持纯拍照(pcm_data=NULL)与边说边拍(pcm_data 传入 16kHz PCM 缓冲，内部 Base64 编码至 pcm_base64)。
+ * edu_stage / enrollment_year / device_remaining_quota 由本层从 profile.json 自动注入（05 §5.1）。
+ */
 bool net_study_solve(const char* session_id, const uint8_t* jpg_data, size_t jpg_len, const uint8_t* pcm_data, size_t pcm_len, uint8_t hint_level, int* out_biz_code, char** out_resp_json);
 bool net_study_voice(const char* context_page, const char* pack_id, const char* card_id, const uint8_t* pcm_data, size_t pcm_len, int* out_biz_code, char** out_resp_json);
 

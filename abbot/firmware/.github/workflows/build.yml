@@ -70,6 +70,11 @@ jobs:
               test/test_net_client.c src/net/net_client.c \
               -o /tmp/test_net_client -lmbedtls -lmbedcrypto
           /tmp/test_net_client
+          # 设备端请求层（明文组装 / URL / HTTP 响应解析）——纯 C，同样主机侧可测
+          gcc -Wall -Wextra -Werror -I include -I src \
+              test/test_net_req.c src/net/net_req.c src/net/net_client.c \
+              -o /tmp/test_net_req -lmbedtls -lmbedcrypto
+          /tmp/test_net_req
 
       - name: 编译固件
         working-directory: .
