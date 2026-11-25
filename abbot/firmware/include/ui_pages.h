@@ -11,6 +11,7 @@
 
 #include <stdbool.h>
 
+#include "cards.h"
 #include "lvgl.h"
 #include "ui_router.h"
 
@@ -81,6 +82,22 @@ void ui_pages_focus_adjust(int delta);
 /* ---------- 状态栏 ---------- */
 /** 设置某页状态栏文字（例如离线提示）。 */
 void ui_pages_set_status(ui_page_t page, const char *text);
+
+/* ---------- 学科卡片（doc/04 §四） ---------- */
+/** 刷新学科包列表（读卡上 /subjects 下的真实学科包）。 */
+void ui_pages_refresh_subject_list(void);
+/** 当前选中的学科包 id（没有则空串）。 */
+const char *ui_pages_selected_pack_id(void);
+/** 载入卡片集（UI 持有指针，不拷贝 —— 上层持有所有权）。 */
+void ui_pages_set_cards(const card_pack_t *pack);
+/** 已载入的卡片张数（0 = 没有）。 */
+int ui_pages_card_count(void);
+/** 当前这张卡的序号（0 起）。 */
+int ui_pages_card_index(void);
+/** 当前是不是显示背面（答案）。 */
+bool ui_pages_card_answer_shown(void);
+/** 显示第 index 张卡（show_answer = true 显示背面）。 */
+void ui_pages_show_card(int index, bool show_answer);
 
 /* ---------- 设备接入状态（自动登记，doc/04 §1.2） ---------- */
 /**

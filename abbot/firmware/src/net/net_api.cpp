@@ -43,6 +43,7 @@ extern "C" void configTime(long gmtOffset_sec, int daylightOffset_sec,
 #include "net_api.h"
 #include "net_client.h"
 #include "net_req.h"
+#include "cards.h"
 #include "outbox.h"
 #include "hal_interfaces.h"
 #include "hal_shared.h"
@@ -769,6 +770,24 @@ int net_outbox_pending(void)
     outbox_queue_t q;
     int n = outbox_load(&q);
     return (n > 0) ? n : 0;
+}
+
+/* ===================== 学科卡片包（doc/04 §四） ===================== */
+
+int net_cards_load(const char *pack_id, card_pack_t *out)
+{
+    if (pack_id == NULL || out == NULL) {
+        return CARDS_ERR_INVALID;
+    }
+    /*
+     * 设备密钥只存在 NVS —— 解密必须在这一层做（UI 层不碰密钥）。
+     * AES-128 的密钥取 `device_secret` 的**前 16 字节**（doc/05 §3.1）。
+     */
+    uint8_t secret[NC_SECRET_LEN];
+    if (!net_load_secret(secret)) {
+        return CARDS_ERR_KEY;   /* 还没接入学习助手 */
+    }
+    return cards_load(pack_id, secret, out);
 }
 
 /* ===================== 资产下载 ===================== */

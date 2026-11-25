@@ -24,6 +24,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "cards.h"
 #include "hal_shared.h"
 
 #ifdef __cplusplus
@@ -124,6 +125,17 @@ void ui_router_handle_net_reply(int32_t biz_code, char *payload, uint32_t len);
 
 /** 取最近一次云端应答的业务明文（供页面渲染；无应答时返回 NULL）。 */
 const char *ui_router_last_reply(uint32_t *out_len);
+
+/**
+ * 收到学科卡片包（网络任务解好的明文）。
+ *
+ * `pack` 是网络任务交过来的堆内存，**所有权转移给 UI 层**（本函数负责释放）。
+ * `rc` 是 `CARDS_OK`（>=0，卡片张数）或负的错误码。
+ *
+ * 成功时自动跳到翻卡学习页；失败时给一句温和的中文提示
+ * （不出现加密、密钥这类技术词）。
+ */
+void ui_router_handle_cards(card_pack_t *pack, int rc);
 
 /**
  * 设备接入状态变化（自动登记，doc/04 §1.2）。

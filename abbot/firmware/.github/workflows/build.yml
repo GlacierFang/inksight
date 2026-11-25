@@ -90,6 +90,12 @@ jobs:
               test/test_outbox.c src/net/outbox.c \
               -o /tmp/test_outbox
           /tmp/test_outbox
+          # 学科卡片包（cards）——纯 C，自带假存储任务
+          # 含 doc/05 §3.4 的官方锁定向量（cards.enc 局部块偏移解密）
+          gcc -Wall -Wextra -Werror -I test/host_stubs -I include -I src \
+              test/test_cards.c src/net/cards.c src/net/net_client.c \
+              -o /tmp/test_cards -lmbedtls -lmbedcrypto -lz
+          /tmp/test_cards
           # Arduino 层（net_api.cpp）的语法检查 —— 用 stub 头在主机上跑。
           # 这一步不替代下面的 PlatformIO 固件编译：它只是让「一轮只暴露一个
           # 编译错误」变成「一轮暴露全部」，省掉反复试错。

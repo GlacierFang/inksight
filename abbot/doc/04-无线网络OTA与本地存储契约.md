@@ -81,7 +81,9 @@
 ```
 
 ### 2.2 空白卡开箱自愈（`hal_storage_init_and_scaffold`）
-开机挂载 `SD_MMC`（1-Bit 模式）后，固件自动检查上述目录与核心配置文件是否存在；若插上一张全新空白 FAT32 卡，自动创建全套目录并生成默认初始化文件（含内置示例学科包 `/subjects/demo_pack/`，其 `meta.json` 标记 `"key_type": "demo"`，使用内置默认密钥 `STUDY_DEMO_KEY_16` 解密）。
+开机挂载 `SD_MMC`（1-Bit 模式）后，固件自动检查上述目录与核心配置文件是否存在；若插上一张全新空白 FAT32 卡，自动创建全套目录与默认初始化文件（`profile.json` / `schedule.json` / `settings.json` / `manifest.json` / `progress.json` / `queue.json` 等）。
+
+**空白卡自愈不预置任何学科包** —— `/subjects/` 下是空的，学科包由网关经心跳下发后写入（`meta.json` 标记 `"key_type": "device"` 时用设备密钥 `device_secret[0:16]` 解密，标记 `"key_type": "demo"` 时用内置默认密钥 `STUDY_DEMO_KEY16` 解密）。设备端的「学科包」列表读的就是 `/subjects/` 下的真实目录。
 
 ### 2.3 防掉电原子写入契约（Atomic Write）
 所有核心 JSON 文件（包括 `profile.json`、`schedule.json`、`settings.json`、`progress.json`、`bookmarks.json`、`manifest.json` 及 **`/outbox/queue.json`**）在写入时必须严格执行四步原子替换协议：
@@ -196,7 +198,7 @@
   "updated_at": 1795410000
 }
 ```
-* **`key_type` 密钥路由规则**：取值为 `"demo"`（内置演示包或未配对状态下导出的包，固定使用 16 字节 ASCII 密钥 `"STUDY_DEMO_KEY_16"` 解密）或 `"device"`（已配对设备专用加密包，使用 NVS 中 `device_secret` 的前 16 字节解密）。
+* **`key_type` 密钥路由规则**：取值为 `"demo"`（内置演示包或未配对状态下导出的包，固定使用 16 字节 ASCII 密钥 `"STUDY_DEMO_KEY16"` 解密）或 `"device"`（已配对设备专用加密包，使用 NVS 中 `device_secret` 的前 16 字节解密）。
 
 ### 3.4 `/records/progress.json` 与 `mistakes.jsonl`
 ```json
@@ -281,6 +283,19 @@
 4. 构造当前块初始计数器：`nonce_counter = BigEndian128(IV_base) + block_index`（无符号 128 位大端序加法进位，开发时必须先通过 `05` 文档第 3.4 节局部块偏移向量单测）。就地核对值：`IV_base = 0102030405060708090a0b0c0d0e0f10`、`block_index = 2` 时 `nonce_counter = 0102030405060708090a0b0c0d0e0f12`，明文 `7b2270696e67223a317d`（`{"ping":1}`）的期望密文为 `41da37cc48e5aa3f8d06`；
    * **`IV_base` 来源与作用域（勿与请求信封混淆）**：`IV_base` 取自 **`cards.enc` 文件头前 16 字节**（即第 4.1 节索引里「第 0 题偏移恒为 16」所跳过的那个 `IV`），由**打包时逐包随机生成**并写入文件头；上面那个固定 `IV_base` **仅是 `05` 第 3.4 节的单测核对值**，严禁把它当成打包默认值写死 —— 同一密钥下复用 `IV` 会造成 CTR 密钥流重用，两个包同偏移密文可直接异或还原。`IV_base` 的作用域是**单个学科包文件**（包内 `block_index` 递增），与 `05` 第 3.2 节「每个请求信封独立随机 `IV`、计数器从 0 起」是**两套独立作用域**，互不影响；
 5. 调用 `mbedtls_aes_crypt_ctr()` 时传入 `nc_off = byte_in_block`、`nonce_counter` 与 `stream_block` 缓冲，即可在单题 `< 10ms` 内精确解密单行 JSONL 明文，无需解密整本文件。
+
+> **设备端实现落点（2026-11-25 落地）**：`src/net/cards.c` 按本节公式实现 ——
+> `cards_parse_index()` 校验魔数/版本/CRC32/偏移下界；`cards_decrypt_range()` 按
+> `block_index` / `byte_in_block` 局部解密（首块起点落在块中间时，把密文摆到
+> `block[byte_in_block]` 再解 —— 摆到 `block[0]` 会让块尾用错密钥流）。
+> `nc_add_counter()` 提供大端序 128-bit 进位。实现用 **doc/05 §3.4 的官方锁定向量**
+> （`block_index = 2` 处明文 `{"ping":1}` ↔ 密文 `41da37cc48e5aa3f8d06`）自检，
+> 主机侧单测见 `firmware/test/test_cards.c`。
+>
+> **解密在哪一层做**：设备密钥只存在 NVS，所以解密只在**网络任务**里做
+> （`net_cards_load()` → `cards_load()`），UI 层不碰密钥、不碰加密；
+> 解出的卡片经 `q_ui_command`（kind=6）投回 Core 1 渲染。
+> 读卡仍走存储任务队列（doc/02 §4.2）。
 
 ---
 

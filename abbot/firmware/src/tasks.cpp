@@ -82,6 +82,10 @@ static void task_ui_fsm(void *arg)
             } else if (cmd.kind == 5) {
                 /* 设备接入状态变化（自动登记，doc/04 §1.2） */
                 ui_router_set_pair_state((int)cmd.biz_code);
+            } else if (cmd.kind == 6) {
+                /* 学科卡片包（网络任务解好的明文）—— 所有权转移给 UI 层 */
+                ui_router_handle_cards((card_pack_t *)cmd.payload, cmd.biz_code);
+                cmd.payload = NULL;
             }
         }
 
@@ -401,6 +405,22 @@ static void task_net_worker(void *arg)
         bool got = (q != NULL) && (xQueueReceive(q, &req, pdMS_TO_TICKS(500)) == pdTRUE);
         if (got) {
             hal_power_note_activity();
+
+            if (req.op == NET_OP_CARDS) {
+                /*
+                 * 学科卡片包：解密 + 解析在**网络任务**里做（设备密钥只在 NVS，
+                 * UI 层不碰密钥）。解完经 kind=6 投回 Core 1 渲染。
+                 */
+                card_pack_t *pack = (card_pack_t *)malloc(sizeof(card_pack_t));
+                int rc = (pack != NULL) ? net_cards_load(req.pack_id, pack) : CARDS_ERR_IO;
+                ui_command_t ccmd = {};
+                ccmd.kind = 6;              /* 卡片数据 */
+                ccmd.biz_code = rc;
+                ccmd.payload = (char *)pack; /* 所有权转移给 UI */
+                ccmd.payload_len = (pack != NULL) ? (uint32_t)sizeof(card_pack_t) : 0;
+                xQueueSend(hal_ui_command_queue(), &ccmd, 0);
+                continue;
+            }
 
             char *resp = NULL;
             int biz = net_dispatch(&req, &resp);

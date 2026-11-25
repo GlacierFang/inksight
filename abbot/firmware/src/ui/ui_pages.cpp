@@ -75,6 +75,9 @@ static uint8_t s_item_count[PAGE_COUNT];
 static uint8_t s_cursor[PAGE_COUNT];
 static int s_build_page = -1;     /* 正在构建的页面（-1 = 不登记条目） */
 
+/* 光标渲染（定义在文件后面的「列表光标」段 —— 这里先前置声明） */
+static void ui_cursor_render(ui_page_t page);
+
 /* 解析结果页的动态内容 */
 static lv_obj_t *s_solve_body = NULL;
 static lv_obj_t *s_solve_question = NULL;
@@ -105,6 +108,21 @@ static lv_obj_t *s_focus_value_label = NULL;
 
 /* 首页「今日课程」卡片 */
 static lv_obj_t *s_home_schedule_label = NULL;
+
+/* ===================== 学科卡片（doc/04 §四） ===================== */
+
+#define UI_MAX_PACKS   8   /* 学科包列表最多显示几个 */
+#define UI_PACK_ID_MAX 32  /* 学科包 id 长度上限 */
+
+static const card_pack_t *s_cards = NULL;   /* 已载入的卡片集（UI 持有指针） */
+static int s_card_index = 0;                /* 当前这张卡（0 起） */
+static bool s_card_show_answer = false;     /* 当前是不是背面 */
+static lv_obj_t *s_card_label = NULL;       /* 卡片正文标签 */
+static lv_obj_t *s_card_pos_label = NULL;   /* 「第 N / M 张」 */
+
+/* 学科包列表（读卡上 /subjects 下的真实目录） */
+static char s_pack_ids[UI_MAX_PACKS][UI_PACK_ID_MAX];
+static int s_pack_count = 0;
 
 /* OOBE 自动接入进度页（doc/04 §1.2 自动登记） */
 static lv_obj_t *s_oobe_state_label = NULL;
@@ -437,41 +455,48 @@ static void ui_build_solve_result(lv_obj_t *content)
     lv_obj_align(menu, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
-/* 4. 学科卡片包列表 (PAGE_SUBJECT_LIST) */
+/* 4. 学科卡片包列表 (PAGE_SUBJECT_LIST)
+ *
+ * 内容由 `ui_pages_refresh_subject_list()` 从 TF 卡的 /subjects 重建
+ * （这里只放标题占位）—— 列表显示的是**真实已下载**的学科包，不是写死的假数据。
+ */
 static void ui_build_subject_list(lv_obj_t *content)
 {
-    static const char *items[] = {
-        "> 语文 · 基础积累",
-        "  数学 · 几何直观",
-        "  英语 · 日常表达",
-        "  历史 · 时间线",
-    };
-    int i;
-    for (i = 0; i < 4; i++) {
-        lv_obj_t *row = ui_make_list_item(content, items[i], "已下载");
-        lv_obj_align(row, LV_ALIGN_TOP_LEFT, 0, i * 40);
-    }
+    lv_obj_t *title = ui_make_label(content, "学科包", true);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
 }
 
-/* 5. 翻卡学习 (PAGE_CARD_STUDY) */
+/* 5. 翻卡学习 (PAGE_CARD_STUDY)
+ *
+ * 正面是题干，短按翻面看答案，长按退出（doc/03 §四 手势表）。
+ * 左右键在卡片之间翻。
+ */
 static void ui_build_card_study(lv_obj_t *content)
 {
     lv_obj_t *card = ui_make_card(content);
     lv_obj_set_size(card, 280, 260);
     lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_t *label = ui_make_label(card, "正面：这句话的意思是……\n\n[ 翻面 ]", false);
+    lv_obj_t *label = ui_make_label(card, "还没有打开学科包", false);
     lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
+    s_card_label = label;
 
+    lv_obj_t *pos = ui_make_label(content, "", false);
+    lv_obj_align(pos, LV_ALIGN_TOP_RIGHT, 0, 6);
+    s_card_pos_label = pos;
+
+    /* 菜单只有两项是**可确认**的（doc/03 §四）：翻面 / 语音追问。
+     * 第三行是操作提示（左右键翻卡），用普通标签 —— 不是可选行。 */
     static const char *items[] = {
         "> [ 翻面 ]",
         "  [ 语音追问这题 ]",
-        "  [ 上一张 / 下一张 ]",
     };
     int i;
-    for (i = 0; i < 3; i++) {
+    for (i = 0; i < 2; i++) {
         lv_obj_t *row = ui_make_list_item(content, items[i], NULL);
         lv_obj_align(row, LV_ALIGN_BOTTOM_LEFT, 0, -70 + i * 26);
     }
+    lv_obj_t *hint = ui_make_label(content, "  左右键换一张", false);
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_LEFT, 0, -18);
 }
 
 /* 6. 番茄专注时钟 (PAGE_POMODORO) */
@@ -574,6 +599,114 @@ static void ui_build_ota(lv_obj_t *content)
 
     lv_obj_t *item = ui_make_list_item(content, "> [ 检查更新 ]", NULL);
     lv_obj_align(item, LV_ALIGN_BOTTOM_MID, 0, 0);
+}
+
+/* ===================== 学科卡片：公开接口 ===================== */
+
+/** 刷新学科包列表（读卡上 /subjects 下的真实学科包目录）。 */
+void ui_pages_refresh_subject_list(void)
+{
+    lv_obj_t *content = ui_page_content(PAGE_SUBJECT_LIST);
+    if (content == NULL) {
+        return;
+    }
+    lv_obj_clean(content);
+    s_pack_count = 0;
+    s_item_count[PAGE_SUBJECT_LIST] = 0;
+    s_cursor[PAGE_SUBJECT_LIST] = 0;
+
+    lv_obj_t *title = ui_make_label(content, "学科包", true);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
+
+    ui_data_file_t files[UI_DATA_MAX_FILES];
+    uint32_t count = 0;
+    int rc = ui_data_list_files(UI_DATA_SUBJECTS_DIR, files, UI_DATA_MAX_FILES, &count);
+    if (rc != UI_DATA_OK) {
+        lv_obj_t *empty = ui_make_label(content, "暂时读不到学科包", false);
+        lv_obj_align(empty, LV_ALIGN_CENTER, 0, 0);
+        return;
+    }
+
+    uint32_t i;
+    /* 构建期登记可选行 —— 这一页是**运行时重建**的，
+       所以要自己把 s_build_page 置上（否则光标找不到行）。 */
+    s_build_page = PAGE_SUBJECT_LIST;
+    for (i = 0; i < count && s_pack_count < UI_MAX_PACKS; i++) {
+        const char *name = files[i].name;
+        if (name[0] == '\0' || strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+            continue;
+        }
+        size_t n = strlen(name);
+        if (n >= UI_PACK_ID_MAX) {
+            continue;
+        }
+        snprintf(s_pack_ids[s_pack_count], UI_PACK_ID_MAX, "%s", name);
+        char row_text[UI_PACK_ID_MAX + 4];
+        snprintf(row_text, sizeof(row_text), "  %s", name);
+        lv_obj_t *row = ui_make_list_item(content, row_text, "已下载");
+        lv_obj_align(row, LV_ALIGN_TOP_LEFT, 0, 44 + s_pack_count * 40);
+        s_pack_count++;
+    }
+    s_build_page = -1;
+    if (s_pack_count == 0) {
+        lv_obj_t *empty = ui_make_label(content, "还没有下载学科包", false);
+        lv_obj_align(empty, LV_ALIGN_CENTER, 0, 0);
+        return;
+    }
+    ui_cursor_render(PAGE_SUBJECT_LIST);
+}
+
+/** 当前选中的学科包 id（没有则空串）。 */
+const char *ui_pages_selected_pack_id(void)
+{
+    int idx = ui_pages_cursor_index(PAGE_SUBJECT_LIST);
+    if (idx < 0 || idx >= s_pack_count) {
+        return "";
+    }
+    return s_pack_ids[idx];
+}
+
+/** 载入卡片集（UI 持有指针，不拷贝 —— 上层持有所有权）。 */
+void ui_pages_set_cards(const card_pack_t *pack)
+{
+    s_cards = pack;
+    s_card_index = 0;
+    s_card_show_answer = false;
+    ui_pages_show_card(0, false);
+}
+
+int ui_pages_card_count(void)
+{
+    return (s_cards != NULL) ? s_cards->count : 0;
+}
+
+int ui_pages_card_index(void)
+{
+    return s_card_index;
+}
+
+bool ui_pages_card_answer_shown(void)
+{
+    return s_card_show_answer;
+}
+
+/** 显示第 index 张卡（show_answer = true 显示背面）。 */
+void ui_pages_show_card(int index, bool show_answer)
+{
+    if (s_cards == NULL || index < 0 || index >= s_cards->count) {
+        return;
+    }
+    s_card_index = index;
+    s_card_show_answer = show_answer;
+    const card_item_t *item = &s_cards->items[index];
+    if (s_card_label != NULL) {
+        lv_label_set_text(s_card_label, show_answer ? item->answer : item->question);
+    }
+    if (s_card_pos_label != NULL) {
+        char buf[48];
+        snprintf(buf, sizeof(buf), "第 %d / %d 张", index + 1, s_cards->count);
+        lv_label_set_text(s_card_pos_label, buf);
+    }
 }
 
 /* ===================== 电子书子页面 (doc/07) ===================== */

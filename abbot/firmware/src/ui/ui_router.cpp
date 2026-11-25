@@ -48,6 +48,9 @@ static int s_paired = 0;
 /* 设备接入状态（自动登记，doc/04 §1.2）：由网络任务经队列投来。 */
 static int s_pair_state = UI_PAIR_STATE_NONE;
 
+/* 已载入的学科卡片集（网络任务解好的明文，堆内存 —— 所有权在本层）。 */
+static card_pack_t *s_cards = NULL;
+
 /* 读配对标志（定义在“页面动作”段） */
 static void ui_paired_refresh(void);
 
@@ -140,6 +143,10 @@ void ui_router_go(ui_page_t page)
     case PAGE_HOME:
         ui_paired_refresh();
         ui_pages_refresh_home();
+        break;
+    case PAGE_SUBJECT_LIST:
+        /* 学科包列表是**真实**已下载的包 —— 进页时重新读一遍卡 */
+        ui_pages_refresh_subject_list();
         break;
     default:
         break;
@@ -283,7 +290,38 @@ static void ui_page_action(ui_page_t page)
         break;
     case PAGE_SUBJECT_LIST:
         if (idx >= 0) {
-            ui_router_go(PAGE_CARD_STUDY);
+            /*
+             * 打开学科包：卡片解密在**网络任务**里做（设备密钥只在 NVS），
+             * 这里只发请求，解完经 kind=6 投回来再跳翻卡页。
+             */
+            const char *pack_id = ui_pages_selected_pack_id();
+            if (pack_id[0] == '\0') {
+                ui_toast("还没有下载学科包");
+                break;
+            }
+            net_request_t req = {};
+            req.op = NET_OP_CARDS;
+            snprintf(req.pack_id, sizeof(req.pack_id), "%s", pack_id);
+            if (hal_net_request_queue() == NULL ||
+                xQueueSend(hal_net_request_queue(), &req, 0) != pdTRUE) {
+                ui_toast("网络还在准备中，等一下就好");
+            } else {
+                ui_toast("正在打开学科包");
+            }
+        }
+        break;
+    case PAGE_CARD_STUDY:
+        switch (idx) {
+        case 0:
+            /* 短按 = 翻面（正面题干 ↔ 背面答案） */
+            ui_pages_show_card(ui_pages_card_index(), !ui_pages_card_answer_shown());
+            break;
+        case 1:
+            /* 语音追问这题 —— 语音链路尚未接通 */
+            ui_toast("语音追问还在准备中");
+            break;
+        default:
+            break;
         }
         break;
     case PAGE_SOLVE_RESULT:
@@ -322,6 +360,23 @@ static void ui_page_side(ui_page_t page, int delta)
             ui_pages_focus_adjust(delta);
             return;
         }
+        return;
+    }
+    if (page == PAGE_CARD_STUDY) {
+        /* 左右键：上一张 / 下一张卡片（doc/03 §四 手势表）。
+           翻到下一张时回到正面 —— 上一张的答案没必要留着。 */
+        int n = ui_pages_card_count();
+        if (n <= 0) {
+            return;
+        }
+        int next = ui_pages_card_index() + delta;
+        if (next < 0) {
+            next = n - 1;
+        }
+        if (next >= n) {
+            next = 0;
+        }
+        ui_pages_show_card(next, false);
     }
 }
 
@@ -499,6 +554,9 @@ void ui_router_handle_gesture(ui_gesture_t gesture)
             /* 番茄钟: 长按 = 结束并退出 */
             ui_pages_pomodoro_stop();
             ui_router_go(PAGE_HOME);
+        } else if (s_current == PAGE_CARD_STUDY) {
+            /* 翻卡页: 长按 = 退出返回学科包列表（doc/03 §四） */
+            ui_router_go(PAGE_SUBJECT_LIST);
         } else if (s_current != PAGE_HOME && s_current != PAGE_OOBE) {
             ui_router_go(PAGE_HOME);
         }
@@ -615,6 +673,36 @@ const char *ui_router_last_reply(uint32_t *out_len)
         *out_len = s_last_reply_len;
     }
     return s_last_reply;
+}
+
+/* ===================== 学科卡片包（doc/04 §四） ===================== */
+
+void ui_router_handle_cards(card_pack_t *pack, int rc)
+{
+    /* 旧的卡片集先释放（所有权一直在 UI 层） */
+    if (s_cards != NULL) {
+        free(s_cards);
+        s_cards = NULL;
+    }
+    if (pack == NULL) {
+        ui_toast("暂时打不开这个学科包");
+        return;
+    }
+    if (rc < 0 || pack->count <= 0) {
+        free(pack);
+        /* 文案温和，且**不出现加密、密钥这类技术词**（doc/03 §四 铁律） */
+        if (rc == CARDS_ERR_KEY) {
+            ui_toast("还没接入学习助手，先连上网再试");
+        } else if (rc == CARDS_ERR_NOTFOUND) {
+            ui_toast("这个学科包还没下载好");
+        } else {
+            ui_toast("暂时打不开这个学科包");
+        }
+        return;
+    }
+    s_cards = pack;
+    ui_pages_set_cards(s_cards);
+    ui_router_go(PAGE_CARD_STUDY);
 }
 
 /* ===================== 设备接入状态（自动登记，doc/04 §1.2） ===================== */

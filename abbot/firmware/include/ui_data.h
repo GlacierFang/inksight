@@ -46,6 +46,7 @@ extern "C" {
 #define UI_DATA_PATH_SCHEDULE  "/config/schedule.json"
 #define UI_DATA_PATH_PROFILE   "/config/profile.json"
 #define UI_DATA_DIR_BOOKS      "/books"
+#define UI_DATA_DIR_SUBJECTS   "/subjects"   /* 学科包目录（每个子目录是一个包） */
 
 /* doc/07 §3 单页读取与排版上限 */
 #define UI_DATA_PAGE_BYTES     1024  /* 单次读卡字节数（恒定 < 3KB 内存） */

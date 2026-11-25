@@ -117,7 +117,7 @@ QueueHandle_t hal_net_request_queue(void);
 
 /* ---------- 内部消息类型 ---------- */
 typedef struct {
-    uint8_t kind; /* 1=提示 2=网络应答 3=刷新页面 4=文件已落盘 5=设备接入状态 */
+    uint8_t kind; /* 1=提示 2=网络应答 3=刷新页面 4=文件已落盘 5=设备接入状态 6=学科卡片包 */
     int32_t biz_code; /* kind=2 时的业务码（0 成功；-1 网络/协议失败；4004 学段未设置等）
                        * kind=5 时为接入状态码（见 UI_PAIR_STATE_*） */
     char text[128];   /* 提示文案，或网络应答的中文摘要 */

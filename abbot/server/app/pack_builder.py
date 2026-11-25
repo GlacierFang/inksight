@@ -32,7 +32,10 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 IDX_MAGIC = b"IDX1"
 IDX_VERSION = 1
-DEMO_KEY = b"STUDY_DEMO_KEY_16"  # 16 字节 ASCII，demo 包固定密钥
+# ⚠️ 必须是**恰好 16 字节** —— AES-128 的密钥长度是硬约束（多一个字节都会
+# ValueError: Invalid key size）。原来的 b"STUDY_DEMO_KEY_16" 是 17 字节，
+# 导致 key_type="demo" 的打包直接崩（只有 device 类型的包，所以一直没被发现）。
+DEMO_KEY = b"STUDY_DEMO_KEY16"  # 16 字节 ASCII，demo 包固定密钥
 
 
 class PackBuildError(RuntimeError):

@@ -19,6 +19,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "cards.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -30,6 +32,7 @@ extern "C" {
 #define NET_OP_PAIR      4 /* 配对 */
 #define NET_OP_PROFILE   5 /* 档案同步（学段/配额基准，由存储任务读 TF 卡后投递） */
 #define NET_OP_REGISTER  6 /* 自动登记（无码配对，doc/04 §1.2） */
+#define NET_OP_CARDS    7 /* 学科卡片包（本地解密 + 解析） */
 
 /** 固件版本号（心跳上报与 OTA 比对用）。 */
 #define NET_FW_VERSION "1.0.0"
@@ -54,7 +57,7 @@ typedef struct {
     const int16_t *pcm;  /* 16kHz PCM（可为空） */
     uint32_t pcm_samples;
     char context_page[16]; /* NET_OP_VOICE：当前页面 */
-    char pack_id[24];      /* NET_OP_VOICE */
+    char pack_id[24];      /* NET_OP_VOICE / NET_OP_CARDS：学科包 id */
     char card_id[24];      /* NET_OP_VOICE */
     char pair_code[8];     /* NET_OP_PAIR：6 位配对码 */
     char edu_stage[16];    /* NET_OP_PROFILE：学段 */
@@ -208,6 +211,18 @@ void net_media_cleanup(const char *media_path);
 
 /** 队列里待补传的条数（给 UI 显示「待问队列 N 条」）。 */
 int net_outbox_pending(void);
+
+/* ===================== 学科卡片包（doc/04 §四） ===================== */
+/**
+ * 载入并解密一个学科包的卡片。
+ *
+ * 解密在**网络任务**里做 —— 设备密钥只存在 NVS，UI 层不碰密钥、不碰加密；
+ * 解出来的卡片经 `q_ui_command`（kind=6）投回 Core 1 渲染。
+ *
+ * `out` 由调用方分配（`card_pack_t`）。
+ * 成功返回卡片张数；失败返回负的错误码（`CARDS_ERR_*`）。
+ */
+int net_cards_load(const char *pack_id, card_pack_t *out);
 
 /* ===================== 资产下载 ===================== */
 

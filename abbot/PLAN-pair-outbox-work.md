@@ -69,67 +69,79 @@
   - 三者字节数与 sha256 与 `manifest.txt` **逐一吻合**。
 - 网关 + 文档：workspace 本地 commit `cfede8a`（不推 inksight 远端，按要求只做本地提交）。
 
-## 块 B 设计（离线队列 outbox）
+## 块 B：离线队列 outbox —— ✅ 代码完成并推送
 
 **位置**：`/outbox/queue.json`（索引）+ `/outbox/task_<ts>.<jpg|pcm>`（关联媒体）。
-hal_storage 的空白卡自愈已建 `/outbox/` 目录并写好 `{"tasks": []}` 初始索引。
 
-**索引格式**：按 **doc/04 §3.5 的既有契约**（字段名 `task_id`/`type`/`status`/`retry_count`/
+**索引格式**：按 **doc/04 §3.5 的既有契约**（`task_id`/`type`/`status`/`retry_count`/
 `created_at`/`hint_level`/`image_path`/`pcm_path`），另加 `session_id`/`context` 两个补传必需字段。
 10 条满载约 2.2KB —— **放不进 `storage_req_t.text` 的 1KB**，所以新增
 `STORAGE_OP_WRITE_TEXT_BUF = 12`（数据取自调用方缓冲），队列项本身不放大。
 
 **谁持有队列**：新增纯 C 模块 `src/net/outbox.c` + `include/outbox.h`（主机侧可单测）。
-**不直接碰 TF 卡** —— 与 `ui_data.c` 一样走 `hal_storage_req_queue()` 请求/应答，
-守住「网络任务不得扫 TF 卡」这条硬约束。
+**不直接碰 TF 卡** —— 与 `ui_data.c` 一样走 `hal_storage_req_queue()` 请求/应答。
 
-**上限 10 条**：超出时淘汰最旧的一条（并删掉它的关联媒体文件），保证队列不撑爆卡。
+**策略（同步写进 doc/04 §3.5）**
+- 重试上限 **5 次**；过期 **72 小时**；时钟未校准时**不做过期判定**。
+- 队列上限 **10 条**，满了淘汰最旧一条并删它的关联文件。
+- 只有**传输失败**才入队；网关业务错（如 4004）不入队。
+- 补传**每次只补一条**，且**只在业务请求队列空闲时**才补（一次拍题往返含 AI 推理可能十几秒，
+  不能把业务请求饿死）。
 
-**原子写 + .bak 自愈**：写走 op=12（存储任务做 `.tmp → .bak → 重命名`）；
-读时正式文件缺失由 `hal_storage_read_text` 自动回退 `.bak`；
-正式文件**内容损坏**时本模块自己回退 `.bak` 并删掉坏文件。
+**代码改动**
+- `include/outbox.h` + `src/net/outbox.c`：解析 / 序列化 / 入队淘汰 / 出队 / 过期判定 /
+  走存储队列的读写 / 媒体文件删读。
+- `include/storage_io.h` + `src/tasks.cpp`：新增 `STORAGE_OP_WRITE_TEXT_BUF = 12`。
+- `include/net_api.h` + `src/net/net_api.cpp`：`net_outbox_enqueue_solve()` / `net_outbox_flush()` /
+  `net_outbox_pending()` / `net_media_cleanup()`；`net_request_t.media_path[72]`。
+- `src/net/net_dispatch.c`：拍题成功 → 删媒体文件；传输失败 → 入队。
+- `src/tasks.cpp`：相机任务带上 `media_path`；网络队列满时也入队；空闲时补传。
+- `test/test_outbox.c`（新建）、`test/test_net_dispatch.c`（桩 + 路由断言）。
+- `.github/workflows/build.yml`：加跑 outbox 测试。
 
-**重试上限与过期策略**（必须写进 doc，不能只写在代码里）：
-- 重试上限 **5 次**（`OUTBOX_MAX_RETRY`）；超过则丢弃条目并删关联文件。
-- 过期 **72 小时**（`OUTBOX_MAX_AGE_SEC`）；超期条目在补传时丢弃并删关联文件。
-- 时钟不可信（未校时）时**不做过期判定**，否则一开机就会把队列全清掉。
+**主机侧验证（全绿）**
+- `test_net_client` 18 PASS / `test_net_req` 114 PASS / `test_net_dispatch` **35 PASS** /
+  `test_ui_data` 69 checks / `test_outbox` **93 checks** / `host_check_arduino.sh` 通过。
 
-**入队时机**：拍照/语音这类需要云端的请求，断网或未配对时**入队**而不是失败。
-未配对时也允许入队（配对完成后一并补传）。
+**提交**
+- 固件 commit `0027c11`，已推 `0f119db..0027c11`；CI run **45577886523**（待确认）。
+- 文档：workspace 本地 commit `6c900c4`（doc/04 §3.5 补齐重试上限与过期策略）。
 
-**补传**：联网 + 已配对后逐条补传，成功则移除索引条目并删除关联 JPG/PCM。
-
-**已完成的代码改动（块 B）**
-- [x] `include/outbox.h` + `src/net/outbox.c`（纯 C，主机侧可单测）
-- [x] 队列索引读写（走存储队列，≤10 条，原子写 + .bak 自愈）
-- [x] 入队 / 出队 / 重试计数 / 过期清理 / 媒体路径生成
-- [x] `include/storage_io.h` + `src/tasks.cpp`：新增 `STORAGE_OP_WRITE_TEXT_BUF = 12`
-- [x] `include/net_api.h` + `src/net/net_api.cpp`：`net_outbox_enqueue_solve()` / `net_outbox_flush()`
-      / `net_outbox_pending()` / `net_media_cleanup()`
-- [x] `include/net_api.h`：`net_request_t.media_path[72]`（相机任务把媒体路径带过来）
-- [x] `src/net/net_dispatch.c`：拍题**成功 -> 删媒体文件**；**传输失败 -> 入队**（业务错不入队）
-- [x] `src/tasks.cpp`：相机任务带上 `media_path`；网络队列满时也入队；
-      网络任务在**业务请求队列空时**才补传（避免饿死业务请求）
-- [x] `test/test_outbox.c`：**93 checks, 0 failures**
-- [x] `test/test_net_dispatch.c`：加 `net_outbox_enqueue_solve` / `net_media_cleanup` 桩 +
-      「拍题失败->入队 / 拍题成功->删文件」两条路由断言
-- [ ] 编译 + 全量主机测试通过
-- [ ] doc/04 §3.5 补齐重试上限与过期策略
-- [ ] CI 里加跑 outbox 测试
-- [ ] 提交 + 推
-
-**实现过程中修掉的 3 个自己的 bug**
+**实现过程中修掉的 4 个自己的 bug**
 1. `outbox_parse` 找不到 `tasks` 数组 —— 通用取值函数碰到 `[` 会当标量值停住，
    补了 `json_find_array()` 专门定位配对的 `]`。
 2. 序列化时 `pcm_path`/`session_id` **漏写键名**（只写了值）→ 解析回来是空的。
    重构成 `json_put_str_field()`（键 + 值成对写），根治这类漏。
 3. `status` 字段长度比较写成 7（"retry" 是 5）→ retry 态解析不出来。
+4. 测试桩里 `g_last_code[8]` 装不下媒体路径（被截断）→ 另开 `g_last_media[72]`。
+
+## 块 C 设计（学科包 cards.enc 解密 + 卡片学习页）—— 待写
+
+**包格式（已核对服务端实现）**
+- `cards.enc` = `IV(16B) || AES-128-CTR(明文 JSONL 流)`；
+  密钥 = `device_secret[0:16]`（`key_type=device`）或固定 `STUDY_DEMO_KEY_16`（`key_type=demo`）。
+- 明文 JSONL 每行一张卡：`{"id","question","answer","hint1","hint2","analysis"}`。
+- `index.idx` = `"IDX1"` + `uint16 version(1)` + `uint16 N` + `uint32 crc32` + N × `uint32 偏移`。
+- doc/04 §4.2 的局部解密公式：`payload_offset = start_offset - 16`；
+  `block_index = payload_offset / 16`；`byte_in_block = payload_offset % 16`；
+  `nonce_counter = BigEndian128(IV_base) + block_index`（固件已有 `nc_add_counter`）。
+
+**分层**
+- 解密归**网络任务**（密钥只在 net 层，UI 不碰加密）；卡片内容经 `q_ui_command`
+  投回 Core 1 渲染。
+- 读卡仍走存储任务队列（网络任务不得直接扫 TF 卡）。
+
+**卡片学习页**
+- 正面题干 → 短按翻面看答案 → 长按退出（长按阈值只由 HAL 裁定）。
 
 ## 任务清单
 ### A. 配对简化 ✅（已推、CI 绿、产物自核通过）
-### B. 离线队列 outbox（进行中，代码已写完，待编译验证 + 文档 + 提交）
-### C. 学科包 cards.enc 解密 + 卡片学习页
-- [ ] 固件解 `cards.enc`（AES-128-CTR，key = `device_secret[0:16]`）
-- [ ] 卡片学习页：正面题干 → 短按翻面 → 长按退出
+### B. 离线队列 outbox ✅（已推，CI 待确认）
+### C. 学科包 cards.enc 解密 + 卡片学习页（下一步）
+- [ ] `include/cards.h` + `src/net/cards.c`：读 index.idx / cards.enc（走存储队列）
+- [ ] AES-128-CTR 局部解密 + JSONL 解析
+- [ ] net 层：`net_cards_load(pack_id, out)`（用 NVS 里的密钥）
+- [ ] UI：卡片学习页渲染题干/答案，短按翻面、长按退出
 - [ ] 解密失败给温和中文提示
+- [ ] doc/04 §四 / doc/03 卡片页同步
 - [ ] 提交 + 推
