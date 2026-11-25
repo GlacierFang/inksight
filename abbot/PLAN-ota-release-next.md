@@ -96,13 +96,23 @@
    取得到这个头、且会与 check 应答的 `size` 逐一比对。`X-File-Sha256` 也带。
 2. **下载请求必须带 `X-Device-Id`** → **已确认**：固件 `net_http_get()`（`net_api.cpp:1081`）与
    OTA 直连下载路径（`ota_client_esp.cpp` 内）都带这个头，服务端下载端点用它定位设备密钥。
-3. **版本比较口径** → **已对齐**：固件 `ota_version_compare()` 按数字段比（`1.0.10 > 1.0.9`）；
-   服务端 `check_update()` 取清单 `latest` 与设备 `current_ver` 比，固件侧再用 `ota_should_update()`
-   二次判定，两边都以「无 `v` 前缀的数字段版本串」为口径。
+3. **版本比较口径** → **已对齐，但要知道两层不一致**：
+   - 服务端 `check_update()` 用的是**字符串相等**（`current_ver == latest` → 无更新）。
+   - 固件 `ota_version_compare()` 用**数字段比较**（`1.0.10 > 1.0.9`），再由 `ota_should_update()` 判。
+   - → **降级会被固件拦住**：设备在 `1.0.2`、清单 latest 是 `1.0.1` 时，服务端字符串不等 → 仍会下发，
+     但固件 `ota_version_compare("1.0.2","1.0.1")` 返回 1 → 拒绝升级。**下层兼底层两层都在，不会真的降级。**
+   - → 后果：**服务端会白白下发一次旧包**（浪费一次 1.3MB 下载）。新版发布后若发现设备反复下载同一个版本，
+     就是这个原因。
 4. **时间戳窗口 60 秒**：设备 RTC 没校准就会飘 → 表现为“连接有点不稳”（业务码 4001）。
 5. **回滚前提**：设备跑在 app1 时 `esp_ota_set_boot_partition(app0)` 才能退回去。
 6. **OTA check 的下发开关**：服务端 `check_update()` 支持 `ALL / CANARY / PAUSED` 三档策略 +
    连续失败熔断（`ota.circuit_breaker_threshold`，默认 3）→ 下一版出问题时可只放行白名单设备。
+7. **外网链路已实跑通过（2026-11-25 19:15）**：走 `http://ruohan.site/abbot`（nginx + frp 隧道，
+   不走本机出口代理，模拟设备无代理环境）：
+   - 真签名 GET `/api/v1/ota/check` → HTTP 200 / 业务码 0 / 耗时 0.60s；
+   - 按应答 `bin_url` 真下载 → 1295712 字节 / 1.91s（662 KB/s），**`Content-Length` 存在、无 `Transfer-Encoding`**；
+   - **下载内容 sha256 == 响应头 `X-File-Sha256` == 清单 sha256**，三者一致。
+   → 设备侧那两个严格校验（长度必须相等、摘要必须一致）服务端都满足，**真机不会卡在下载这一步**。
 
 ## 坑位备忘
 
