@@ -45,6 +45,9 @@ static bool s_reminder_had_page = false;
  * 本地页（番茄钟/设置/书架/课表）照常可用。 */
 static int s_paired = 0;
 
+/* 设备接入状态（自动登记，doc/04 §1.2）：由网络任务经队列投来。 */
+static int s_pair_state = UI_PAIR_STATE_NONE;
+
 /* 读配对标志（定义在“页面动作”段） */
 static void ui_paired_refresh(void);
 
@@ -187,6 +190,16 @@ static void ui_paired_refresh(void)
     } else {
         s_paired = 0;
     }
+    /*
+     * 「已接入」的真相源是 **NVS 里有没有 device_secret**（自动登记写入，
+     * doc/04 §1.2），不是 TF 卡上 profile.json 的 paired 字段 ——
+     * 那张卡可能压根没有这个字段（空白卡自愈生成的那份就没有）。
+     * 所以取两者的「或」：只要网关注册成功过，就算已接入，
+     * 不然首页的「拍题导学」会一直误报「还没连上学习助手」。
+     */
+    if (s_pair_state == UI_PAIR_STATE_READY) {
+        s_paired = 1;
+    }
 }
 
 /**
@@ -216,7 +229,7 @@ static void ui_page_action(ui_page_t page)
         case 0:
             /* 拍题导学要靠云端解题：没配对时先给一句温和提示 */
             if (!s_paired) {
-                ui_toast("还没连上学习助手，请先完成配对");
+                ui_toast("还没连上学习助手，请检查一下网络");
                 break;
             }
             ui_router_go(PAGE_CAMERA);
@@ -241,6 +254,32 @@ static void ui_page_action(ui_page_t page)
     case PAGE_POMODORO:
         /* 短按 = 暂停/继续（已完成后再按 = 重新开始） */
         ui_pages_pomodoro_toggle();
+        break;
+    case PAGE_OOBE:
+        switch (idx) {
+        case 0:
+            ui_router_go(PAGE_WIFI_SCAN);
+            break;
+        case 1:
+            /* 重新尝试接入：UI 只发请求，实际网络活儿由网络任务做 */
+            {
+                net_request_t req = {};
+                req.op = NET_OP_REGISTER;
+                if (hal_net_request_queue() == NULL ||
+                    xQueueSend(hal_net_request_queue(), &req, 0) != pdTRUE) {
+                    ui_toast("网络还在准备中，等一下就好");
+                } else {
+                    ui_toast("正在重新接入");
+                }
+            }
+            break;
+        case 2:
+            /* 先离线体验：本地页（课表/书架/番茄钟/设置）照常可用 */
+            ui_router_go(PAGE_HOME);
+            break;
+        default:
+            break;
+        }
         break;
     case PAGE_SUBJECT_LIST:
         if (idx >= 0) {
@@ -576,4 +615,22 @@ const char *ui_router_last_reply(uint32_t *out_len)
         *out_len = s_last_reply_len;
     }
     return s_last_reply;
+}
+
+/* ===================== 设备接入状态（自动登记，doc/04 §1.2） ===================== */
+
+void ui_router_set_pair_state(int state)
+{
+    s_pair_state = state;
+    ui_pages_set_pair_state(state);
+
+    if (state == UI_PAIR_STATE_READY) {
+        /* 接入成功：顺手刷新「已配对」标志，让首页的端云入口可用。
+         * 读卡失败也不阻断跳转 —— 本地页照常。 */
+        ui_paired_refresh();
+        if (s_current == PAGE_OOBE) {
+            /* 设备侧零输入：接入好了直接进首页，不需要家长按任何键 */
+            ui_router_go(PAGE_HOME);
+        }
+    }
 }

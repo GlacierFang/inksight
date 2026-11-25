@@ -79,6 +79,9 @@ static void task_ui_fsm(void *arg)
                 /* 云端应答：所有权转给 UI 层（UI 负责释放与渲染） */
                 ui_router_handle_net_reply(cmd.biz_code, cmd.payload, cmd.payload_len);
                 cmd.payload = NULL;
+            } else if (cmd.kind == 5) {
+                /* 设备接入状态变化（自动登记，doc/04 §1.2） */
+                ui_router_set_pair_state((int)cmd.biz_code);
             }
         }
 
@@ -357,27 +360,68 @@ static void task_net_worker(void *arg)
     net_wifi_init_auto_connect();
     net_sync_ntp_time();
 
+    /*
+     * 自动登记（无码配对，doc/04 §1.2）：
+     * 联网后如果本机还没有密钥，就自报身份向网关登记一次。
+     * **设备侧零输入** —— 不弹码、不进虚拟键盘、不要求家长敲任何东西。
+     * 没接上就**自动重试**（下方主循环里做），不把家长拖进配对流程。
+     */
+    bool paired = net_is_paired();
+    uint32_t next_register_ms = 0;
+
+    ui_command_t st = {};
+    st.kind = 5;
+    st.biz_code = paired ? UI_PAIR_STATE_READY : UI_PAIR_STATE_PENDING;
+    xQueueSend(hal_ui_command_queue(), &st, 0);
+
     for (;;) {
-        net_request_t req;
-        if (q == NULL || xQueueReceive(q, &req, portMAX_DELAY) != pdTRUE) {
-            continue;
+        /* 显式清零：xQueueReceive 只有在返回 pdTRUE 时才写 req，
+         * 留着未初始化的内容会让 -Wmaybe-uninitialized 在 -O 下报错。 */
+        net_request_t req = {};
+        bool got = (q != NULL) && (xQueueReceive(q, &req, pdMS_TO_TICKS(500)) == pdTRUE);
+        if (got) {
+            hal_power_note_activity();
+
+            char *resp = NULL;
+            int biz = net_dispatch(&req, &resp);
+
+            /* JPEG 所有权随请求转移过来 —— 用完必须在这里释放 */
+            if (req.jpg != NULL) {
+                hal_camera_release_jpeg(req.jpg);
+            }
+
+            ui_command_t cmd = {};
+            cmd.kind = 2;
+            cmd.biz_code = biz;
+            cmd.payload = resp;              /* 所有权转移给 Core 1 */
+            cmd.payload_len = resp ? (uint32_t)strlen(resp) : 0;
+            xQueueSend(hal_ui_command_queue(), &cmd, 0);
+
+            /* 手动「重新尝试接入」可能已经登记成功 —— 刷新本地标志，
+               免得主循环又去重复登记（网关幂等，但没必要白跑一趟）。 */
+            if (!paired) {
+                paired = net_is_paired();
+            }
         }
-        hal_power_note_activity();
 
-        char *resp = NULL;
-        int biz = net_dispatch(&req, &resp);
-
-        /* JPEG 所有权随请求转移过来 —— 用完必须在这里释放 */
-        if (req.jpg != NULL) {
-            hal_camera_release_jpeg(req.jpg);
+        /*
+         * 自动登记重试：没接上就每隔 15 秒再试一次，直到成功。
+         * 放在主循环里（而不是阻塞在上电那一处），是为了**不占住请求队列** ——
+         * 等待期间照样能处理拍照/语音等业务请求。
+         */
+        if (!paired) {
+            uint32_t now = millis();
+            if ((int32_t)(now - next_register_ms) >= 0) {
+                if (net_auto_register()) {
+                    paired = true;
+                    st.biz_code = UI_PAIR_STATE_READY;
+                } else {
+                    st.biz_code = UI_PAIR_STATE_FAILED;
+                    next_register_ms = now + 15000;
+                }
+                xQueueSend(hal_ui_command_queue(), &st, 0);
+            }
         }
-
-        ui_command_t cmd = {};
-        cmd.kind = 2;
-        cmd.biz_code = biz;
-        cmd.payload = resp;              /* 所有权转移给 Core 1 */
-        cmd.payload_len = resp ? (uint32_t)strlen(resp) : 0;
-        xQueueSend(hal_ui_command_queue(), &cmd, 0);
     }
 }
 

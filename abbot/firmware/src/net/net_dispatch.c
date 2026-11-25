@@ -45,6 +45,11 @@ int net_dispatch(const net_request_t *req, char **out_resp_json)
         ok = net_pair_with_code(req->pair_code);
         biz = ok ? 0 : -1;
         break;
+    case NET_OP_REGISTER:
+        /* 自动登记：设备自报身份，网关幂等签发密钥（doc/04 §1.2） */
+        ok = net_auto_register();
+        biz = ok ? 0 : -1;
+        break;
     case NET_OP_PROFILE:
         /* 档案同步不是一次网络请求，只是把档案灌进 net 层缓存，
          * 由 net 层在组装明文时自动注入（doc/05 §5.1）。 */

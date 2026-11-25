@@ -38,6 +38,7 @@ typedef enum {
     CALL_BOOTSTRAP,
     CALL_PAIR,
     CALL_PROFILE,
+    CALL_REGISTER,
 } call_t;
 
 static call_t g_last_call = CALL_NONE;
@@ -122,6 +123,20 @@ bool net_pair_with_code(const char *six_digit_code)
 {
     g_last_call = CALL_PAIR;
     snprintf(g_last_code, sizeof g_last_code, "%s", six_digit_code ? six_digit_code : "");
+    return true;
+}
+
+bool net_auto_register(void)
+{
+    g_last_call = CALL_REGISTER;
+    return true;
+}
+
+/* 净调度层会拉待下载清单（真实现会调 TF 卡下载）—— 路由测试里只需要它能链上。 */
+bool net_sync_pending_assets(const char *bootstrap_json, size_t len)
+{
+    (void)bootstrap_json;
+    (void)len;
     return true;
 }
 
@@ -218,7 +233,18 @@ int main(void)
     free(resp);
     resp = NULL;
 
-    /* 5. 档案同步 */
+    /* 5. 自动登记（无码配对） */
+    reset();
+    memset(&req, 0, sizeof req);
+    req.op = NET_OP_REGISTER;
+    rc = net_dispatch(&req, &resp);
+    CHECK(g_last_call == CALL_REGISTER, "op=自动登记 路由到 net_auto_register");
+    CHECK(rc == 0, "自动登记成功返回 0");
+    CHECK(resp == NULL, "自动登记不产生业务明文");
+    free(resp);
+    resp = NULL;
+
+    /* 6. 档案同步 */
     reset();
     memset(&req, 0, sizeof req);
     req.op = NET_OP_PROFILE;

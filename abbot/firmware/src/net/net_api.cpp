@@ -351,17 +351,60 @@ bool net_sync_ntp_time()
     return false;
 }
 
-bool net_pair_with_code(const char *six_digit_code)
+/**
+ * 从「明文信封」应答里取出 `device_secret` 并写入 NVS。
+ *
+ * 配对与自动登记的应答形状完全一致（payload 是明文 JSON 串，内含
+ * `device_secret` 的 64 位 Hex），所以两条路径共用这一段解析。
+ *
+ * 返回 true = 密钥已落 NVS。
+ */
+static bool net_store_secret_from_plain_reply(size_t resp_len)
 {
-    if (six_digit_code == NULL || strlen(six_digit_code) != 6) {
+    char inner[384];
+    int inner_len = nr_json_get_string(g_resp, resp_len, "payload", inner, sizeof inner);
+    if (inner_len <= 0) {
         return false;
     }
+    char secret_hex[NC_SECRET_LEN * 2 + 1] = { 0 };
+    int slen = nr_json_get_string(inner, (size_t)inner_len, "device_secret",
+                                 secret_hex, sizeof secret_hex);
+    if (slen != (int)(NC_SECRET_LEN * 2)) {
+        return false;
+    }
+    nvs_set_str(NVS_NS_AUTH, NVS_KEY_SECRET, secret_hex);
+    nvs_set_str(NVS_NS_AUTH, NVS_KEY_DEVICE, net_device_id());
+    return true;
+}
+
+/** 发一个明文 POST（不加签、不加密）并把应答交给调用方解析。 */
+static bool net_post_plain(const char *api_path, const char *plain, size_t plain_len,
+                           size_t *out_resp_len)
+{
     char host[128];
     char mount[64];
     net_gateway(host, sizeof host, mount, sizeof mount);
 
     char url[256];
-    if (nr_build_url(host, mount, NR_PATH_PAIR, url, sizeof url) < 0) {
+    if (nr_build_url(host, mount, api_path, url, sizeof url) < 0) {
+        return false;
+    }
+    size_t resp_len = 0;
+    nr_http_response_t parsed;
+    /* 明文请求：不加签、不加密 */
+    if (!net_http_exchange(host, "POST", url, NULL, NULL, plain, plain_len,
+                           false, &resp_len, &parsed)) {
+        return false;
+    }
+    if (out_resp_len != NULL) {
+        *out_resp_len = resp_len;
+    }
+    return true;
+}
+
+bool net_pair_with_code(const char *six_digit_code)
+{
+    if (six_digit_code == NULL || strlen(six_digit_code) != 6) {
         return false;
     }
 
@@ -379,30 +422,48 @@ bool net_pair_with_code(const char *six_digit_code)
     }
 
     size_t resp_len = 0;
-    nr_http_response_t parsed;
-    /* 配对是明文请求：不加签、不加密 */
-    bool ok = false;
-    if (net_http_exchange(host, "POST", url, NULL, NULL, plain, strlen(plain),
-                          false, &resp_len, &parsed)) {
-        /* 响应信封的 payload 是明文 JSON 串（此时双方都还没有密钥） */
-        char inner[384];
-        int inner_len = nr_json_get_string(g_resp, resp_len, "payload", inner, sizeof inner);
-        if (inner_len > 0) {
-            char secret_hex[NC_SECRET_LEN * 2 + 1] = { 0 };
-            int slen = nr_json_get_string(inner, (size_t)inner_len, "device_secret",
-                                         secret_hex, sizeof secret_hex);
-            if (slen == (int)(NC_SECRET_LEN * 2)) {
-                nvs_set_str(NVS_NS_AUTH, NVS_KEY_SECRET, secret_hex);
-                nvs_set_str(NVS_NS_AUTH, NVS_KEY_DEVICE, net_device_id());
-                ok = true;
-            }
-        }
-    }
+    bool ok = net_post_plain(NR_PATH_PAIR, plain, strlen(plain), &resp_len) &&
+              net_store_secret_from_plain_reply(resp_len);
     free(plain);
     if (ok) {
         Serial.printf("[%s] 配对成功，密钥已入 NVS\n", NET_TAG);
     } else {
         Serial.printf("[%s] 配对失败\n", NET_TAG);
+    }
+    return ok;
+}
+
+bool net_is_paired(void)
+{
+    uint8_t secret[NC_SECRET_LEN];
+    return net_load_secret(secret);
+}
+
+bool net_auto_register(void)
+{
+    /* 自动登记：设备自报身份，网关幂等签发密钥（doc/04 §1.2）。
+     * 设备侧零输入 —— 不弹码、不进虚拟键盘。 */
+    int need = nr_build_register_plain(net_device_id(), NET_FW_VERSION, NULL, 0);
+    if (need <= 0) {
+        return false;
+    }
+    char *plain = (char *)malloc((size_t)need);
+    if (plain == NULL) {
+        return false;
+    }
+    if (nr_build_register_plain(net_device_id(), NET_FW_VERSION, plain, (size_t)need) < 0) {
+        free(plain);
+        return false;
+    }
+
+    size_t resp_len = 0;
+    bool ok = net_post_plain(NR_PATH_REGISTER, plain, strlen(plain), &resp_len) &&
+              net_store_secret_from_plain_reply(resp_len);
+    free(plain);
+    if (ok) {
+        Serial.printf("[%s] 自动登记成功，密钥已入 NVS\n", NET_TAG);
+    } else {
+        Serial.printf("[%s] 自动登记失败，稍后重试\n", NET_TAG);
     }
     return ok;
 }

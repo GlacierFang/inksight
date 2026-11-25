@@ -10,9 +10,10 @@
 
 import json
 import os
+import secrets
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.config import settings
 
@@ -135,6 +136,34 @@ class Storage:
             "last_seen": _now_iso(),
         }
         return self.write_devices(devices)
+
+    def register_device(self, device_id: str) -> Tuple[str, bool]:
+        """
+        自动登记（无码配对，doc/04 §1.2）：按 `device_id` **幂等**签发密钥。
+
+        返回 `(secret_hex, created)`：
+          - 设备已登记 -> 返回**同一份**密钥，`created=False`（不重签、不覆盖）；
+          - 设备首次登记 -> 签发新的 32 字节密钥并落盘，`created=True`。
+
+        **幂等是硬要求**：设备可能在没收到应答时重试，若每次重签，设备手上那份
+        旧密钥就永久失效，配对再也无法完成。
+        """
+        devices = self.read_devices()
+        existing = devices.get(device_id)
+        if existing and existing.get("device_secret_hex"):
+            existing["last_seen"] = _now_iso()
+            self.write_devices(devices)
+            return str(existing["device_secret_hex"]), False
+
+        secret_hex = secrets.token_hex(32)
+        devices[device_id] = {
+            "device_id": device_id,
+            "device_secret_hex": secret_hex,
+            "registered_at": _now_iso(),
+            "last_seen": _now_iso(),
+        }
+        self.write_devices(devices)
+        return secret_hex, True
 
     def touch_device(self, device_id: str) -> None:
         devices = self.read_devices()

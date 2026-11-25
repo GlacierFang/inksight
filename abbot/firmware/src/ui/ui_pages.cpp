@@ -106,6 +106,9 @@ static lv_obj_t *s_focus_value_label = NULL;
 /* 首页「今日课程」卡片 */
 static lv_obj_t *s_home_schedule_label = NULL;
 
+/* OOBE 自动接入进度页（doc/04 §1.2 自动登记） */
+static lv_obj_t *s_oobe_state_label = NULL;
+
 /* ===================== 书架与阅读页（doc/07） ===================== */
 
 #define UI_MAX_BOOKS       8    /* 书架最多列出的书 */
@@ -320,21 +323,59 @@ static lv_obj_t *ui_make_list_item(lv_obj_t *parent, const char *text, const cha
 
 /* ===================== 各页内容 ===================== */
 
-/* 0. 首次开机引导 (PAGE_OOBE) */
+/* 0. 首次开机引导 (PAGE_OOBE)
+ *
+ * 改版后的 OOBE 不再要求家长敲配对码：设备联网后自己向学习助手报到，
+ * 这一页只展示**接入进度**（doc/04 §1.2）。
+ * 页面上的文字由 `ui_pages_set_pair_state()` 刷新，UI 不自己计时、不发网络请求。
+ */
 static void ui_build_oobe(lv_obj_t *content)
 {
-    lv_obj_t *title = ui_make_label(content, "欢迎使用 · 随身学习终端 (1/4)", true);
+    lv_obj_t *title = ui_make_label(content, "欢迎使用 · 随身学习终端", true);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
 
+    lv_obj_t *card = ui_make_card(content);
+    lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_t *state = ui_make_label(card, "正在准备中…", false);
+    lv_obj_align(state, LV_ALIGN_TOP_LEFT, 0, 0);
+    s_oobe_state_label = state;
+
     lv_obj_t *body = ui_make_label(content,
-        "你好！初次见面，只需 1 分钟\n完成网络与学习档案配置即可启程。", false);
-    lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 60);
+        "正在为你连接学习助手，\n不用输入任何东西，等一会儿就好。", false);
+    lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, 112);
 
-    lv_obj_t *item1 = ui_make_list_item(content, "> [ 开始连接 Wi-Fi 网络 ]", NULL);
-    lv_obj_align(item1, LV_ALIGN_TOP_LEFT, 0, 130);
+    lv_obj_t *item1 = ui_make_list_item(content, "> [ 连接 Wi-Fi 网络 ]", NULL);
+    lv_obj_align(item1, LV_ALIGN_TOP_LEFT, 0, 200);
 
-    lv_obj_t *item2 = ui_make_list_item(content, "  [ 跳过引导，先离线体验 ]", NULL);
-    lv_obj_align(item2, LV_ALIGN_TOP_LEFT, 0, 170);
+    lv_obj_t *item2 = ui_make_list_item(content, "  [ 重新尝试接入 ]", NULL);
+    lv_obj_align(item2, LV_ALIGN_TOP_LEFT, 0, 240);
+
+    lv_obj_t *item3 = ui_make_list_item(content, "  [ 先离线体验 ]", NULL);
+    lv_obj_align(item3, LV_ALIGN_TOP_LEFT, 0, 280);
+}
+
+/** 按接入状态刷新 OOBE 进度文案（文案温和，不出现任何技术术语）。 */
+void ui_pages_set_pair_state(int state)
+{
+    if (s_oobe_state_label == NULL) {
+        return;
+    }
+    const char *text;
+    switch (state) {
+    case UI_PAIR_STATE_PENDING:
+        text = "正在接入学习助手…";
+        break;
+    case UI_PAIR_STATE_READY:
+        text = "已经接上啦，可以开始学习了";
+        break;
+    case UI_PAIR_STATE_FAILED:
+        text = "暂时没接上，会自动再试一次";
+        break;
+    default:
+        text = "正在准备中…";
+        break;
+    }
+    lv_label_set_text(s_oobe_state_label, text);
 }
 
 /* 1. 主仪表盘 (PAGE_HOME) */

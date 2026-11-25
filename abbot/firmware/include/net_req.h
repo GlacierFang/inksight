@@ -26,6 +26,8 @@ extern "C" {
 /* ---------- 纯 API 路径（签名口径，doc/05 §3.2） ---------- */
 #define NR_PATH_PING      "/api/v1/ping"
 #define NR_PATH_PAIR      "/api/v1/pair"
+/* 自动登记（无码配对）：设备开机联网后自报身份，网关签发密钥并落盘（doc/04 §1.2）。 */
+#define NR_PATH_REGISTER  "/api/v1/device/register"
 #define NR_PATH_BOOTSTRAP "/api/v1/sync/bootstrap"
 #define NR_PATH_SOLVE     "/api/v1/study/solve"
 #define NR_PATH_VOICE     "/api/v1/study/voice"
@@ -102,6 +104,17 @@ int nr_build_voice_plain(const nr_profile_t *prof, const char *context_page,
 /** `POST /api/v1/pair` 明文（**明文请求，不加签不加密**，此时双方都还没有密钥）。 */
 int nr_build_pair_plain(const char *device_id, const char *pair_code,
                         char *out, size_t out_cap);
+
+/**
+ * `POST /api/v1/device/register` 明文（自动登记，**明文请求，不加签不加密**）。
+ *
+ * 设备开机联网后自动调用，网关按 `device_id` 幂等签发 `device_secret`：
+ * 同一个 device_id 重复登记会拿到**同一份**密钥（doc/04 §1.2）。
+ *
+ * `fw_version` 可传 NULL（不下发固件版本）。
+ */
+int nr_build_register_plain(const char *device_id, const char *fw_version,
+                            char *out, size_t out_cap);
 
 /** `POST /api/v1/sync/bootstrap` 明文（心跳同步，doc/05 §5）。 */
 int nr_build_bootstrap_plain(const char *device_id, const char *fw_version,

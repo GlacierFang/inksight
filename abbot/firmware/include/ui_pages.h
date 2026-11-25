@@ -82,6 +82,13 @@ void ui_pages_focus_adjust(int delta);
 /** 设置某页状态栏文字（例如离线提示）。 */
 void ui_pages_set_status(ui_page_t page, const char *text);
 
+/* ---------- 设备接入状态（自动登记，doc/04 §1.2） ---------- */
+/**
+ * 刷新 OOBE 页的接入进度文案。
+ * `state` 取 `UI_PAIR_STATE_*`（hal_shared.h）；UI 只渲染，不自己发网络请求、不自己计时。
+ */
+void ui_pages_set_pair_state(int state);
+
 lv_obj_t *ui_overlay_root(ui_overlay_t overlay);
 void ui_overlay_set_text(ui_overlay_t overlay, const char *text);
 void ui_overlay_set_visible(ui_overlay_t overlay, bool visible);

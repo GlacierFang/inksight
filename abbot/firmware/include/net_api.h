@@ -29,6 +29,7 @@ extern "C" {
 #define NET_OP_BOOTSTRAP 3 /* 心跳同步 */
 #define NET_OP_PAIR      4 /* 配对 */
 #define NET_OP_PROFILE   5 /* 档案同步（学段/配额基准，由存储任务读 TF 卡后投递） */
+#define NET_OP_REGISTER  6 /* 自动登记（无码配对，doc/04 §1.2） */
 
 /** 固件版本号（心跳上报与 OTA 比对用）。 */
 #define NET_FW_VERSION "1.0.0"
@@ -119,7 +120,22 @@ int8_t net_wifi_get_rssi(void);
 
 /* ===================== 配对与时间 ===================== */
 bool net_sync_ntp_time(void);
+/**
+ * 旧路径：网页端生成 6 位码、设备敲码换密钥。**默认不暴露**，仅在自动登记不可用时兜底。
+ */
 bool net_pair_with_code(const char *six_digit_code);
+
+/**
+ * 自动登记（无码配对，doc/04 §1.2）。
+ *
+ * 设备联网后用芯片 MAC 派生的 `device_id`（`esp32s3_<mac8>`）向网关自报身份，
+ * 网关幂等签发 `device_secret` 并返回；本函数把密钥写进 NVS。
+ * **设备侧零输入**：不弹码、不进虚拟键盘、不要求家长操作。
+ */
+bool net_auto_register(void);
+
+/** 本机是否已持有设备密钥（NVS 里有 `device_secret`）。 */
+bool net_is_paired(void);
 
 /* ===================== 端云加密通信 ===================== */
 /**

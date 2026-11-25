@@ -307,6 +307,44 @@ int nr_build_pair_plain(const char *device_id, const char *pair_code,
     return (int)(sb.len + 1);
 }
 
+int nr_build_register_plain(const char *device_id, const char *fw_version,
+                            char *out, size_t out_cap)
+{
+    if (device_id == NULL || device_id[0] == '\0') {
+        return -1;
+    }
+    nr_sb_t probe;
+    sb_init(&probe, NULL, 0);
+    sb_puts(&probe, "{\"device_id\":");
+    sb_json_str(&probe, device_id);
+    if (fw_version != NULL && fw_version[0] != '\0') {
+        sb_puts(&probe, ",\"fw_version\":");
+        sb_json_str(&probe, fw_version);
+    }
+    sb_puts(&probe, "}");
+
+    if (out == NULL) {
+        return (int)(probe.len + 1);
+    }
+    if (out_cap < probe.len + 1) {
+        return -2;
+    }
+    nr_sb_t sb;
+    sb_init(&sb, out, out_cap);
+    sb_puts(&sb, "{\"device_id\":");
+    sb_json_str(&sb, device_id);
+    if (fw_version != NULL && fw_version[0] != '\0') {
+        sb_puts(&sb, ",\"fw_version\":");
+        sb_json_str(&sb, fw_version);
+    }
+    sb_puts(&sb, "}");
+    if (sb.overflow) {
+        return -2;
+    }
+    out[sb.len] = '\0';
+    return (int)(sb.len + 1);
+}
+
 static void fill_bootstrap_plain(nr_sb_t *sb, const char *device_id, const char *fw_version,
                                  int battery_pct, uint32_t schedule_updated_at,
                                  const char *local_packs_json, const char *local_books_json)

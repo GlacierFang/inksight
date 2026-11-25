@@ -220,6 +220,35 @@ static void test_pair_plain(void)
     free(buf);
 }
 
+static void test_register_plain(void)
+{
+    printf("[5b] register 明文组装（自动登记）\n");
+    int need = nr_build_register_plain("esp32s3_a1b2c3d4", "1.0.0", NULL, 0);
+    char *buf = (char *)malloc((size_t)need);
+    if (buf == NULL) {
+        CHECK(0, "分配缓冲区");
+        return;
+    }
+    nr_build_register_plain("esp32s3_a1b2c3d4", "1.0.0", buf, (size_t)need);
+    CHECK_STR(buf, "{\"device_id\":\"esp32s3_a1b2c3d4\",\"fw_version\":\"1.0.0\"}",
+              "register 明文");
+    free(buf);
+
+    /* fw_version 传 NULL 时不该带上这个字段 */
+    need = nr_build_register_plain("esp32s3_a1b2c3d4", NULL, NULL, 0);
+    buf = (char *)malloc((size_t)need);
+    if (buf == NULL) {
+        CHECK(0, "分配缓冲区（无版本号）");
+        return;
+    }
+    nr_build_register_plain("esp32s3_a1b2c3d4", NULL, buf, (size_t)need);
+    CHECK_STR(buf, "{\"device_id\":\"esp32s3_a1b2c3d4\"}", "register 明文（无 fw_version）");
+    free(buf);
+
+    /* device_id 为空 -> 拒绝 */
+    CHECK(nr_build_register_plain("", "1.0.0", NULL, 0) < 0, "空 device_id 被拒");
+}
+
 static void test_json_get(void)
 {
     printf("[6] JSON 取值\n");
@@ -442,6 +471,7 @@ int main(void)
     test_solve_plain_no_pcm();
     test_voice_plain();
     test_pair_plain();
+    test_register_plain();
     test_json_get();
     test_http_response();
     test_solve_result();

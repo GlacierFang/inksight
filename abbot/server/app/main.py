@@ -211,6 +211,50 @@ async def api_pair(req: Request):
     )
 
 
+@app.post("/api/v1/device/register")
+async def api_register(req: Request):
+    """
+    自动登记（无码配对，doc/04 §1.2）。
+
+    设备开机联网后用芯片 MAC 派生的 `device_id`（`esp32s3_<mac8>`）自报身份，
+    网关按 `device_id` **幂等**签发 `device_secret`。
+
+    - **明文 JSON 请求**：此时设备还没有密钥，无法签名（与 `/api/v1/pair` 同性质）。
+    - **幂等**：同一个 `device_id` 重复登记拿到**同一份**密钥（`storage.register_device`）。
+    - 应答形状与 `/api/v1/pair` 完全一致：`payload` 是明文 JSON 串，内含
+      `device_secret`（64 位 Hex），固件侧复用同一段解析。
+    """
+    try:
+        data = json.loads((await req.body()).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return err(CODE_SIGN, "登记请求格式错误")
+
+    device_id = str(data.get("device_id", "")).strip()
+    if not device_id:
+        return err(CODE_SIGN, "缺少设备标识")
+    if len(device_id) > 64 or not all(
+        c.isalnum() or c in "_-" for c in device_id
+    ):
+        return err(CODE_SIGN, "设备标识格式不对")
+
+    secret_hex, created = get_storage().register_device(device_id)
+    print(f"[api] 设备登记：{device_id}（{'新设备' if created else '已有设备，取回原密钥'}）")
+    return JSONResponse(
+        {
+            "code": CODE_OK,
+            "msg": "ok",
+            "payload": json.dumps(
+                {
+                    "device_secret": secret_hex,
+                    "server_time": int(time.time()),
+                    "registered": created,
+                },
+                ensure_ascii=False,
+            ),
+        }
+    )
+
+
 @app.post("/api/v1/sync/bootstrap")
 async def api_bootstrap(req: Request):
     """心跳同步：天气、课表、新学科包与电子书元数据。"""
@@ -495,6 +539,9 @@ async def admin_status(req: Request):
             {
                 "device_id": did,
                 "last_seen": dev.get("last_seen", ""),
+                "registered_at": dev.get("registered_at", ""),
+                # **只有状态，没有密钥** —— 密钥绝不回传浏览器（doc/04 §1.2）
+                "status": "已接入",
                 "used_count": entry.get("used_count", 0),
                 "remaining": router.effective_remaining(did),
                 "device_reported_remaining": entry.get("device_reported_remaining"),

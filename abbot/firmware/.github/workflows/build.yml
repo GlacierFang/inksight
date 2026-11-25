@@ -63,7 +63,7 @@ jobs:
       - name: 主机侧向量测试（端云信封）
         working-directory: .
         run: |
-          set +e
+          set -e
           sudo apt-get update -qq
           sudo apt-get install -y -qq libmbedtls-dev
           gcc -Wall -Wextra -Werror -I include -I src \

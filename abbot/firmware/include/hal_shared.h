@@ -95,6 +95,18 @@ typedef struct {
 #define Q_NET_REQUEST_LEN 8
 #define Q_STORAGE_REQ_LEN 8 /* task_storage 单线程串行化 TF 卡访问的投递口 */
 
+/* ---------- 设备接入状态（kind=5，doc/04 §1.2 自动登记） ---------- */
+/**
+ * 设备侧「是否已接入学习助手」的状态机。
+ *
+ * 网关任务（Core 0）在自动登记过程中把状态投回 UI 任务（Core 1），
+ * UI 任务据此渲染 OOBE 进度页 —— **UI 不直接发网络请求**，也不自己计时。
+ */
+#define UI_PAIR_STATE_NONE     0 /* 还没开始 */
+#define UI_PAIR_STATE_PENDING  1 /* 正在接入（已联网，登记进行中） */
+#define UI_PAIR_STATE_READY    2 /* 已接入（密钥已拿到） */
+#define UI_PAIR_STATE_FAILED   3 /* 这次没接上，稍后自动重试 */
+
 QueueHandle_t hal_joystick_queue(void);
 QueueHandle_t hal_ui_command_queue(void);
 QueueHandle_t hal_photo_request_queue(void);
@@ -105,8 +117,9 @@ QueueHandle_t hal_net_request_queue(void);
 
 /* ---------- 内部消息类型 ---------- */
 typedef struct {
-    uint8_t kind; /* 1=提示 2=网络应答 3=刷新页面 4=文件已落盘 */
-    int32_t biz_code; /* kind=2 时的业务码（0 成功；-1 网络/协议失败；4004 学段未设置等） */
+    uint8_t kind; /* 1=提示 2=网络应答 3=刷新页面 4=文件已落盘 5=设备接入状态 */
+    int32_t biz_code; /* kind=2 时的业务码（0 成功；-1 网络/协议失败；4004 学段未设置等）
+                       * kind=5 时为接入状态码（见 UI_PAIR_STATE_*） */
     char text[128];   /* 提示文案，或网络应答的中文摘要 */
     /* kind=2 时：解密后的业务明文（堆内存，**所有权随队列转移给接收方，由 UI 释放） */
     char *payload;

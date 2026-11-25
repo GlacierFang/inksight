@@ -125,6 +125,17 @@ void ui_router_handle_net_reply(int32_t biz_code, char *payload, uint32_t len);
 /** 取最近一次云端应答的业务明文（供页面渲染；无应答时返回 NULL）。 */
 const char *ui_router_last_reply(uint32_t *out_len);
 
+/**
+ * 设备接入状态变化（自动登记，doc/04 §1.2）。
+ *
+ * 由 UI 任务在收到网络任务的 kind=5 消息时调用：
+ *   - 刷新 OOBE 页的进度文案；
+ *   - 接入成功（`UI_PAIR_STATE_READY`）时**自动跳首页** —— 设备侧零输入。
+ *
+ * `state` 取 `UI_PAIR_STATE_*`（hal_shared.h）。
+ */
+void ui_router_set_pair_state(int state);
+
 #ifdef __cplusplus
 }
 #endif
