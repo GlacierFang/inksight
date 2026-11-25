@@ -38,7 +38,7 @@ extern "C" {
 #define NET_OP_CITY     9 /* 设置城市（UI 核写入 net 层缓存，随下一次心跳上报） */
 
 /** 固件版本号（心跳上报与 OTA 比对用）。 */
-#define NET_FW_VERSION "1.0.0"
+#define NET_FW_VERSION "1.0.1"  /* 抬号：这一版才含 Wi-Fi 真扫描 + OTA 客户端 + 阅读护栏 + 天气 */
 
 /**
  * 网络请求（UI 核 / 相机任务 → 网络任务）。

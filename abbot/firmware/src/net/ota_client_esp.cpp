@@ -525,9 +525,11 @@ static ota_result_t ota_download_write_and_activate(const char *bin_url,
     }
 
     /* ---- 6. NVS 标记「待验证升级」 ----
-     * 写在 esp_ota_end() **之前**：esp_ota_end() 会把启动分区切到新分区，
-     * 若在它之后、标记之前掉电，设备会带着新固件启动却没有待验证标记 ——
-     * 自检就形同虚设。先写标记再切换启动分区，掉电最坏也只是白标记一次
+     * 写在 esp_ota_end() **之前**：esp_ota_end() 只做「校验镜像 + 结束写入」，
+     * **不切启动分区**；真正切分区的是下面的 esp_ota_set_boot_partition()。
+     * 标记先写，是为了「已写入备用分区但还没切换」时掉电也能在下次启动识别出来；
+     * 若反过来先切换后写标记，设备会带着新固件启动却没有待验证标记 —— 自检形同虚设。
+     * 先写标记再切换启动分区，掉电最坏也只是白标记一次
      * （旧固件启动时发现标记的目标分区不是自己，会自己清掉）。
      */
     char tag[12];
@@ -536,7 +538,8 @@ static ota_result_t ota_download_write_and_activate(const char *bin_url,
     ota_nvs_set(NVS_KEY_TARGET, tag);
     ota_nvs_set_int(NVS_KEY_TRIES, 0);
 
-    /* ---- 5. 写完并激活：esp_ota_end() 结束写入并把启动分区切到新分区 ---- */
+    /* ---- 5. 写完并激活：esp_ota_end() 结束写入（不切分区），
+     *      esp_ota_set_boot_partition() 才把启动分区切到新分区 ---- */
     if (esp_ota_end(handle) != ESP_OK) {
         Serial.printf("[%s] 固件写入收尾失败\n", TAG);
         return OTA_ERR_FLASH;
