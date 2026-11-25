@@ -125,6 +125,9 @@ jobs:
               -o /tmp/test_ui_weather -lmbedtls -lmbedcrypto
           /tmp/test_ui_weather
           bash test/host_check_arduino.sh
+          # C/C++ 静态自检（static 函数先用后声明 / designated initializer 乱序）
+          # —— 这两类错在主机侧就能查出来，不必等 Actions 一轮只暴露一个错误
+          python3 tools/check_cpp_static.py
 
       - name: 编译固件
         working-directory: .

@@ -1411,8 +1411,8 @@ static const ui_page_builder_t s_page_builders[PAGE_COUNT] = {
     [PAGE_OUTBOX]       = ui_build_outbox,
     [PAGE_KEYBOARD]     = ui_build_keyboard,
     [PAGE_OTA]          = ui_build_ota,
-    [PAGE_CITY]         = ui_build_city,
     [PAGE_POMODORO]     = ui_build_pomodoro,
+    [PAGE_CITY]         = ui_build_city,
 };
 
 static const ui_page_builder_t s_book_builders[PAGE_BOOK_COUNT - PAGE_BOOKSHELF] = {
@@ -1437,8 +1437,8 @@ static const char *s_page_hints[PAGE_COUNT] = {
     [PAGE_OUTBOX]       = "上下选择 | 短按确定 | 长按退出",
     [PAGE_KEYBOARD]     = "上下选择 | 短按输入 | 长按退出",
     [PAGE_OTA]          = "上下选择 | 短按确定 | 长按退出",
-    [PAGE_CITY]         = "上下选择 | 短按确定 | 长按退出",
     [PAGE_POMODORO]     = "短按暂停/继续 | 长按结束退出",
+    [PAGE_CITY]         = "上下选择 | 短按确定 | 长按退出",
 };
 
 static const char *s_book_hints[PAGE_BOOK_COUNT - PAGE_BOOKSHELF] = {
