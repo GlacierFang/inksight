@@ -914,7 +914,8 @@ static void ui_keyboard_render_input(void)
     memcpy(s_key_input_line + c + 1, vis + c, (size_t)(n - c));
     s_key_input_line[n + 1] = '\0';
     if (s_key_input_label != NULL) {
-        char buf[KEYPAD_MAX_TEXT + 24];
+        /* buf 要比「密码：」+ 输入行更长，否则 gcc 的 -Wformat-truncation 会报错 */
+        char buf[KEYPAD_MAX_TEXT + 48];
         snprintf(buf, sizeof(buf), "密码：%s", s_key_input_line);
         lv_label_set_text(s_key_input_label, buf);
     }
