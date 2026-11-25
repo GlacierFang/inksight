@@ -478,7 +478,59 @@ static void test_cards_load_e2e(void)
     CHECK(cards_load("no_such_pack", key, &missing) == CARDS_ERR_NOTFOUND, "包不存在时报未找到");
 }
 
-int main(void)
+/* ============================================================
+ * 7. 交叉核对：用**服务端真实造出来的包**喂固件自己的解密代码
+ * ============================================================ */
+/**
+ * 参数：目录里放服务端 `pack_builder.build_pack()` 产出的
+ * `meta.json` / `index.idx` / `cards.enc`。
+ *
+ * 这条测的是「Python 服务端 ↔ C 固件」这一对 —— 两边对包格式的理解
+ * 必须逐字节一致，否则设备解出来的就是乱码。
+ */
+static int test_xcheck_pack(const char *dir)
+{
+    printf("[7] 交叉核对服务端造出来的包（%s）\n", dir);
+    memset(g_files, 0, sizeof(g_files));
+
+    const char *names[3] = {"/meta.json", "/index.idx", "/cards.enc"};
+    for (int i = 0; i < 3; i++) {
+        char path[256];
+        snprintf(path, sizeof(path), "%s%s", dir, names[i]);
+        FILE *fp = fopen(path, "rb");
+        if (fp == NULL) {
+            printf("  （跳过：打不开 %s）\n", path);
+            return 0;
+        }
+        static uint8_t buf[8192];
+        size_t n = fread(buf, 1, sizeof(buf), fp);
+        fclose(fp);
+        char dst[256];
+        snprintf(dst, sizeof(dst), "/subjects/xcheck%s", names[i]);
+        fake_put(dst, buf, (uint32_t)n);
+    }
+
+    /* demo 包的密钥是固定的 16 字节演示密钥；传什么都会被 meta.json 覆盖。 */
+    uint8_t key[16] = {0};
+    card_pack_t pack;
+    int n = cards_load("xcheck", key, &pack);
+    CHECK(n == 3, "解出 3 张卡，实际 %d", n);
+    if (n == 3) {
+        CHECK(strcmp(pack.items[0].question, "水的化学式？") == 0, "第 1 张题干一致：%s",
+              pack.items[0].question);
+        CHECK(strcmp(pack.items[0].answer, "H2O") == 0, "第 1 张答案一致：%s",
+              pack.items[0].answer);
+        CHECK(strcmp(pack.items[1].answer, "叶绿体") == 0, "第 2 张答案一致：%s",
+              pack.items[1].answer);
+        CHECK(strcmp(pack.items[2].question, "地球有几个天然卫星？") == 0, "第 3 张题干一致：%s",
+              pack.items[2].question);
+        CHECK(strcmp(pack.items[2].answer, "1 个") == 0, "第 3 张答案一致：%s",
+              pack.items[2].answer);
+    }
+    return 1;
+}
+
+int main(int argc, char **argv)
 {
     printf("=== abbot 学科卡片包测试（cards）===\n");
     test_official_vector();
@@ -487,6 +539,9 @@ int main(void)
     test_parse_item();
     test_item_length();
     test_cards_load_e2e();
+    if (argc > 1) {
+        test_xcheck_pack(argv[1]);
+    }
     printf("\n=== %d checks, %d failures ===\n", g_checks, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

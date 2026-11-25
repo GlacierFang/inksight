@@ -620,7 +620,7 @@ void ui_pages_refresh_subject_list(void)
 
     ui_data_file_t files[UI_DATA_MAX_FILES];
     uint32_t count = 0;
-    int rc = ui_data_list_files(UI_DATA_SUBJECTS_DIR, files, UI_DATA_MAX_FILES, &count);
+    int rc = ui_data_list_files(UI_DATA_DIR_SUBJECTS, files, UI_DATA_MAX_FILES, &count);
     if (rc != UI_DATA_OK) {
         lv_obj_t *empty = ui_make_label(content, "暂时读不到学科包", false);
         lv_obj_align(empty, LV_ALIGN_CENTER, 0, 0);
