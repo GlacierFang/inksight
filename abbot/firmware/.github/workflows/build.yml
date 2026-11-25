@@ -85,6 +85,11 @@ jobs:
               test/test_ui_data.c src/ui/ui_data.c \
               -o /tmp/test_ui_data
           /tmp/test_ui_data
+          # 离线队列（outbox）——纯 C，自带假存储任务
+          gcc -Wall -Wextra -Werror -I test/host_stubs -I include -I src \
+              test/test_outbox.c src/net/outbox.c \
+              -o /tmp/test_outbox
+          /tmp/test_outbox
           # Arduino 层（net_api.cpp）的语法检查 —— 用 stub 头在主机上跑。
           # 这一步不替代下面的 PlatformIO 固件编译：它只是让「一轮只暴露一个
           # 编译错误」变成「一轮暴露全部」，省掉反复试错。

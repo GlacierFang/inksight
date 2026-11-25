@@ -45,7 +45,12 @@ typedef enum {
     STORAGE_OP_GET_SIZE = 8,      /* 取文件大小 -> io->out_size */
     STORAGE_OP_WRITE_TEXT_IO = 9, /* 原子写文本（text+len）-> io->result */
     STORAGE_OP_DIR_USAGE = 10,    /* 目录占用 -> io->dir_bytes */
-    STORAGE_OP_IS_MOUNTED = 11    /* 是否挂载 -> io->mounted */
+    STORAGE_OP_IS_MOUNTED = 11,   /* 是否挂载 -> io->mounted */
+    /* 原子写文本，**数据取自调用方缓冲**（io->buf / io->buf_cap）。
+     * 为什么需要它：`req.text` 只有 1KB，而 /outbox/queue.json 满载 10 条约 2.2KB
+     * （doc/04 §3.5 的完整字段）。放大 `req.text` 会把队列项内存翻倍，
+     * 而队列项本身只是「投递口」，大文件走调用方缓冲才是正解。 */
+    STORAGE_OP_WRITE_TEXT_BUF = 12
 } storage_op_t;
 
 /**

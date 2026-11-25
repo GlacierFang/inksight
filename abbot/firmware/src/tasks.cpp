@@ -120,7 +120,8 @@ static void task_camera(void *arg)
         /* 备份到 TF：doc/04 §3.5 的离线任务媒体命名法 */
         char path[72];
         snprintf(path, sizeof(path), "/outbox/task_%u.jpg", (unsigned)millis());
-        if (hal_storage_write_binary(path, jpg, (uint32_t)len) == HAL_OK) {
+        bool media_saved = (hal_storage_write_binary(path, jpg, (uint32_t)len) == HAL_OK);
+        if (media_saved) {
             ui_command_t cmd = {};
             cmd.kind = 4;
             snprintf(cmd.text, sizeof(cmd.text), "%s", path);
@@ -136,8 +137,16 @@ static void task_camera(void *arg)
             snprintf(nreq.session_id, sizeof(nreq.session_id), "%s", req.session_id);
             nreq.jpg = jpg;
             nreq.jpg_len = (uint32_t)len;
+            /* 把媒体路径带给网络任务：传成功就删掉它，传失败就把它记进离线队列。 */
+            if (media_saved) {
+                snprintf(nreq.media_path, sizeof(nreq.media_path), "%s", path);
+            }
             if (xQueueSend(hal_net_request_queue(), &nreq, 0) != pdTRUE) {
                 Serial.printf("[%s] net queue full, jpg dropped\n", TAG);
+                /* 网络队列都满了 —— 照片已经在卡上，入队等以后补传。 */
+                if (media_saved) {
+                    net_outbox_enqueue_solve(nreq.session_id, path, 0);
+                }
                 hal_camera_release_jpeg(jpg);
             }
         } else {
@@ -334,6 +343,17 @@ static void task_storage(void *arg)
                 req.io->result = HAL_OK;
             }
             break;
+        case 12: /* 原子写文本，数据取自调用方缓冲（io->buf / io->buf_cap）
+                  * —— /outbox/queue.json 满载 10 条约 2.2KB，放不进 req.text */
+            if (req.io != NULL) {
+                hal_status_t st = HAL_ERR_INVALID;
+                if (req.io->buf != NULL && req.io->buf_cap > 0) {
+                    st = hal_storage_atomic_write_text(req.path, (const char *)req.io->buf,
+                                                       req.io->buf_cap);
+                }
+                req.io->result = (int32_t)st;
+            }
+            break;
         default:
             break;
         }
@@ -420,6 +440,19 @@ static void task_net_worker(void *arg)
                     next_register_ms = now + 15000;
                 }
                 xQueueSend(hal_ui_command_queue(), &st, 0);
+            }
+        } else if (q != NULL && uxQueueMessagesWaiting(q) == 0) {
+            /*
+             * 离线队列补传（doc/04 §3.5）。
+             *
+             * **只在业务请求队列空的时候才补**：一次补传要等一次完整 HTTP 往返
+             * （拍题带 AI 推理，可能十几秒），而这个任务同时是业务请求的执行者 ——
+             * 补传插在业务请求中间会把用户的拍照请求饿死。
+             *
+             * 每次只补一条（`net_outbox_flush` 内部保证），下一轮再补下一条。
+             */
+            if (net_outbox_pending() > 0) {
+                net_outbox_flush();
             }
         }
     }

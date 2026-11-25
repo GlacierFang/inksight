@@ -43,6 +43,7 @@ extern "C" void configTime(long gmtOffset_sec, int daylightOffset_sec,
 #include "net_api.h"
 #include "net_client.h"
 #include "net_req.h"
+#include "outbox.h"
 #include "hal_interfaces.h"
 #include "hal_shared.h"
 
@@ -612,6 +613,162 @@ static bool net_http_exchange(const char *host, const char *method, const char *
         return false;
     }
     return true;
+}
+
+/* ===================== 离线队列（outbox，doc/04 §3.5） ===================== */
+
+/**
+ * 把一张拍题请求入队（断网 / 未配对 / 云端忙时用）。
+ *
+ * **关联的 JPG 已经在 TF 卡上了** —— 相机任务拍完就落盘（doc/04 §3.5 命名法），
+ * 本函数只负责把「这张图待补传」记进索引，不重复写一遍图。
+ *
+ * 队列满了（>10 条）时淘汰**最旧**的一条，并把它的关联文件删掉
+ * （doc/04 §3.5 的媒体垃圾文件清理铁律：索引里没有的条目，文件也不能留）。
+ */
+bool net_outbox_enqueue_solve(const char *session_id, const char *media_path,
+                               uint8_t hint_level)
+{
+    if (media_path == NULL || media_path[0] == '\0') {
+        return false;
+    }
+    /* 没有关联文件的条目没有补传价值 —— 不入队。 */
+    uint32_t size = 0;
+    if (outbox_file_size(media_path, &size) != OUTBOX_OK || size == 0) {
+        return false;
+    }
+
+    time_t now = 0;
+    time(&now);
+
+    outbox_queue_t q;
+    if (outbox_load(&q) < 0) {
+        return false;
+    }
+
+    outbox_entry_t e;
+    memset(&e, 0, sizeof(e));
+    snprintf(e.task_id, sizeof(e.task_id), "%ld", (long)now);
+    e.type = OUTBOX_TYPE_SOLVE;
+    e.status = OUTBOX_STATUS_PENDING;
+    e.retry_count = 0;
+    e.hint_level = hint_level;
+    e.created_at = (uint32_t)now;
+    snprintf(e.image_path, sizeof(e.image_path), "%s", media_path);
+    if (session_id != NULL) {
+        snprintf(e.session_id, sizeof(e.session_id), "%s", session_id);
+    }
+
+    int evicted = -1;
+    outbox_enqueue(&q, &e, &evicted);
+    if (evicted >= 0) {
+        /* 淘汰的那条的关联文件要删掉，别在卡上留垃圾。 */
+        outbox_delete_file(q.items[evicted].image_path);
+        outbox_delete_file(q.items[evicted].pcm_path);
+    }
+    if (outbox_store(&q) != OUTBOX_OK) {
+        return false;
+    }
+    Serial.printf("[%s] 离线入队：%s（队列 %d 条）\n", NET_TAG, media_path, q.count);
+    return true;
+}
+
+/** 把一条队列条目发给网关。成功返回 true。 */
+static bool net_outbox_send_entry(const outbox_entry_t *e, int *out_biz)
+{
+    uint8_t *jpg = NULL;
+    uint32_t jpg_len = 0;
+    if (outbox_read_file(e->image_path, &jpg, &jpg_len) != OUTBOX_OK || jpg_len == 0) {
+        /* 关联文件不见了 —— 这条没救，交给上层丢弃。 */
+        return false;
+    }
+    char *resp = NULL;
+    int biz = -1;
+    bool ok = net_study_solve(e->session_id, jpg, jpg_len, NULL, 0, e->hint_level,
+                               &biz, &resp);
+    if (resp != NULL) {
+        free(resp);
+    }
+    free(jpg);
+    if (out_biz != NULL) {
+        *out_biz = biz;
+    }
+    return ok;
+}
+
+void net_media_cleanup(const char *media_path)
+{
+    if (media_path == NULL || media_path[0] == '\0') {
+        return;
+    }
+    outbox_delete_file(media_path);
+}
+
+int net_outbox_flush(void)
+{
+    if (!net_is_paired()) {
+        return 0;   /* 还没接入，补传不了 */
+    }
+    outbox_queue_t q;
+    if (outbox_load(&q) <= 0) {
+        return 0;
+    }
+
+    /* 先把「该丢的」挑出来（重试超限 / 过期）—— 它们的文件一并删掉。 */
+    time_t t = 0;
+    time(&t);
+    int dropped[OUTBOX_MAX_TASKS];
+    int n_drop = outbox_select_expired(&q, (uint32_t)t, dropped, OUTBOX_MAX_TASKS);
+    for (int i = 0; i < n_drop; i++) {
+        int idx = dropped[i];
+        if (idx < 0 || idx >= q.count) {
+            continue;
+        }
+        outbox_delete_file(q.items[idx].image_path);
+        outbox_delete_file(q.items[idx].pcm_path);
+        outbox_remove(&q, idx);
+    }
+    if (n_drop > 0) {
+        outbox_store(&q);
+    }
+
+    /*
+     * 补传**一条**就返回（不把整个队列一次发完）。
+     *
+     * 为什么一次只发一条：一次 HTTP 往返最长 20 秒（`NR_HTTP_TIMEOUT_MS`），
+     * 而这个函数跑在网络任务里 —— 一次发完会把业务请求（拍题/语音）饿死。
+     * 调用方循环调用直到返回 0 即可。
+     */
+    for (int i = 0; i < q.count; i++) {
+        outbox_entry_t *e = &q.items[i];
+        if (e->type != OUTBOX_TYPE_SOLVE) {
+            continue;   /* 其它类型暂不支持补传 */
+        }
+        int biz = -1;
+        if (net_outbox_send_entry(e, &biz)) {
+            /* 成功：从索引移除 + 删掉关联文件（doc/04 §3.5 清理铁律）。 */
+            outbox_delete_file(e->image_path);
+            outbox_delete_file(e->pcm_path);
+            outbox_remove(&q, i);
+            outbox_store(&q);
+            Serial.printf("[%s] 补传完成 1 条\n", NET_TAG);
+            return 1;
+        }
+        /* 失败：重试次数 +1，标成待重试。这次不继续发下一条 —— 网络多半还不通。 */
+        e->retry_count++;
+        e->status = OUTBOX_STATUS_RETRY;
+        outbox_store(&q);
+        Serial.printf("[%s] 补传失败，重试 %d 次\n", NET_TAG, (int)e->retry_count);
+        return 0;
+    }
+    return 0;
+}
+
+int net_outbox_pending(void)
+{
+    outbox_queue_t q;
+    int n = outbox_load(&q);
+    return (n > 0) ? n : 0;
 }
 
 /* ===================== 资产下载 ===================== */

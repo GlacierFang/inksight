@@ -60,6 +60,13 @@ typedef struct {
     char edu_stage[16];    /* NET_OP_PROFILE：学段 */
     int enrollment_year;   /* NET_OP_PROFILE：入学年 */
     int remaining_quota;   /* NET_OP_PROFILE：本地估算的剩余配额（仅供对账） */
+    /*
+     * 关联媒体文件在 TF 卡上的路径（如 `/outbox/task_12345.jpg`）。
+     * 相机任务拍完就把 JPG 落到卡上（doc/04 §3.5 命名法），把这个路径带过来：
+     *   - 上传成功 -> 删掉它（doc/04 §3.5 媒体垃圾文件清理铁律）；
+     *   - 上传失败 -> 把它记进离线队列，等联网后补传。
+     */
+    char media_path[72];
 } net_request_t;
 
 /* ===================== 档案注入上下文（doc/05 §5.1） ===================== */
@@ -163,6 +170,44 @@ bool net_study_solve(const char *session_id, const uint8_t *jpg_data, size_t jpg
 bool net_study_voice(const char *context_page, const char *pack_id, const char *card_id,
                      const uint8_t *pcm_data, size_t pcm_len,
                      int *out_biz_code, char **out_resp_json);
+
+/* ===================== 离线队列（outbox，doc/04 §3.5） ===================== */
+/**
+ * 把一条拍题请求**入队**（断网或未配对时用，不让用户的拍照白拍）。
+ *
+ * 关联的 JPG **已经在 TF 卡上了** —— 相机任务拍完就落盘（doc/04 §3.5 命名法），
+ * 本函数只负责把「这张图待补传」记进索引，不重复写一遍图。
+ *
+ * `media_path` 是那张 JPG 在 TF 卡上的路径（如 `/outbox/task_12345.jpg`）。
+ * 队列满了（>10 条）时淘汰**最旧**的一条，并删掉它的关联文件
+ * （doc/04 §3.5 媒体垃圾文件清理铁律：索引里没有的条目，文件也不能留）。
+ *
+ * 返回 true = 已入队。
+ */
+bool net_outbox_enqueue_solve(const char *session_id, const char *media_path,
+                               uint8_t hint_level);
+
+/**
+ * 补传：把队列里的任务发给网关。
+ *
+ * **一次只发一条**（HTTP 往返最长 20 秒，跑在网络任务里，发完整个队列会把业务请求饿死）。
+ * 调用方循环调用直到返回 0。
+ *
+ * 每条成功就从索引移除并**删掉关联的 JPG/PCM 文件**（doc/04 §3.5 清理铁律）；
+ * 失败则重试次数 +1；超过重试上限或已过期的条目直接丢弃（并删文件）。
+ *
+ * 返回本次成功补传的条数（0 或 1）。
+ */
+int net_outbox_flush(void);
+
+/**
+ * 删掉一个关联媒体文件（上传成功或队列淘汰时用）。
+ * doc/04 §3.5 媒体垃圾文件清理铁律：索引里没有的条目，文件也不能留。
+ */
+void net_media_cleanup(const char *media_path);
+
+/** 队列里待补传的条数（给 UI 显示「待问队列 N 条」）。 */
+int net_outbox_pending(void);
 
 /* ===================== 资产下载 ===================== */
 

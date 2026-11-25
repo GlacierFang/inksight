@@ -39,6 +39,7 @@ typedef enum {
     CALL_PAIR,
     CALL_PROFILE,
     CALL_REGISTER,
+    CALL_ENQUEUE,
 } call_t;
 
 static call_t g_last_call = CALL_NONE;
@@ -48,12 +49,15 @@ static char g_last_page[16];
 static char g_last_pack[24];
 static char g_last_card[24];
 static char g_last_code[8];
+static char g_last_media[72];   /* 媒体路径（TF 卡路径上限 72） */
 static char g_last_stage[16];
 static int g_last_year = 0;
 static int g_last_quota = 0;
 static int g_last_hint = 0;
 static size_t g_last_jpg_len = 0;
 static size_t g_last_pcm_len = 0;
+static int g_cleanup_count = 0;
+static bool g_solve_ok = true;   /* 桩的拍题结果：默认成功，测试里可改成失败 */
 
 /* 桩返回的应答明文（net_dispatch 会把所有权交给调用方） */
 static char *make_resp(void)
@@ -83,7 +87,9 @@ bool net_study_solve(const char *session_id, const uint8_t *jpg_data, size_t jpg
     if (out_resp_json != NULL) {
         *out_resp_json = make_resp();
     }
-    return true;
+    /* g_solve_ok 用来模拟「传输失败」（断网 / 未配对）——
+       调度层看到失败就该把这条入队，而不是丢掉用户的拍照。 */
+    return g_solve_ok;
 }
 
 bool net_study_voice(const char *context_page, const char *pack_id, const char *card_id,
@@ -132,6 +138,23 @@ bool net_auto_register(void)
     return true;
 }
 
+/* 离线队列：入队与媒体清理（块 B 新增） */
+bool net_outbox_enqueue_solve(const char *session_id, const char *media_path,
+                               uint8_t hint_level)
+{
+    (void)session_id;
+    (void)hint_level;
+    g_last_call = CALL_ENQUEUE;
+    snprintf(g_last_media, sizeof g_last_media, "%s", media_path ? media_path : "");
+    return true;
+}
+
+void net_media_cleanup(const char *media_path)
+{
+    g_cleanup_count++;
+    snprintf(g_last_media, sizeof g_last_media, "%s", media_path ? media_path : "");
+}
+
 /* 净调度层会拉待下载清单（真实现会调 TF 卡下载）—— 路由测试里只需要它能链上。 */
 bool net_sync_pending_assets(const char *bootstrap_json, size_t len)
 {
@@ -165,6 +188,8 @@ static void reset(void)
     g_last_hint = 0;
     g_last_jpg_len = 0;
     g_last_pcm_len = 0;
+    g_cleanup_count = 0;
+    g_last_media[0] = '\0';
 }
 
 int main(void)
@@ -241,6 +266,33 @@ int main(void)
     CHECK(g_last_call == CALL_REGISTER, "op=自动登记 路由到 net_auto_register");
     CHECK(rc == 0, "自动登记成功返回 0");
     CHECK(resp == NULL, "自动登记不产生业务明文");
+    free(resp);
+    resp = NULL;
+
+    /* 5b. 拍题失败 -> 入队；拍题成功 -> 删媒体文件 */
+    reset();
+    memset(&req, 0, sizeof req);
+    req.op = NET_OP_SOLVE;
+    snprintf(req.session_id, sizeof req.session_id, "sess_1");
+    snprintf(req.media_path, sizeof req.media_path, "/outbox/task_42.jpg");
+    g_solve_ok = false;          /* 模拟传输失败（断网/未配对） */
+    rc = net_dispatch(&req, &resp);
+    CHECK(g_last_call == CALL_ENQUEUE, "拍题失败时入队而不是丢掉");
+    CHECK(strcmp(g_last_media, "/outbox/task_42.jpg") == 0, "入队带上媒体路径");
+    CHECK(rc == -1, "失败返回 -1");
+    free(resp);
+    resp = NULL;
+
+    reset();
+    memset(&req, 0, sizeof req);
+    req.op = NET_OP_SOLVE;
+    snprintf(req.session_id, sizeof req.session_id, "sess_1");
+    snprintf(req.media_path, sizeof req.media_path, "/outbox/task_42.jpg");
+    g_solve_ok = true;           /* 模拟上传成功 */
+    rc = net_dispatch(&req, &resp);
+    CHECK(g_last_call != CALL_ENQUEUE, "拍题成功时不入队");
+    CHECK(g_cleanup_count == 1, "拍题成功时删掉卡上的媒体文件");
+    CHECK(strcmp(g_last_media, "/outbox/task_42.jpg") == 0, "删的是那张图");
     free(resp);
     resp = NULL;
 
