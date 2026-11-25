@@ -49,6 +49,16 @@
    systemctl --user restart openclaw-abbot.service
    ```
 
+## 已核实：OTA check 的签名路径口径一致 ✅
+
+- 固件 `src/net/net_api.cpp:1263` 签的是 **纯路径**：`GET\n/api/v1/ota/check\n<ts>\n<sha256(空 body)>`，
+  常量 `NR_PATH_OTA_CHECK = "/api/v1/ota/check"`（`include/net_req.h:34`）——
+  请求 URL 带 query，**签名用纯路径**，注释里已写明这条铁律。
+- 服务端 `app/main.py:454` 用 `req.url.path` 验签（**不含 query**）→ 与设备一致 ✅。
+- `scripts/ota_selfcheck.py` 也是用纯路径签（`path = "/api/v1/ota/check"`，query 单独拼在 url 上）→ 三方同口径。
+- 结论：设备查更新不会因为路径口径不一致而 4001。真机联调时若仍失败，优先查**时间戳偏差**（窗口 60 秒，
+  设备 RTC 未校准就会飘）与 `device_secret` 是否已登记。
+
 ## 坑位备忘
 
 - **设备侧上报的版本串必须与清单 `latest` 完全一致**（含无 `v` 前缀）。
