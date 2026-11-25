@@ -406,7 +406,16 @@ static void task_net_worker(void *arg)
         /* 显式清零：xQueueReceive 只有在返回 pdTRUE 时才写 req，
          * 留着未初始化的内容会让 -Wmaybe-uninitialized 在 -O 下报错。 */
         net_request_t req = {};
-        bool got = (q != NULL) && (xQueueReceive(q, &req, pdMS_TO_TICKS(500)) == pdTRUE);
+        bool got = (q != NULL) && (xQueueReceive(q, &req, pdMS_TO_TICKS(100)) == pdTRUE);
+
+        /* Wi-Fi 服务（Core 0 的活，doc/02 §4.1）：
+         *   - 扫描请求 → 真正扫一次，把结果收进缓存；
+         *   - 连接请求 → 发起连接（非阻塞）并推进连接状态。
+         * UI 核只提交请求、读状态，这三行是唯一的执行点。 */
+        net_wifi_service_connect();
+        net_wifi_connect_poll();
+        net_wifi_service_scan();
+
         if (got) {
             hal_power_note_activity();
 

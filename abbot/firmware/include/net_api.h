@@ -114,6 +114,8 @@ struct WifiApInfo {
     bool is_encrypted;
     bool is_saved;
 };
+/* C 侧也能直接用这个类型名（主机侧单测 wifi_model 时要用）。 */
+typedef struct WifiApInfo WifiApInfo;
 
 enum WifiConnState {
     WIFI_STATE_DISCONNECTED = 0,
@@ -125,10 +127,61 @@ enum WifiConnState {
 
 void net_wifi_init_auto_connect(void);
 void net_wifi_start_async_scan(void);
+/**
+ * 取扫描结果。
+ *
+ * 返回值语义（UI 要靠它区分「还在扫」和「扫完一个都没扫到」）：
+ *   > 0  扫到的网络数（已填进 out_list）
+ *   = 0  扫描已结束，但周边一个网络都没扫到
+ *   < 0  还在扫，稍后再问
+ */
 int net_wifi_get_scan_results(struct WifiApInfo *out_list, int max_count);
 bool net_wifi_connect_and_save(const char *ssid, const char *password);
 enum WifiConnState net_wifi_get_state(void);
 int8_t net_wifi_get_rssi(void);
+
+/* ---------- Wi-Fi：UI 核只发请求，真活儿在网络任务（doc/02 §4.1） ----------
+ *
+ * 分工（跨核铁律：Core 0 产出的结果必须经共享缓冲回 Core 1，禁止裸共享变量乱写）：
+ *   - UI 核（Core 1）：net_wifi_request_scan() / net_wifi_submit_connect()
+ *     只负责**提交请求**与**读状态**，绝不自己调 WiFi 驱动、绝不阻塞；
+ *   - 网络任务（Core 0）：net_wifi_service_scan() / net_wifi_service_connect()
+ *     每轮循环推进一次，把扫描结果收进缓存、把连接请求执行掉。
+ */
+
+/** 请求扫描周边热点（幂等；重复调用只会重新扫一次）。 */
+void net_wifi_request_scan(void);
+/**
+ * 网络任务调用：推进扫描并把结果收进缓存。
+ * 返回：>0 = 扫到的网络数；0 = 扫完但没扫到；-1 = 还在扫。
+ */
+int net_wifi_service_scan(void);
+/** UI 读缓存里的扫描结果（拷贝出去）。返回条数。 */
+int net_wifi_get_cached_scan(struct WifiApInfo *out, int max_count);
+/** 缓存里是否已经有一次**完成**的扫描结果。 */
+bool net_wifi_scan_cache_ready(void);
+/** 扫描结果序号：每完成一次扫描 +1（UI 靠它判断「有没有新结果」）。 */
+uint32_t net_wifi_scan_seq(void);
+
+/**
+ * 提交连接请求（SSID + 密码）。
+ * 密码只拷进内存缓冲，**不进日志、不进 NVS**（连上之后才写 NVS）。
+ */
+bool net_wifi_submit_connect(const char *ssid, const char *password);
+/** 网络任务调用：取走连接请求并发起连接（非阻塞）。返回 true = 处理了一个请求。 */
+bool net_wifi_service_connect(void);
+/**
+ * 网络任务调用：推进连接。
+ * 返回：1 = 已连上；0 = 还在连；-1 = 连不上（超时或密码不对）。
+ */
+int net_wifi_connect_poll(void);
+/** 连接结果序号：每次连接出结果（成功或失败）+1。 */
+uint32_t net_wifi_connect_result_seq(void);
+/** 最近一次连接结果：1 = 连上，-1 = 没连上。 */
+int net_wifi_connect_result(void);
+
+/** 读已保存网络的 SSID（给 UI 标「★」）。没保存过返回 false。 */
+bool net_wifi_get_saved_ssid(char *out, size_t cap);
 
 /* ===================== 配对与时间 ===================== */
 bool net_sync_ntp_time(void);

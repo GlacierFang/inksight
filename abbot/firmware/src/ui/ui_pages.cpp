@@ -19,9 +19,12 @@
 #include "ui_font.h"
 
 #include "hal_interfaces.h"
+#include "keypad_editor.h"
+#include "net_api.h"
 #include "ui_book_guard.h"
 #include "ui_data.h"
 #include "ui_ota_page.h"
+#include "wifi_model.h"
 
 /* ===================== 颜色（中性骨架，落地前按 doc/03 §一 核对） ===================== */
 #define UI_C_BG        lv_color_hex(0xFFFFFF)
@@ -581,42 +584,513 @@ static void ui_build_settings(lv_obj_t *content)
     }
 }
 
-/* 9. WiFi 扫描列表 (PAGE_WIFI_SCAN) */
+/* ===================== 9. Wi-Fi 扫描列表 (PAGE_WIFI_SCAN)
+ *
+ * 页面上显示的是**真扫描结果**：进页时向网络任务提交扫描请求，
+ * 心跳里轮询缓存回来的结果，按信号强弱排序、同名合并，标出加密与已保存。
+ * 底层扫描与连接都在 Core 0 的网络任务里做（doc/02 §4.1），UI 不阻塞。
+ * ===================================================== */
+
+#define WIFI_VISIBLE_ROWS 8   /* 屏幕里能同时显示的热点行数 */
+#define WIFI_ROW_H        34  /* 行高（与别页的行高一致） */
+#define WIFI_RAW_MAX      16  /* 一次扫描最多缓存的热点数 */
+
+/* 静态缓冲：UI 核栈只有 4KB，列表构建路径不开大缓冲 */
+static struct WifiApInfo s_wifi_raw[WIFI_RAW_MAX];
+static struct WifiApInfo s_wifi_aps[WIFI_MODEL_MAX_APS];
+static lv_obj_t *s_wifi_status_label = NULL;
+static lv_obj_t *s_wifi_row_label[WIFI_VISIBLE_ROWS];
+static lv_obj_t *s_wifi_rescan_label = NULL;
+static int s_wifi_ap_count = 0;
+static int s_wifi_cursor = 0;     /* 0..ap_count-1 = 热点；= ap_count 时是「重新扫描」 */
+static int s_wifi_scroll = 0;      /* 列表滚动偏移 */
+static wifi_conn_state_t s_wifi_conn;
+static uint32_t s_wifi_result_seq = 0;     /* 已看过的连接结果序号 */
+static uint32_t s_wifi_seen_scan_seq = 0;   /* 已看过的扫描结果序号 */
+static char s_wifi_line[UI_ITEM_TEXT_MAX + 4];
+
+/** 建一行「不登记进通用光标」的可选行（Wi-Fi 页与键盘页各自管光标）。 */
+static lv_obj_t *ui_make_row(lv_obj_t *parent, lv_obj_t **out_label)
+{
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_set_size(row, 300, WIFI_ROW_H);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 2, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *label = lv_label_create(row);
+    lv_label_set_text(label, "");
+    lv_obj_add_style(label, &s_style_body, 0);
+    lv_obj_align(label, LV_ALIGN_LEFT_MID, 0, 0);
+    if (out_label != NULL) {
+        *out_label = label;
+    }
+    return row;
+}
+
 static void ui_build_wifi_scan(lv_obj_t *content)
 {
     lv_obj_t *title = ui_make_label(content, "附近的无线网络", true);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
 
-    static const char *items[] = {
-        "> Home-2.4G      强",
-        "  Guest          中",
-        "  Neighbor       弱",
-    };
+    s_wifi_status_label = ui_make_label(content, "正在搜索附近的无线网络…", false);
+    lv_obj_align(s_wifi_status_label, LV_ALIGN_TOP_LEFT, 0, 26);
+
     int i;
-    for (i = 0; i < 3; i++) {
-        lv_obj_t *row = ui_make_list_item(content, items[i], NULL);
-        lv_obj_align(row, LV_ALIGN_TOP_LEFT, 0, 44 + i * 40);
+    for (i = 0; i < WIFI_VISIBLE_ROWS; i++) {
+        lv_obj_t *row = ui_make_row(content, &s_wifi_row_label[i]);
+        lv_obj_align(row, LV_ALIGN_TOP_LEFT, 0, 58 + i * WIFI_ROW_H);
+    }
+
+    /* 最后一行固定是「重新扫描」 */
+    lv_obj_t *rescan = ui_make_row(content, &s_wifi_rescan_label);
+    lv_obj_align(rescan, LV_ALIGN_TOP_LEFT, 0, 58 + WIFI_VISIBLE_ROWS * WIFI_ROW_H);
+    lv_label_set_text(s_wifi_rescan_label, "  [ 重新扫描周边热点 ]");
+}
+
+/** 重画 Wi-Fi 列表（真数据 + 光标标记）。 */
+static void ui_wifi_render_rows(void)
+{
+    char buf[UI_ITEM_TEXT_MAX];
+    int i;
+    for (i = 0; i < WIFI_VISIBLE_ROWS; i++) {
+        int idx = s_wifi_scroll + i;
+        if (idx >= s_wifi_ap_count) {
+            lv_label_set_text(s_wifi_row_label[i], "");
+            continue;
+        }
+        wifi_model_format_ap(buf, sizeof(buf), &s_wifi_aps[idx]);
+        snprintf(s_wifi_line, sizeof(s_wifi_line), "%s%s",
+                 (idx == s_wifi_cursor) ? "> " : "  ", buf);
+        lv_label_set_text(s_wifi_row_label[i], s_wifi_line);
+    }
+    snprintf(s_wifi_line, sizeof(s_wifi_line), "%s[ 重新扫描周边热点 ]",
+             (s_wifi_cursor == s_wifi_ap_count) ? "> " : "  ");
+    lv_label_set_text(s_wifi_rescan_label, s_wifi_line);
+}
+
+/** 重画顶部状态行（连接中 / 成功 / 失败 / 没扫到）。 */
+static void ui_wifi_render_status(void)
+{
+    if (s_wifi_status_label == NULL) {
+        return;
+    }
+    const char *text = wifi_conn_hint(&s_wifi_conn);
+    if (s_wifi_conn.phase == WIFI_CONN_SCANNING) {
+        text = "正在搜索附近的无线网络…";
+    } else if (s_wifi_conn.phase == WIFI_CONN_IDLE && s_wifi_ap_count == 0) {
+        text = "附近没搜到无线网络，靠近路由器再试一次";
+    } else if (s_wifi_conn.phase == WIFI_CONN_FAILED) {
+        text = "无线网络连接失败，请核对密码后重试";
+    }
+    lv_label_set_text(s_wifi_status_label, text);
+}
+
+/** 把网络任务缓存回来的扫描结果整理成列表。 */
+static void ui_wifi_take_scan_results(void)
+{
+    int n = net_wifi_get_cached_scan(s_wifi_raw, WIFI_RAW_MAX);
+    if (n <= 0) {
+        s_wifi_ap_count = 0;
+        wifi_conn_scan_finish(&s_wifi_conn, 0);
+        ui_wifi_render_rows();
+        ui_wifi_render_status();
+        return;
+    }
+    /* 排序 + 同名合并 + 标出已保存的网络 */
+    n = wifi_model_sort_aps(s_wifi_raw, n);
+    char saved[33];
+    if (!net_wifi_get_saved_ssid(saved, sizeof(saved))) {
+        saved[0] = '\0';
+    }
+    wifi_model_mark_saved(s_wifi_raw, n, saved);
+    if (n > WIFI_MODEL_MAX_APS) {
+        n = WIFI_MODEL_MAX_APS;
+    }
+    memcpy(s_wifi_aps, s_wifi_raw, (size_t)n * sizeof(struct WifiApInfo));
+    s_wifi_ap_count = n;
+    s_wifi_cursor = 0;
+    s_wifi_scroll = 0;
+    wifi_conn_scan_finish(&s_wifi_conn, n);
+    ui_wifi_render_rows();
+    ui_wifi_render_status();
+}
+
+void ui_pages_wifi_scan_enter(uint32_t now_ms)
+{
+    /* 从键盘输完密码刚回来：连接已经在进行中，别把状态冲掉（否则会白扫一次） */
+    if (s_wifi_conn.phase == WIFI_CONN_CONNECTING) {
+        ui_wifi_render_rows();
+        ui_wifi_render_status();
+        return;
+    }
+    wifi_conn_state_init(&s_wifi_conn);
+    s_wifi_ap_count = 0;
+    s_wifi_cursor = 0;
+    s_wifi_scroll = 0;
+    s_wifi_result_seq = net_wifi_connect_result_seq();
+    net_wifi_request_scan();          /* UI 只提交请求 */
+    wifi_conn_scan_start(&s_wifi_conn, now_ms);
+    ui_wifi_render_rows();
+    ui_wifi_render_status();
+}
+
+void ui_pages_wifi_scan_tick(uint32_t now_ms)
+{
+    /* 1) 扫描结果到了没 */
+    if (s_wifi_conn.phase == WIFI_CONN_SCANNING) {
+        uint32_t seq = net_wifi_scan_seq();
+        if (seq != s_wifi_seen_scan_seq && net_wifi_scan_cache_ready()) {
+            s_wifi_seen_scan_seq = seq;
+            ui_wifi_take_scan_results();
+        } else if (wifi_conn_scan_expired(&s_wifi_conn, now_ms)) {
+            /* 扫太久没结果：给温和提示，不空屏 */
+            wifi_conn_scan_finish(&s_wifi_conn, 0);
+            ui_wifi_render_status();
+        }
+    }
+
+    /* 2) 连接结果 */
+    if (s_wifi_conn.phase == WIFI_CONN_CONNECTING) {
+        if (net_wifi_connect_result_seq() != s_wifi_result_seq) {
+            s_wifi_result_seq = net_wifi_connect_result_seq();
+            bool ok = (net_wifi_connect_result() == 1);
+            wifi_conn_connect_finish(&s_wifi_conn, ok);
+            if (ok) {
+                /* 连上了：刷新列表把刚连的网络标成「已保存」 */
+                char saved[33];
+                if (net_wifi_get_saved_ssid(saved, sizeof(saved))) {
+                    wifi_model_mark_saved(s_wifi_aps, s_wifi_ap_count, saved);
+                    ui_wifi_render_rows();
+                }
+            }
+            ui_wifi_render_status();
+        } else if (wifi_conn_connect_expired(&s_wifi_conn, now_ms)) {
+            wifi_conn_connect_finish(&s_wifi_conn, false);
+            ui_wifi_render_status();
+        }
     }
 }
 
-/* 10. 虚拟键盘 (PAGE_KEYBOARD) */
+int ui_pages_wifi_scan_move(int delta)
+{
+    int last = s_wifi_ap_count;   /* 最后一项是「重新扫描」 */
+    int c = s_wifi_cursor + delta;
+    if (c < 0) {
+        c = 0;
+    }
+    if (c > last) {
+        c = last;
+    }
+    s_wifi_cursor = c;
+    /* 滚动：让光标始终在可见窗口里 */
+    if (c < s_wifi_scroll) {
+        s_wifi_scroll = c;
+    } else if (c >= s_wifi_scroll + WIFI_VISIBLE_ROWS) {
+        s_wifi_scroll = c - WIFI_VISIBLE_ROWS + 1;
+    }
+    ui_wifi_render_rows();
+    return c;
+}
+
+void ui_pages_wifi_scan_connect(const char *ssid, const char *password, uint32_t now_ms)
+{
+    if (ssid == NULL || ssid[0] == '\0') {
+        return;
+    }
+    wifi_conn_connect_start(&s_wifi_conn, ssid, now_ms);
+    s_wifi_result_seq = net_wifi_connect_result_seq();
+    net_wifi_submit_connect(ssid, password ? password : "");  /* 密码只进内存，不进日志 */
+    ui_wifi_render_status();
+}
+
+void ui_pages_wifi_scan_action(uint32_t now_ms)
+{
+    if (s_wifi_conn.phase == WIFI_CONN_CONNECTING) {
+        return;   /* 正在连，不重复发起 */
+    }
+    if (s_wifi_cursor >= s_wifi_ap_count) {
+        /* 重新扫描 */
+        s_wifi_ap_count = 0;
+        s_wifi_cursor = 0;
+        s_wifi_scroll = 0;
+        net_wifi_request_scan();
+        wifi_conn_scan_start(&s_wifi_conn, now_ms);
+        ui_wifi_render_rows();
+        ui_wifi_render_status();
+        return;
+    }
+    const struct WifiApInfo *ap = &s_wifi_aps[s_wifi_cursor];
+    if (ap->is_encrypted) {
+        /* 加密网络：先进键盘输密码 */
+        ui_pages_keyboard_enter(ap->ssid, true, now_ms);
+        ui_router_go(PAGE_KEYBOARD);
+        return;
+    }
+    ui_pages_wifi_scan_connect(ap->ssid, "", now_ms);
+}
+
+/* ===================== 10. 虚拟键盘 (PAGE_KEYBOARD)
+ *
+ * 真键盘：能移动光标、输入、退格、空格、大小写切换、显/隐、清空、确认。
+ * 编辑逻辑全在 keypad_editor.c（纯逻辑，主机侧有测试），
+ * 这一层只负责画键位与把摇杆动作翻译成编辑动作。
+ * ===================================================== */
+
+#define KEY_ROWS      6
+#define KEY_COLS      10
+#define KEY_ROW_H     38
+#define KEY_TOP_Y     74
+#define KEY_IDLE_MS   60000UL   /* 60 秒无操作退出（doc/03 §五 第 12 页） */
+
+typedef enum {
+    K_CHAR = 0,  /* 普通字符 */
+    K_SHIFT,     /* 大小写切换 */
+    K_SPACE,     /* 空格 */
+    K_BACK,      /* 退格 */
+    K_LEFT,      /* 光标左移 */
+    K_RIGHT,     /* 光标右移 */
+    K_MASK,      /* 显 / 隐 */
+    K_CLEAR,     /* 清除 */
+    K_OK,        /* 确认 */
+} keypad_key_act_t;
+
+typedef struct {
+    const char *label;        /* 功能键的显示文字（普通字符键为 NULL） */
+    char ch;                  /* 普通字符键的字符（小写） */
+    keypad_key_act_t act;
+} keypad_key_t;
+
+static const keypad_key_t s_key_rows[KEY_ROWS][KEY_COLS] = {
+    { { NULL, '1', K_CHAR }, { NULL, '2', K_CHAR }, { NULL, '3', K_CHAR },
+      { NULL, '4', K_CHAR }, { NULL, '5', K_CHAR }, { NULL, '6', K_CHAR },
+      { NULL, '7', K_CHAR }, { NULL, '8', K_CHAR }, { NULL, '9', K_CHAR },
+      { NULL, '0', K_CHAR } },
+    { { NULL, 'q', K_CHAR }, { NULL, 'w', K_CHAR }, { NULL, 'e', K_CHAR },
+      { NULL, 'r', K_CHAR }, { NULL, 't', K_CHAR }, { NULL, 'y', K_CHAR },
+      { NULL, 'u', K_CHAR }, { NULL, 'i', K_CHAR }, { NULL, 'o', K_CHAR },
+      { NULL, 'p', K_CHAR } },
+    { { NULL, 'a', K_CHAR }, { NULL, 's', K_CHAR }, { NULL, 'd', K_CHAR },
+      { NULL, 'f', K_CHAR }, { NULL, 'g', K_CHAR }, { NULL, 'h', K_CHAR },
+      { NULL, 'j', K_CHAR }, { NULL, 'k', K_CHAR }, { NULL, 'l', K_CHAR } },
+    { { NULL, 'z', K_CHAR }, { NULL, 'x', K_CHAR }, { NULL, 'c', K_CHAR },
+      { NULL, 'v', K_CHAR }, { NULL, 'b', K_CHAR }, { NULL, 'n', K_CHAR },
+      { NULL, 'm', K_CHAR }, { NULL, ',', K_CHAR }, { NULL, '.', K_CHAR },
+      { NULL, '-', K_CHAR } },
+    { { "大小写", 0, K_SHIFT }, { "空格", 0, K_SPACE }, { "退格", 0, K_BACK },
+      { "左移", 0, K_LEFT }, { "右移", 0, K_RIGHT } },
+    { { "显/隐", 0, K_MASK }, { "清除", 0, K_CLEAR }, { "确认并连接", 0, K_OK } },
+};
+
+/* 每行的键数与格宽（合计不超过 300px 内容宽度） */
+static const uint8_t s_key_count[KEY_ROWS] = { 10, 10, 9, 10, 5, 3 };
+static const uint16_t s_key_w[KEY_ROWS] = { 30, 30, 33, 30, 60, 100 };
+
+static lv_obj_t *s_key_obj[KEY_ROWS][KEY_COLS];
+static lv_obj_t *s_key_label[KEY_ROWS][KEY_COLS];
+static lv_obj_t *s_key_title_label = NULL;
+static lv_obj_t *s_key_input_label = NULL;
+static keypad_editor_t s_keypad;
+static int s_key_row = 0;
+static int s_key_col = 0;
+static bool s_key_confirmed = false;
+static uint32_t s_key_last_ms = 0;
+static char s_key_input_line[KEYPAD_MAX_TEXT + 16];
+static char s_key_title[64];
+static char s_key_target[33];
+
+static void ui_keyboard_render_input(void)
+{
+    char vis[KEYPAD_MAX_TEXT + 2];
+    int n = keypad_editor_render(&s_keypad, vis, sizeof(vis));
+    int c = s_keypad.cursor;
+    if (c > n) {
+        c = n;
+    }
+    /* 光标处插一个下划线 */
+    memcpy(s_key_input_line, vis, (size_t)c);
+    s_key_input_line[c] = '_';
+    memcpy(s_key_input_line + c + 1, vis + c, (size_t)(n - c));
+    s_key_input_line[n + 1] = '\0';
+    if (s_key_input_label != NULL) {
+        char buf[KEYPAD_MAX_TEXT + 24];
+        snprintf(buf, sizeof(buf), "密码：%s", s_key_input_line);
+        lv_label_set_text(s_key_input_label, buf);
+    }
+}
+
+static void ui_keyboard_render_keys(void)
+{
+    int r, c;
+    for (r = 0; r < KEY_ROWS; r++) {
+        for (c = 0; c < s_key_count[r]; c++) {
+            if (s_key_label[r][c] == NULL) {
+                continue;
+            }
+            const keypad_key_t *k = &s_key_rows[r][c];
+            char buf[32];
+            if (k->act == K_CHAR) {
+                buf[0] = keypad_editor_key_char(&s_keypad, k->ch);
+                buf[1] = '\0';
+            } else {
+                snprintf(buf, sizeof(buf), "%s", k->label);
+            }
+            lv_label_set_text(s_key_label[r][c], buf);
+            bool sel = (r == s_key_row && c == s_key_col);
+            lv_obj_set_style_text_color(s_key_label[r][c], sel ? UI_C_ACCENT : UI_C_TEXT, 0);
+            lv_obj_set_style_bg_color(s_key_obj[r][c], sel ? UI_C_CARD : UI_C_BG, 0);
+            lv_obj_set_style_bg_opa(s_key_obj[r][c], sel ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        }
+    }
+}
+
 static void ui_build_keyboard(lv_obj_t *content)
 {
-    lv_obj_t *input = ui_make_label(content, "输入：", false);
-    lv_obj_align(input, LV_ALIGN_TOP_LEFT, 0, 0);
+    s_key_title_label = ui_make_label(content, "输入密码", true);
+    lv_obj_align(s_key_title_label, LV_ALIGN_TOP_MID, 0, 0);
 
-    static const char *keys[] = {
-        "1 2 3 4 5 6 7 8 9 0",
-        "Q W E R T Y U I O P",
-        "A S D F G H J K L",
-        "Z X C V B N M",
-        "空格  删除  大小写",
-    };
-    int i;
-    for (i = 0; i < 5; i++) {
-        lv_obj_t *row = ui_make_label(content, keys[i], false);
-        lv_obj_align(row, LV_ALIGN_TOP_LEFT, 0, 44 + i * 44);
+    s_key_input_label = ui_make_label(content, "密码：", false);
+    lv_obj_align(s_key_input_label, LV_ALIGN_TOP_LEFT, 0, 28);
+
+    int r, c;
+    for (r = 0; r < KEY_ROWS; r++) {
+        for (c = 0; c < s_key_count[r]; c++) {
+            lv_obj_t *obj = lv_obj_create(content);
+            lv_obj_set_size(obj, s_key_w[r] - 2, 32);
+            lv_obj_set_pos(obj, c * s_key_w[r], KEY_TOP_Y + r * KEY_ROW_H);
+            lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(obj, 1, 0);
+            lv_obj_set_style_border_color(obj, UI_C_LINE, 0);
+            lv_obj_set_style_radius(obj, 4, 0);
+            lv_obj_set_style_pad_all(obj, 0, 0);
+            lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+
+            lv_obj_t *label = lv_label_create(obj);
+            lv_label_set_text(label, "");
+            lv_obj_add_style(label, &s_style_body, 0);
+            lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+            s_key_obj[r][c] = obj;
+            s_key_label[r][c] = label;
+        }
     }
+}
+
+void ui_pages_keyboard_enter(const char *title, bool masked, uint32_t now_ms)
+{
+    keypad_editor_init(&s_keypad);
+    keypad_editor_set_mask(&s_keypad, masked);
+    s_key_row = 0;
+    s_key_col = 0;
+    s_key_confirmed = false;
+    s_key_last_ms = now_ms;
+    snprintf(s_key_target, sizeof(s_key_target), "%s",
+             (title != NULL) ? title : "");
+    snprintf(s_key_title, sizeof(s_key_title), "输入密码：%s",
+             (s_key_target[0] != '\0') ? s_key_target : "网络");
+    if (s_key_title_label != NULL) {
+        lv_label_set_text(s_key_title_label, s_key_title);
+    }
+    ui_keyboard_render_input();
+    ui_keyboard_render_keys();
+}
+
+void ui_pages_keyboard_move(int dx, int dy, uint32_t now_ms)
+{
+    s_key_last_ms = now_ms;
+    if (dy != 0) {
+        int r = s_key_row + dy;
+        if (r < 0) {
+            r = 0;
+        }
+        if (r >= KEY_ROWS) {
+            r = KEY_ROWS - 1;
+        }
+        s_key_row = r;
+        if (s_key_col >= s_key_count[s_key_row]) {
+            s_key_col = s_key_count[s_key_row] - 1;
+        }
+    }
+    if (dx != 0) {
+        int c = s_key_col + dx;
+        if (c < 0) {
+            c = 0;
+        }
+        if (c >= s_key_count[s_key_row]) {
+            c = s_key_count[s_key_row] - 1;
+        }
+        s_key_col = c;
+    }
+    ui_keyboard_render_keys();
+}
+
+void ui_pages_keyboard_action(uint32_t now_ms)
+{
+    s_key_last_ms = now_ms;
+    const keypad_key_t *k = &s_key_rows[s_key_row][s_key_col];
+    switch (k->act) {
+    case K_CHAR:
+        keypad_editor_type_key(&s_keypad, k->ch);
+        break;
+    case K_SHIFT:
+        keypad_editor_toggle_shift(&s_keypad);
+        break;
+    case K_SPACE:
+        keypad_editor_space(&s_keypad);
+        break;
+    case K_BACK:
+        keypad_editor_backspace(&s_keypad);
+        break;
+    case K_LEFT:
+        keypad_editor_move_left(&s_keypad);
+        break;
+    case K_RIGHT:
+        keypad_editor_move_right(&s_keypad);
+        break;
+    case K_MASK:
+        keypad_editor_toggle_mask(&s_keypad);
+        break;
+    case K_CLEAR:
+        keypad_editor_clear(&s_keypad);
+        break;
+    case K_OK:
+        s_key_confirmed = true;
+        break;
+    default:
+        break;
+    }
+    ui_keyboard_render_input();
+    ui_keyboard_render_keys();
+}
+
+bool ui_pages_keyboard_confirmed(void)
+{
+    return s_key_confirmed;
+}
+
+const char *ui_pages_keyboard_text(void)
+{
+    return keypad_editor_text(&s_keypad);
+}
+
+const char *ui_pages_keyboard_target(void)
+{
+    return s_key_target;
+}
+
+bool ui_pages_keyboard_tick(uint32_t now_ms)
+{
+    if (s_key_last_ms == 0) {
+        s_key_last_ms = now_ms;
+        return false;
+    }
+    return (uint32_t)(now_ms - s_key_last_ms) > KEY_IDLE_MS;
+}
+void ui_pages_keyboard_leave(void)
+{
+    /* 清掉内存里的明文，别留在 buffer 里 */
+    keypad_editor_clear(&s_keypad);
+    s_key_confirmed = false;
 }
 
 /* 11. 固件升级 (PAGE_OTA)

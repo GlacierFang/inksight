@@ -153,6 +153,10 @@ void ui_router_go(ui_page_t page)
         /* 固件升级页正文是真实状态 —— 进页时立刻刷新一次 */
         ui_ota_page_refresh();
         break;
+    case PAGE_WIFI_SCAN:
+        /* 进页就请求一次真扫描（真正的扫描在网络任务里做，UI 不阻塞） */
+        ui_pages_wifi_scan_enter((uint32_t)millis());
+        break;
     default:
         break;
     }
@@ -334,7 +338,18 @@ static void ui_page_action(ui_page_t page)
         ui_toast("口述思路还在准备中");
         break;
     case PAGE_WIFI_SCAN:
-        ui_toast("连接热点还在准备中");
+        /* 短按：选中热点 →（加密的）进键盘输密码；（开放的）直接连 */
+        ui_pages_wifi_scan_action((uint32_t)millis());
+        break;
+    case PAGE_KEYBOARD:
+        /* 短按：输入字符 / 触发功能键；「确认并连接」→ 回去发起连接 */
+        ui_pages_keyboard_action((uint32_t)millis());
+        if (ui_pages_keyboard_confirmed()) {
+            const char *pwd = ui_pages_keyboard_text();
+            ui_pages_wifi_scan_connect(ui_pages_keyboard_target(), pwd, (uint32_t)millis());
+            ui_pages_keyboard_leave();
+            ui_router_go(PAGE_WIFI_SCAN);
+        }
         break;
     case PAGE_OTA:
         /* 短按 = 检查更新：UI 只发请求，实际网络活儿由网络任务做（doc/04） */
@@ -361,6 +376,16 @@ static void ui_page_nav(ui_page_t page, int delta)
         ui_pages_solve_scroll(delta);
         return;
     }
+    if (page == PAGE_WIFI_SCAN) {
+        /* Wi-Fi 列表页的光标自己管（热点 + 重新扫描） */
+        ui_pages_wifi_scan_move(delta);
+        return;
+    }
+    if (page == PAGE_KEYBOARD) {
+        /* 键盘：上下换行 */
+        ui_pages_keyboard_move(0, delta, (uint32_t)millis());
+        return;
+    }
     ui_pages_cursor_move(page, delta);
 }
 
@@ -370,6 +395,11 @@ static void ui_page_nav(ui_page_t page, int delta)
  */
 static void ui_page_side(ui_page_t page, int delta)
 {
+    if (page == PAGE_KEYBOARD) {
+        /* 键盘：左右换列 */
+        ui_pages_keyboard_move(delta, 0, (uint32_t)millis());
+        return;
+    }
     if (page == PAGE_SETTINGS) {
         if (ui_pages_cursor_index(page) == 6) {
             ui_pages_focus_adjust(delta);
@@ -578,6 +608,10 @@ void ui_router_handle_gesture(ui_gesture_t gesture)
         } else if (s_current == PAGE_CARD_STUDY) {
             /* 翻卡页: 长按 = 退出返回学科包列表（doc/03 §四） */
             ui_router_go(PAGE_SUBJECT_LIST);
+        } else if (s_current == PAGE_KEYBOARD) {
+            /* 键盘页: 长按 = 退出回 Wi-Fi 列表（不打断正在进行的连接） */
+            ui_pages_keyboard_leave();
+            ui_router_go(PAGE_WIFI_SCAN);
         } else if (s_current != PAGE_HOME && s_current != PAGE_OOBE) {
             ui_router_go(PAGE_HOME);
         }
@@ -655,6 +689,16 @@ void ui_router_tick(void)
      * 番茄钟的倒计时挂在这里 —— 用毫秒计数，不做秒级累加。 */
     uint32_t now = (uint32_t)millis();
     ui_pages_pomodoro_tick(now);
+
+    /* Wi-Fi 扫描页：轮询真扫描结果与连接状态（doc/03 §五 第 11 页） */
+    if (s_current == PAGE_WIFI_SCAN) {
+        ui_pages_wifi_scan_tick(now);
+    }
+    /* 键盘页：60 秒无操作自动退出（doc/03 §五 第 12 页） */
+    if (s_current == PAGE_KEYBOARD && ui_pages_keyboard_tick(now)) {
+        ui_pages_keyboard_leave();
+        ui_router_go(PAGE_WIFI_SCAN);
+    }
 
     /* 阅读计时（doc/07 §2.4）：只有阅读页在前台、无浮层遮挡、屏幕点亮时
      * 才累计当日阅读时长 —— 菜单页 / 目录页 / 提醒弹窗 / 息屏一律暂停。 */

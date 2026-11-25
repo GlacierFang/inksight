@@ -100,6 +100,39 @@ int ui_pages_focus_minutes(void);
 /** 调整专注时长（delta = -1 减一档 / +1 加一档，步长 5 分钟），并立即落盘。 */
 void ui_pages_focus_adjust(int delta);
 
+/* ---------- Wi-Fi 扫描页（真实扫描结果） ---------- */
+/**
+ * 进入 Wi-Fi 扫描页：清空旧列表并**请求扫描**。
+ * 真正的扫描在网络任务（Core 0）里做，UI 只提交请求（doc/02 §4.1）。
+ */
+void ui_pages_wifi_scan_enter(uint32_t now_ms);
+/** 每轮 UI 心跳：轮询扫描结果与连接状态，刷新页面。 */
+void ui_pages_wifi_scan_tick(uint32_t now_ms);
+/** 上下移动光标（-1 上 / +1 下）。返回移动后的光标索引。 */
+int ui_pages_wifi_scan_move(int delta);
+/** 短按：选中热点 →（加密的）进键盘输密码；（开放的）直接连接；「重新扫描」→ 重扫。 */
+void ui_pages_wifi_scan_action(uint32_t now_ms);
+/** 从键盘页确认后回来：用键盘里输的密码去连这个网络。 */
+void ui_pages_wifi_scan_connect(const char *ssid, const char *password, uint32_t now_ms);
+
+/* ---------- 虚拟键盘（真键盘，doc/03 §五 第 12 页） ---------- */
+/** 进入键盘页：设定输入对象（标题里的 SSID）与是否掩码显示。 */
+void ui_pages_keyboard_enter(const char *title, bool masked, uint32_t now_ms);
+/** 四向移动光标（dx / dy 取 -1 / 0 / 1）。 */
+void ui_pages_keyboard_move(int dx, int dy, uint32_t now_ms);
+/** 短按：输入字符 / 触发功能键。 */
+void ui_pages_keyboard_action(uint32_t now_ms);
+/** 短按了「确认」返回 true（此时用 ui_pages_keyboard_text 取内容）。 */
+bool ui_pages_keyboard_confirmed(void);
+/** 取当前输入内容（明文；调用方**不得**打印它）。 */
+const char *ui_pages_keyboard_text(void);
+/** 键盘的输入对象（SSID）；没有就是空串。 */
+const char *ui_pages_keyboard_target(void);
+/** 键盘页心跳：60 秒无操作返回 true（调用方据此退出）。 */
+bool ui_pages_keyboard_tick(uint32_t now_ms);
+/** 退出键盘页：清掉内存里的输入内容。 */
+void ui_pages_keyboard_leave(void);
+
 /* ---------- 状态栏 ---------- */
 /** 设置某页状态栏文字（例如离线提示）。 */
 void ui_pages_set_status(ui_page_t page, const char *text);

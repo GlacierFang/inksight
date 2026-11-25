@@ -244,7 +244,49 @@ static void net_gateway(char *host, size_t host_cap, char *mount, size_t mount_c
     nvs_get_str(NVS_NS_AUTH, NVS_KEY_MOUNT, mount, mount_cap, DEFAULT_GATEWAY_MOUNT);
 }
 
-/* ===================== Wi-Fi ===================== */
+/* ===================== Wi-Fi =====================
+ *
+ * 分核（doc/02 §4.1）：Wi-Fi 的驱动调用一律在**网络任务（Core 0）**里做；
+ * UI 核（Core 1）只提交请求、读状态，绝不阻塞。
+ *
+ * 跨核数据用「双槽 + 序号」搬运：写方写一个槽位再翻序号，
+ * 读方读当前槽位 —— 避免读到写了一半的数据（不引裸共享变量乱写）。
+ */
+
+/* 扫描缓存：最多记 16 个热点 */
+#define WIFI_SCAN_CACHE_MAX 16
+/* 连接超时（doc/03 §三：连接热点 12 秒） */
+#define WIFI_CONNECT_TIMEOUT_MS 12000
+/* 扫描最短时长（毫秒）：WiFi.scanComplete() 在核心刚启动扫描时可能先回 0，
+ * 这里用一个下限把它挡掉（真扫描一般 2~4 秒），免得把「还没扫完」当成「一个都没扫到」。 */
+#define WIFI_SCAN_MIN_MS 1200
+
+static volatile bool g_scan_requested = false;  /* UI 请求扫描 */
+static bool g_scan_running = false;             /* 网络任务：正在扫 */
+static struct WifiApInfo g_scan_stage[WIFI_SCAN_CACHE_MAX];  /* 暂存（静态，不占栈） */
+static struct WifiApInfo g_scan_slots[2][WIFI_SCAN_CACHE_MAX];
+static int g_scan_count_slots[2] = { 0, 0 };
+static bool g_scan_valid_slots[2] = { false, false };
+static volatile uint32_t g_scan_published = 0;  /* 当前发布的槽位号 */
+static volatile uint32_t g_scan_seq = 0;       /* 每完成一次扫描 +1（UI 靠它判新结果） */
+static uint32_t g_scan_started_ms = 0;         /* 本次扫描开始时刻 */
+
+/* 连接请求：双槽 + 提交序号 */
+static char g_conn_ssid_slots[2][33];
+static char g_conn_pass_slots[2][65];
+static volatile uint32_t g_conn_submitted = 0;  /* UI 提交了几次 */
+static uint32_t g_conn_taken = 0;               /* 网络任务取走了几次 */
+
+/* 连接过程 */
+static bool g_conn_active = false;
+static uint32_t g_conn_deadline = 0;
+static char g_conn_ssid_cur[33];
+static char g_conn_pass_cur[65];
+static volatile uint32_t g_conn_result_seq = 0;  /* 每次出结果 +1 */
+static volatile int g_conn_result = 0;          /* 1 = 连上，-1 = 没连上 */
+
+/** 发起连接（不阻塞）：只在后台启动连接，结果由 net_wifi_connect_poll 读。 */
+static bool net_wifi_connect_begin(const char *ssid, const char *password);
 
 void net_wifi_init_auto_connect()
 {
@@ -257,7 +299,8 @@ void net_wifi_init_auto_connect()
     nvs_get_str(NVS_NS_WIFI, "ssid", ssid, sizeof ssid, "");
     nvs_get_str(NVS_NS_WIFI, "pass", pass, sizeof pass, "");
     if (ssid[0] != '\0') {
-        net_wifi_connect_and_save(ssid, pass);
+        /* 不阻塞：只发起连接，后续由 net_wifi_connect_poll 推进 */
+        net_wifi_connect_begin(ssid, pass);
     } else {
         g_wifi_state = WIFI_STATE_DISCONNECTED;
     }
@@ -266,6 +309,7 @@ void net_wifi_init_auto_connect()
 void net_wifi_start_async_scan()
 {
     g_wifi_state = WIFI_STATE_SCANNING;
+    g_scan_started_ms = millis();
     WiFi.scanNetworks(true, false);   /* 异步扫描，不阻塞调用方 */
 }
 
@@ -276,7 +320,10 @@ int net_wifi_get_scan_results(WifiApInfo *out_list, int max_count)
     }
     int n = WiFi.scanComplete();
     if (n < 0) {
-        return 0;   /* 还没扫完 */
+        return -1;  /* 还在扫 */
+    }
+    if ((uint32_t)(millis() - g_scan_started_ms) < WIFI_SCAN_MIN_MS) {
+        return -1;  /* 核心刚启动扫描时会先回 0，还没真扫完 */
     }
     int count = (n < max_count) ? n : max_count;
     for (int i = 0; i < count; i++) {
@@ -294,27 +341,167 @@ int net_wifi_get_scan_results(WifiApInfo *out_list, int max_count)
     return count;
 }
 
+/* ---------- 跨核请求 / 缓存（UI 核 ↔ 网络任务） ---------- */
+
+void net_wifi_request_scan(void)
+{
+    g_scan_requested = true;
+}
+
+int net_wifi_service_scan(void)
+{
+    if (g_scan_requested) {
+        g_scan_requested = false;
+        g_scan_running = true;
+        net_wifi_start_async_scan();
+    }
+    if (!g_scan_running) {
+        return g_scan_count_slots[g_scan_published];
+    }
+    int n = net_wifi_get_scan_results(g_scan_stage, WIFI_SCAN_CACHE_MAX);
+    if (n < 0) {
+        return -1;   /* 还在扫 */
+    }
+    uint32_t slot = (g_scan_published + 1) % 2;
+    memcpy(g_scan_slots[slot], g_scan_stage, (size_t)n * sizeof(struct WifiApInfo));
+    g_scan_count_slots[slot] = n;
+    g_scan_valid_slots[slot] = true;
+    g_scan_published = slot;   /* 发布 */
+    g_scan_seq++;
+    g_scan_running = false;
+    return n;
+}
+
+int net_wifi_get_cached_scan(WifiApInfo *out, int max_count)
+{
+    if (out == NULL || max_count <= 0) {
+        return 0;
+    }
+    uint32_t slot = g_scan_published;
+    int n = g_scan_count_slots[slot];
+    if (n > max_count) {
+        n = max_count;
+    }
+    memcpy(out, g_scan_slots[slot], (size_t)n * sizeof(struct WifiApInfo));
+    return n;
+}
+
+bool net_wifi_scan_cache_ready(void)
+{
+    return g_scan_valid_slots[g_scan_published];
+}
+
+uint32_t net_wifi_scan_seq(void)
+{
+    return g_scan_seq;
+}
+
+bool net_wifi_submit_connect(const char *ssid, const char *password)
+{
+    if (ssid == NULL || ssid[0] == '\0') {
+        return false;
+    }
+    uint32_t n = g_conn_submitted + 1;
+    uint32_t slot = n % 2;
+    net_str_copy(g_conn_ssid_slots[slot], sizeof g_conn_ssid_slots[slot], ssid);
+    net_str_copy(g_conn_pass_slots[slot], sizeof g_conn_pass_slots[slot],
+                 password ? password : "");
+    g_conn_submitted = n;   /* 发布 */
+    return true;
+}
+
+bool net_wifi_service_connect(void)
+{
+    if (g_conn_submitted == g_conn_taken) {
+        return false;   /* 没有新请求 */
+    }
+    uint32_t n = g_conn_submitted;
+    uint32_t slot = n % 2;
+    net_str_copy(g_conn_ssid_cur, sizeof g_conn_ssid_cur, g_conn_ssid_slots[slot]);
+    net_str_copy(g_conn_pass_cur, sizeof g_conn_pass_cur, g_conn_pass_slots[slot]);
+    g_conn_taken = n;
+    net_wifi_connect_begin(g_conn_ssid_cur, g_conn_pass_cur);
+    return true;
+}
+
+/** 发起连接（不阻塞）：只在后台启动连接，结果由 net_wifi_connect_poll 读。 */
+static bool net_wifi_connect_begin(const char *ssid, const char *password)
+{    if (ssid == NULL || ssid[0] == '\0') {
+        return false;
+    }
+    net_str_copy(g_conn_ssid_cur, sizeof g_conn_ssid_cur, ssid);
+    net_str_copy(g_conn_pass_cur, sizeof g_conn_pass_cur, password ? password : "");
+    g_wifi_state = WIFI_STATE_CONNECTING;
+    g_conn_active = true;
+    g_conn_deadline = millis() + WIFI_CONNECT_TIMEOUT_MS;
+    WiFi.begin(ssid, password ? password : "");
+    return true;
+}
+
+int net_wifi_connect_poll(void)
+{
+    if (!g_conn_active) {
+        return (g_wifi_state == WIFI_STATE_CONNECTED) ? 1 : 0;
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+        g_conn_active = false;
+        g_wifi_state = WIFI_STATE_CONNECTED;
+        /* 连上了才落盘凭据：密码不写日志 */
+        nvs_set_str(NVS_NS_WIFI, "ssid", g_conn_ssid_cur);
+        nvs_set_str(NVS_NS_WIFI, "pass", g_conn_pass_cur);
+        Serial.printf("[%s] wifi connected: %s\n", NET_TAG, g_conn_ssid_cur);
+        g_conn_result = 1;
+        g_conn_result_seq++;
+        return 1;
+    }
+    if ((int32_t)(millis() - g_conn_deadline) >= 0) {
+        g_conn_active = false;
+        g_wifi_state = WIFI_STATE_AUTH_FAILED;
+        g_conn_result = -1;
+        g_conn_result_seq++;
+        return -1;
+    }
+    return 0;
+}
+
+uint32_t net_wifi_connect_result_seq(void)
+{
+    return g_conn_result_seq;
+}
+
+int net_wifi_connect_result(void)
+{
+    return g_conn_result;
+}
+
+bool net_wifi_get_saved_ssid(char *out, size_t cap)
+{
+    if (out == NULL || cap == 0) {
+        return false;
+    }
+    out[0] = '\0';
+    char ssid[33] = { 0 };
+    nvs_get_str(NVS_NS_WIFI, "ssid", ssid, sizeof ssid, "");
+    if (ssid[0] == '\0') {
+        return false;
+    }
+    net_str_copy(out, cap, ssid);
+    return true;
+}
+
 bool net_wifi_connect_and_save(const char *ssid, const char *password)
 {
     if (ssid == NULL || ssid[0] == '\0') {
         return false;
     }
-    g_wifi_state = WIFI_STATE_CONNECTING;
-    WiFi.begin(ssid, password ? password : "");
-
-    uint32_t start = millis();
-    while (WiFi.status() != WL_CONNECTED && (millis() - start) < 20000) {
-        delay(200);
-    }
-    if (WiFi.status() != WL_CONNECTED) {
-        g_wifi_state = WIFI_STATE_AUTH_FAILED;
+    if (!net_wifi_connect_begin(ssid, password)) {
         return false;
     }
-    g_wifi_state = WIFI_STATE_CONNECTED;
-    nvs_set_str(NVS_NS_WIFI, "ssid", ssid);
-    nvs_set_str(NVS_NS_WIFI, "pass", password ? password : "");
-    Serial.printf("[%s] wifi connected: %s\n", NET_TAG, ssid);
-    return true;
+    /* 兼容旧调用方：这里才阻塞（只在网络任务里用，UI 不用这个函数） */
+    while (net_wifi_connect_poll() == 0) {
+        delay(200);
+    }
+    return net_wifi_get_state() == WIFI_STATE_CONNECTED;
 }
 
 WifiConnState net_wifi_get_state()

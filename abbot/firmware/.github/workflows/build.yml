@@ -101,6 +101,16 @@ jobs:
               test/test_cards.c src/net/cards.c src/net/net_client.c \
               -o /tmp/test_cards -lmbedtls -lmbedcrypto -lz
           /tmp/test_cards
+          # Wi-Fi 扫描结果解析 + 连接状态机（排序 / 去重 / 信号分级 / 重试）—— 纯 C，主机侧可测
+          gcc -Wall -Wextra -Werror -I include -I src \
+              test/test_wifi_model.c src/net/wifi_model.c \
+              -o /tmp/test_wifi_model
+          /tmp/test_wifi_model
+          # 虚拟键盘编辑逻辑（输入 / 退格 / 空格 / 光标 / 大小写 / 掩码）—— 纯 C，主机侧可测
+          gcc -Wall -Wextra -Werror -I include -I src \
+              test/test_keypad.c src/ui/keypad_editor.c \
+              -o /tmp/test_keypad
+          /tmp/test_keypad
           # Arduino 层（net_api.cpp）的语法检查 —— 用 stub 头在主机上跑。
           # 这一步不替代下面的 PlatformIO 固件编译：它只是让「一轮只暴露一个
           # 编译错误」变成「一轮暴露全部」，省掉反复试错。
