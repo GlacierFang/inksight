@@ -620,6 +620,46 @@ PCM 样本是**有符号 16 位**，`>> 8` 是**算术右移** —— 负样本�
 
 **本评估的边界（别当普适结论）：** 夹具 PDF 由 MuPDF 生成，ToUnicode 映射规范。**部分真实中文 PDF 的 ToUnicode CMap 残缺，pypdf 会抽出乱码** —— 这类文件只能靠人工核对或换解析器（`fitz` 本机已装 1.27.2.3，可作对照），本评估未覆盖。
 
+### 9.14 固件网络层落地 + 协议层闭环验证（2026-11-25）
+
+**端云栈拆成三层，边界清晰：**
+
+| 文件 | 层 | 依赖 | 主机可测 |
+| :--- | :--- | :--- | :--- |
+| `src/net/net_client.c` | 密码学原语（SHA-256 / HMAC / AES-128-CTR / Base64 / 签名 / 验签 / 解密） | 纯 C | ✅ 18 PASS |
+| `src/net/net_req.c` | 协议形状（明文组装 / URL / HTTP 响应解析） | 纯 C | ✅ 61 PASS |
+| `src/net/net_api.cpp` | 业务请求层（Wi-Fi / NTP / 配对 / 加密 POST / profile 注入） | Arduino | 语法检查 |
+
+**D1 契约先行：** doc/04 §六 从「一个 `net_client.h` 装全部」改成 **`net_client.h`（纯 C 原语）
++ `net_api.h`（业务层）** 两层，并新增 `NetProfileContext`（`edu_stage` / `enrollment_year` /
+`device_remaining_quota`）。doc/05 §5.1 说好的「net 层自动注入三字段」现在有了明确落点：
+`net_profile_set()` 由读档案的一侧注入，net 层只负责组装明文时自动带上。
+
+**D2 实现要点（踩过的坑）：**
+1. `signed` 是 **C++ 关键字**，不能当参数名（`bool signed` 直接编译失败）→ 改名 `need_sign`。
+2. `WiFiClient::setTimeout(uint32_t)` 收的是**秒**（core 2.0.17 实现是 `seconds * 1000`）——
+   传毫秒会被当成几小时。
+3. `WiFi.SSID/encryptionType/RSSI` 的索引真实类型是 `uint8_t`。
+4. `configTime` 由 **`cores/esp32/Arduino.h`** 声明，`esp32-hal-time.h` 在 2.x 根本不存在。
+5. `nc_extract_payload_field` 返回**状态码**，长度要另看缓冲 —— 把它当长度用会让解密静默失败。
+
+**关键提速手段（本轮最重要的工程决定）：** Actions 一轮只暴露**一个**编译错，
+本轮为此翻了 3 次 CI（`signed` → `-Wformat-truncation` → …）。于是加了
+`firmware/test/host_stubs/*`（签名**逐条抄自 arduino-esp32 2.0.17 真实头文件**）+
+`firmware/test/host_check_arduino.sh`（`g++ -fsyntax-only -Wall -Wextra -Werror
+-Wformat-truncation=2`），**本机一次抓全**，CI 也增跑这一步。
+它同时暴露了上面第 2 条那个真 bug —— 那是纯靠 CI 试错很难自己想到的。
+
+**D5 协议层闭环（本次最有价值的产出）：** `firmware/test/test_host_gateway.c` —— 主机侧
+「设备模拟器」，**复用固件自己的 `net_client.c` + `net_req.c`** 对本机真实网关发真实签名请求。
+**14 PASS / 0 FAIL**：网关认签名、回的加密包解开、四个业务字段齐全。
+这把「协议对齐」从「待验证」变成「已验证」，**剩下的才是真机才能验的射频/屏幕/摇杆/摄像头/TF**。
+
+**当前提交与产物：** 独立仓 `237e821`，Actions run `45527045584` 全绿，
+Release `fw-237e82115bb3ed5e88f416857666b3a6c6a90704`，
+`firmware.bin` **826368 字节**（`bootloader.bin` 15104 / `partitions.bin` 3072），
+三个 bin 的 sha256 与 manifest 实测逐一吻合。
+
 ### 9.13 固件（Phase 2）现状
 
 源码在 `abbot/firmware/`，**已定：独立公开仓库 `GlacierFang/abbot-firmware`**（`main` 存源码，`fw-bin` 存固件产物，`ci-logs` 存 CI 日志与产物清单）。本目录是同一份源码的主副本，两仓已核对无差异。
