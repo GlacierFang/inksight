@@ -32,10 +32,13 @@ git ls-tree -l origin/fw-bin
 cd abbot/server
 python3 scripts/publish_ota.py \
   --bin /tmp/abbot-fw/firmware.bin \
-  --version 1.0.0 \
+  --version 1.0.1 \
   --changelog "首个可发布版本：……" \
   --extra /tmp/abbot-fw/bootloader.bin,/tmp/abbot-fw/partitions.bin,/tmp/abbot-fw/manifest.txt
 ```
+
+> `--version` 的值**不要带 `v` 前缀**。`publish()` 直接拿它当落盘名 `fw_{version}.bin` 与清单 key，
+> **不会剥 `v`** → 写成 `v1.0.1` 会落成 `fw_v1.0.1.bin`，且与设备自报的 `NET_FW_VERSION` 对不上。
 
 `publish()` 内部做的事：
 
@@ -45,9 +48,18 @@ python3 scripts/publish_ota.py \
 
 `--extra` 的文件只归档进 `storage/ota/`，**不登记进清单**（设备端不需要下载它们）。
 
-版本号必须与固件里自报的一致：固件上报的是 `include/net_api.h` 的 `NET_FW_VERSION`
-（当前 `"1.0.0"`），清单版本写成 `"1.0.0"`。写成 `"v1.0.0"` 会导致设备永远收不到更新
+版本号必须与固件里自报的一致：固件上报的是 `include/net_api.h` 的 `NET_FW_VERSION`，
+清单版本写成同一个字符串（**当前 `"1.0.0"`**）。写成 `"v1.0.0"` 会导致设备永远收不到更新
 （`check_update()` 判的是**字符串相等**）。
+
+> ⚠️ **发版顺序**：先改 `NET_FW_VERSION` 并跑一轮 CI，**拿到那一轮产物再发**。
+> 先发后改号 → 清单里的 `latest` 与固件自报版本对不上，设备会一直认为有新版本、反复下载同一个包。
+
+### changelog 必须与产物内容一致
+
+`changelog` 会直接显示在设备的升级页上。**写这一版真正包含的东西**，不要写"计划包含"或"即将支持"。
+历史版本的 changelog 若与那份产物不符，也要在下一版发布时顺手改正
+（例：`1.0.0` 的产物里没有 OTA 客户端与 Wi-Fi 真扫描，就不能那样写）。
 
 ## 三、清单结构 `storage/ota/manifest.json`
 

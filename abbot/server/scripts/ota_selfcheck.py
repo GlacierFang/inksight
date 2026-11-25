@@ -75,6 +75,11 @@ def main() -> int:
     ap.add_argument("--device", default="esp32s3_test01")
     ap.add_argument("--current-ver", default="1.0.0")
     ap.add_argument("--base", default="http://127.0.0.1:18843")
+    ap.add_argument(
+        "--expect-no-update",
+        action="store_true",
+        help="断言「无更新」（用设备当前版本号等于 latest 时）",
+    )
     args = ap.parse_args()
 
     storage = get_storage()
@@ -101,6 +106,16 @@ def main() -> int:
     info = (manifest.get("versions") or {}).get(latest) or {}
 
     check("业务码为 0", res["code"] == 0, str(res["code"]))
+    if args.expect_no_update:
+        # 设备已是最新版本：应当没有更新，也就没有 bin_url
+        check("has_update 为假", not bool(payload.get("has_update")),
+              str(payload.get("has_update")))
+        check("latest_ver 与清单一致", payload.get("latest_ver") == latest,
+              f"应答={payload.get('latest_ver')} 清单={latest}")
+        check("无 bin_url（不白下一份旧包）", not (payload.get("bin_url") or ""))
+        print("\n[结果] " + ("全部通过" if not fails else f"未通过 {len(fails)} 项：{fails}"))
+        return 0 if not fails else 1
+
     check("has_update 为真", bool(payload.get("has_update")))
     check("latest_ver 与清单一致", payload.get("latest_ver") == latest,
           f"应答={payload.get('latest_ver')} 清单={latest}")
