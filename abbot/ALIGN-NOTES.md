@@ -801,7 +801,7 @@ Release `fw-237e82115bb3ed5e88f416857666b3a6c6a90704`，
 4. **本机拉不到 Actions 的 logs / artifacts**（blob 存储被出口代理挡成 403）。因此定位失败**只能读代码 + 读 ci-logs 分支**，不能去拉 Actions 日志 —— 这也是本节加 `manifest.txt` / `steps.txt` 的原因。
 5. **本机巡检脚本曾按字母序取"最新"日志** —— 日志文件名是 commit SHA，字母序 ≠ 时间序，于是连盯了三轮旧报错，误以为固件编译不过。已改为按 git 历史排序并比对当前 main 的 SHA。
 
-**尚未做（2026-11-25 更新）：** 上句已过时 —— 网络任务封装、UI 接真实数据（拍题主线）、页面级方向键焦点移动与列表滚动都已随 D1–D5 落地（见 §9.17）。**剩下的三项：① 设备端本地内容读卡渲染；② 固件端 OTA 升级的落盘生效（apply）；③ 真机四项校准。** 实体硬件未到位，摄像头取图 / 摇杆 ADC 阈值 / 屏幕刷屏 / TF 挂载这四项只有编译期保证，真机行为要等硬件做逐像素、逐交互黄金样校准。
+**尚未做（2026-11-25 更新）：** 上句已过时 —— 网络任务封装、拍题主线的真实数据接线、页面级方向键焦点移动与列表滚动都已随 D1–D5 落地（见 §9.17）。**剩下四块：① 设备端本地内容读卡渲染；② 设备端交互与状态接线（配对/心跳/语音/设置页）；③ 固件端 OTA 升级的落盘生效（apply）；④ 真机四项校准。** 实体硬件未到位，摄像头取图 / 摇杆 ADC 阈值 / 屏幕刷屏 / TF 挂载这四项只有编译期保证，真机行为要等硬件做逐像素、逐交互黄金样校准。
 
 **这一轮 Actions 踩的坑（已修，别回头再踩）：**
 
@@ -832,8 +832,11 @@ Release `fw-237e82115bb3ed5e88f416857666b3a6c6a90704`，
 **剩余任务卡（2026-11-25 收口）：**
 
 - **设备端本地内容读卡渲染** —— 数据已经下载并落盘，但 UI 从不读卡（`src/ui/` 下无任何 `hal_storage_` 调用）。学科包列表是硬编码四行，卡片页是硬编码假文案，书架/阅读器/TOC/跳转全是静态（阅读页显示的是硬编码《小王子》文本），bootstrap 的天气与课表在设备端也没渲染。**已接真实数据的只有拍题主线**（`ui_router.cpp` 用 `nr_solve_result_t`）。要补的是统一的数据读取层（只经 `hal_storage_*`）+ `cards.enc` 解密复用 + 电子书分页 + 课表天气渲染。
+- **设备端交互与状态接线** —— 三个网络操作**没有生产者**：`src/tasks.cpp` 里只有 `NET_OP_SOLVE`（相机抓拍后投递）和 `NET_OP_PROFILE`（存储任务读档案后投递）。因此 **① 首次配对走不通**（`net_pair_with_code()` 存在但无人调，OOBE 页无任何 pair 调用）；**② 没有心跳定时器**（`net_sync_bootstrap_auto()` 只在 `net_dispatch.c:38` 被调，没人产生这个 op → 开机不会拉 bootstrap，课表/天气/待下载清单没有自动下发触发点）；**③ 语音链路设备端没闭合**（`task_audio` 只启停录音与写 PCM 队列，没把 PCM 打包 base64 投递）。另外：WiFi 扫描页写死三个假 AP（`net_wifi_get_scan_results()` 存在但 UI 不调）、取景器页零 `hal_camera_` 调用、番茄钟是写死的「25:00」无计时器、设置页/键盘页/outbox 页全静态、outbox 只存图不重发（`/outbox/task_*.jpg` 存了但无扫描重发）。
 - **固件端 OTA 升级的落盘生效（apply）** —— 「检查」这半段已有：`/api/v1/ota/check` 协议层（`NR_PATH_OTA_CHECK` / `nr_build_ota_url`）、`PAGE_OTA` 页面、服务端 `/admin/api/ota/upload` + `/admin/api/ota/policy` 全齐；但设备端**收到更新包后没有写 OTA 分区并重启**（代码里 `Update.begin` / `Update.end` / `esp_ota_*` 全无）—— 升级会停在「发现有新版本」。D4 原计划里的 OTA 只落了前半段。
 - **真机四项校准** —— 摄像头取图 / 摇杆 ADC 阈值 / 屏幕刷屏 / TF 挂载。**等实体硬件**，当前只有编译期保证。
+
+**服务端侧已完整（2026-11-25 核对）：** 设备端 7 个端点（`ping`/`pair`/`sync/bootstrap`/`content/download`/`study/solve`/`study/voice`/`ota/check`）+ 全部 admin 端点都在 `server/app/main.py`，零构建单文件管理台在 `server/web/index.html`，`config.yaml` 里 `ai.provider` 三个位置都是 `minimax`（真实调用，mock 只留在 `router_ai.py` 的联调分支），`pack_builder.py` / `book_cleaner.py` / `storage.py` / `device_bridge.py` 均为真实实现。**服务端不是缺口，缺的全在设备端。**
 - **多模态与语音链路最终验收汇报** —— 已写成 `doc/08`，待并入正式汇报。
 - ~~扫描件 OCR~~ —— **已实测判定不做**：181 本 PDF 里 176 本有文字层、仅 5 本纯扫描；拍题走 M3 视觉不需要 OCR，OCR 的错公式给孩子读比明确报错更糟。
 - ~~假麦克风 harness~~ —— **已叫停**，不入库，17/3 不作验收依据。
