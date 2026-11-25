@@ -13,7 +13,8 @@
 #   1. 从 `fw-bin` 分支取产物（本机默认 SSH key 拉不动，必须带 GIT_SSH_COMMAND）；
 #   2. 三个 bin 自己算 sha256，与分支里的 manifest.txt **逐一比对**；
 #   3. 用 publish_ota.py 发布到 storage/ota/（版本号不带 v 前缀）；
-#   4. 跑 ota_selfcheck.py：新版本号 → 无更新；旧版本号 → 有更新 + 下载三处 sha256 一致。
+#   4. 核对产物里的固件版本串 == 清单版本（否则设备永远看不到这次发布）；
+#   5. 跑 ota_selfcheck.py：新版本号 → 无更新；旧版本号 → 有更新 + 下载三处 sha256 一致。
 set -euo pipefail
 
 VERSION="${1:-}"
@@ -58,7 +59,7 @@ fi
 echo "$ACTUAL_SHA"
 echo "一致 ✅"
 
-step "3/4 发布到 storage/ota/（版本 $VERSION）"
+step "3/5 发布到 storage/ota/（版本 $VERSION）"
 cd "$SERVER_ROOT"
 PY="$SERVER_ROOT/../.venv/bin/python"
 [ -x "$PY" ] || PY=python3
@@ -67,7 +68,17 @@ PY="$SERVER_ROOT/../.venv/bin/python"
     --version "$VERSION" \
     --changelog "$CHANGELOG"
 
-step "4/4 自检"
+step "4/5 产物里的固件版本串必须等于清单版本"
+# 设备上报的是它自己固件里的 NET_FW_VERSION；如果产物里写的是别的版本号，
+# 设备查更新时永远看不到这次发布（最坑的一种失败）。
+if grep -aqF "$VERSION" "$WORK/firmware.bin"; then
+    echo "产物里能搜到版本串 $VERSION ✅"
+else
+    echo "产物里搜不到版本串 $VERSION —— 固件的 NET_FW_VERSION 与清单版本对不上，拒绝发布！" >&2
+    exit 1
+fi
+
+step "5/5 自检"
 # 设备已是新版本 → 应当「无更新」，也不该再给 bin_url（否则白下一份旧包）
 "$PY" scripts/ota_selfcheck.py --current-ver "$VERSION" --expect-no-update
 echo
