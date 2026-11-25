@@ -23,6 +23,7 @@ import json
 import os
 import secrets
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -48,8 +49,30 @@ from app.router_ai import (
 )
 from app.speech_engine import SpeechError, get_speech_engine
 from app.storage import get_storage
+from app.weather import (
+    read_weather_snapshot,
+    set_city as set_weather_city,
+    start_background_task,
+    stop_background_task,
+)
 
-app = FastAPI(title="abbot study gateway", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    进程生命周期：启动时初始化存储并挂起后台天气任务，退出时收掉。
+    天气抓取走 `asyncio.sleep` 循环，不阻塞事件循环。
+    """
+    get_storage().init()
+    print(f"[gateway] 启动完成，storage 目录：{settings.storage_root}")
+    start_background_task(app)
+    try:
+        yield
+    finally:
+        await stop_background_task(app)
+
+
+app = FastAPI(title="abbot study gateway", version="1.0.0", lifespan=lifespan)
 
 # ---------------------------------------------------------------- 错误码 → 温和中文
 # 设备端只显示 msg，**不显示 code**。措辞要像人对学生说话。
@@ -238,6 +261,10 @@ async def api_register(req: Request):
         return err(CODE_SIGN, "设备标识格式不对")
 
     secret_hex, created = get_storage().register_device(device_id)
+    # 设备可在上报档案时一并带城市（明文请求同性质，不影响登记主流程）
+    reported_city = str(data.get("city", "") or "").strip()
+    if reported_city:
+        set_weather_city(reported_city, device_id)
     print(f"[api] 设备登记：{device_id}（{'新设备' if created else '已有设备，取回原密钥'}）")
     return JSONResponse(
         {
@@ -298,10 +325,15 @@ async def api_bootstrap(req: Request):
     for item in pending_books:
         item["token"] = security.issue_token(device_id, item["rel_path"], secret)
 
-    weather = _weather_snapshot()
+    # 设备上报城市（档案字段）→ 写回服务端权威源 storage/settings.json
+    reported_city = str(payload.get("city") or "").strip()
+    if reported_city:
+        set_weather_city(reported_city, device_id)
+
+    weather_data = _weather_snapshot(device_id)
 
     data = {
-        "weather": weather,
+        "weather": weather_data,
         "schedule_download": schedule_download,
         "pending_packs": pending_packs,
         "pending_books": pending_books,
@@ -436,17 +468,13 @@ async def api_ota_check(req: Request, device_id: str = "", current_ver: str = ""
 
 
 # ================================================================ 天气缓存
-def _weather_snapshot() -> Dict[str, Any]:
-    """读 `storage/cache/weather.json`（TTL 2 小时）。失败返回空对象，不报错。"""
-    from app.storage import read_json
+def _weather_snapshot(device_id: str = "") -> Dict[str, Any]:
+    """
+    读 `storage/cache/weather.json`（TTL 2 小时）。失败返回空对象，不报错。
 
-    data = read_json(get_storage().weather_file, None)
-    if not data:
-        return {}
-    ts = int(data.get("ts", 0))
-    if time.time() - ts > 7200:
-        return dict(data.get("weather", {}) or {})
-    return dict(data.get("weather", {}) or {})
+    抓取失败时保留上一次缓存继续对外提供；缓存本身缺失或损坏才返回空对象。
+    """
+    return read_weather_snapshot(device_id or None)
 
 
 # ================================================================ Admin 会话
@@ -1128,9 +1156,3 @@ async def index():
     if not page.exists():
         return JSONResponse({"code": CODE_OK, "msg": "web/index.html 未部署"}, status_code=404)
     return FileResponse(str(page))
-
-
-@app.on_event("startup")
-async def on_startup():
-    get_storage().init()
-    print(f"[gateway] 启动完成，storage 目录：{settings.storage_root}")

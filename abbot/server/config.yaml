@@ -82,6 +82,18 @@ ota:
   # 熔断：同一固件版本连续失败达到该次数即停止下发
   circuit_breaker_threshold: 3
 
+weather:
+  # 城市名（默认北京）。设备在心跳里上报城市后会覆盖这里 —— 覆盖值写在
+  # storage/settings.json，不写进本文件，也不写进 .env。
+  city: "Beijing"
+  # 可选经纬度：填了就直接按坐标取，不再做地名解析；留空则按上面的城市名解析
+  # latitude: 39.9042
+  # longitude: 116.4074
+  # 缓存有效期（秒），与 bootstrap 侧的 2 小时 TTL 对齐
+  ttl_seconds: 7200
+  # 抓取源开关：open-meteo（主）/ wttr（备）。按顺序尝试，全失败则保留旧缓存
+  sources: ["open-meteo", "wttr"]
+
 admin:
   username: "admin"
   # 密码走 .env 的 ADMIN_PASSWORD，不写在明文配置里

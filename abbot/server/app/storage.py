@@ -94,6 +94,8 @@ class Storage:
         self.cache_dir = self.root / "cache"
         self.tts_cache_dir = self.cache_dir / "tts"
         self.weather_file = self.cache_dir / "weather.json"
+        # 设备上报的城市等运行期设置（权威源，不进 .env / 不进 config.yaml）
+        self.settings_file = self.root / "settings.json"
 
     # ---------------------------------------------------------------- 初始化
     def init(self) -> None:

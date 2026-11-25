@@ -40,6 +40,7 @@ class Settings:
         self._quota = data.get("quota", {}) or {}
         self._ota = data.get("ota", {}) or {}
         self._admin = data.get("admin", {}) or {}
+        self._weather = data.get("weather", {}) or {}
 
     @property
     def raw(self) -> Dict[str, Any]:
@@ -69,6 +70,11 @@ class Settings:
     @property
     def admin(self) -> Dict[str, Any]:
         return self._admin
+
+    @property
+    def weather(self) -> Dict[str, Any]:
+        """天气配置段：城市、可选经纬度、缓存有效期、抓取源开关。"""
+        return self._weather
 
     # ------------------------------------------------------------ 派生路径
     @property
