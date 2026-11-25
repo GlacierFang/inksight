@@ -75,6 +75,10 @@ jobs:
               test/test_net_req.c src/net/net_req.c src/net/net_client.c \
               -o /tmp/test_net_req -lmbedtls -lmbedcrypto
           /tmp/test_net_req
+          # Arduino 层（net_api.cpp）的语法检查 —— 用 stub 头在主机上跑。
+          # 这一步不替代下面的 PlatformIO 固件编译：它只是让「一轮只暴露一个
+          # 编译错误」变成「一轮暴露全部」，省掉反复试错。
+          bash test/host_check_arduino.sh
 
       - name: 编译固件
         working-directory: .

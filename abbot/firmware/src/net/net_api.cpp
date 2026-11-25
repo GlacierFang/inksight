@@ -58,7 +58,7 @@ extern "C" void configTime(long gmtOffset_sec, int daylightOffset_sec,
 #define DEFAULT_GATEWAY_MOUNT "/abbot"
 #define GATEWAY_PORT          80
 
-#define NET_RESP_BUF_SIZE 16384
+#define NET_RESP_BUF_SIZE 12288
 #define NET_HTTP_TIMEOUT_MS 20000
 
 /* ===================== 内部状态 ===================== */
@@ -66,22 +66,72 @@ extern "C" void configTime(long gmtOffset_sec, int daylightOffset_sec,
 static WifiConnState g_wifi_state = WIFI_STATE_DISCONNECTED;
 static char g_device_id[40] = { 0 };
 
+/** HTTP 往返的静态声明（实现见文件后半段，配对流程要先用到）。 */
+static bool net_http_exchange(const char *host, const char *method, const char *url,
+                              const char *timestamp, const char *signature,
+                              const char *body, size_t body_len,
+                              bool need_sign, size_t *resp_len, nr_http_response_t *parsed);
+
 static nr_profile_t g_profile;
 static int  g_remaining_quota = -1;   /* 网关下发的剩余配额；-1 = 尚未联网同步过 */
 static bool g_profile_loaded = false;
 
-/** HTTP 往返的静态声明（实现放在本文件后半段，配对流程要先用到）。 */
-static bool net_http_exchange(const char *host, const char *method, const char *url,
-                              const char *timestamp, const char *signature,
-                              const char *body, size_t body_len,
-                              bool signed, char *resp_buf, size_t resp_cap,
-                              size_t *resp_len, nr_http_response_t *parsed);
+/* 共享响应缓冲：只由 net 任务串行使用，不做重入保护 */
+static char g_resp[NET_RESP_BUF_SIZE];
 
-/** 把 Unix 时间戳格式化成 UTC+8 的 `YYYY-MM-DDTHH:MM:SS`（不用 gmtime，避免时区依赖）。 */
+/* ===================== 小工具 ===================== */
+
+/**
+ * 安全字符串拷贝。
+ * 不用 `snprintf(dst, cap, "%s", src)` —— 目标定长时 GCC 会因为「源长度未知」
+ * 报 -Wformat-truncation，-Werror 下直接编译失败。
+ */
+static void net_str_copy(char *dst, size_t dst_cap, const char *src)
+{
+    if (dst == NULL || dst_cap == 0) {
+        return;
+    }
+    if (src == NULL) {
+        dst[0] = '\0';
+        return;
+    }
+    size_t n = strlen(src);
+    if (n >= dst_cap) {
+        n = dst_cap - 1;
+    }
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+}
+
+/** 写两位十进制（不依赖 printf 家族，避免 -Wformat-truncation）。 */
+static void net_put2(char *p, unsigned v)
+{
+    p[0] = (char)('0' + ((v / 10) % 10));
+    p[1] = (char)('0' + (v % 10));
+}
+
+/** 写四位十进制。 */
+static void net_put4(char *p, unsigned v)
+{
+    p[0] = (char)('0' + ((v / 1000) % 10));
+    p[1] = (char)('0' + ((v / 100) % 10));
+    p[2] = (char)('0' + ((v / 10) % 10));
+    p[3] = (char)('0' + (v % 10));
+}
+
+/**
+ * 把 Unix 时间戳格式化成 UTC+8 的 `YYYY-MM-DDTHH:MM:SS`。
+ * 固定偏移 +8，不走 gmtime/localtime（不依赖时区数据），也不用 printf。
+ */
 static void net_local_time_utc8(time_t epoch, char *out, size_t cap)
 {
-    /* 固定偏移 UTC+8 = 28800 秒；用整数算法拆出日期，避免 gmtime/localtime 的时区依赖 */
-    long long local = (long long)epoch + 28800LL;
+    if (out == NULL || cap < 20) {
+        if (out != NULL && cap > 0) {
+            out[0] = '\0';
+        }
+        return;
+    }
+    long long local = (long long)epoch + 28800LL;   /* UTC+8 = 28800 秒 */
     long long days = local / 86400LL;
     long long secs = local % 86400LL;
     if (secs < 0) {
@@ -98,13 +148,22 @@ static void net_local_time_utc8(time_t epoch, char *out, size_t cap)
     unsigned long long mp = (5 * doy + 2) / 153;
     unsigned long long d = doy - (153 * mp + 2) / 5 + 1;
     unsigned long long m = mp + (mp < 10 ? 3 : -9);
-    y += (m <= 2);
-    snprintf(out, cap, "%04lld-%02llu-%02lluT%02lld:%02lld:%02lld",
-             y, m, d, (long long)(secs / 3600), (long long)((secs % 3600) / 60),
-             (long long)(secs % 60));
+    if (m <= 2) {
+        y += 1;
+    }
+    net_put4(out, (unsigned)y);
+    out[4] = '-';
+    net_put2(out + 5, (unsigned)m);
+    out[7] = '-';
+    net_put2(out + 8, (unsigned)d);
+    out[10] = 'T';
+    net_put2(out + 11, (unsigned)(secs / 3600));
+    out[13] = ':';
+    net_put2(out + 14, (unsigned)((secs % 3600) / 60));
+    out[16] = ':';
+    net_put2(out + 17, (unsigned)(secs % 60));
+    out[19] = '\0';
 }
-
-/* ===================== 小工具 ===================== */
 
 static bool hex_decode(const char *hex, uint8_t *out, size_t out_len)
 {
@@ -146,12 +205,12 @@ static void nvs_get_str(const char *ns, const char *key, char *out, size_t cap, 
 {
     Preferences prefs;
     if (!prefs.begin(ns, false)) {
-        snprintf(out, cap, "%s", fallback);
+        net_str_copy(out, cap, fallback);
         return;
     }
     String v = prefs.getString(key, fallback);
     prefs.end();
-    snprintf(out, cap, "%s", v.c_str());
+    net_str_copy(out, cap, v.c_str());
 }
 
 static void nvs_set_str(const char *ns, const char *key, const char *value)
@@ -216,10 +275,11 @@ int net_wifi_get_scan_results(WifiApInfo *out_list, int max_count)
     }
     int count = (n < max_count) ? n : max_count;
     for (int i = 0; i < count; i++) {
-        snprintf(out_list[i].ssid, sizeof out_list[i].ssid, "%s", WiFi.SSID(i).c_str());
-        out_list[i].rssi = WiFi.RSSI(i);
-        uint8_t enc = WiFi.encryptionType(i);
-        out_list[i].is_encrypted = (enc != WIFI_AUTH_OPEN);
+        uint8_t idx = (uint8_t)i;
+        net_str_copy(out_list[i].ssid, sizeof out_list[i].ssid, WiFi.SSID(idx).c_str());
+        out_list[i].rssi = WiFi.RSSI(idx);
+        uint8_t enc = (uint8_t)WiFi.encryptionType(idx);
+        out_list[i].is_encrypted = (enc != (uint8_t)WIFI_AUTH_OPEN);
         out_list[i].is_saved = false;
     }
     WiFi.scanDelete();
@@ -248,7 +308,7 @@ bool net_wifi_connect_and_save(const char *ssid, const char *password)
     g_wifi_state = WIFI_STATE_CONNECTED;
     nvs_set_str(NVS_NS_WIFI, "ssid", ssid);
     nvs_set_str(NVS_NS_WIFI, "pass", password ? password : "");
-    Serial.printf("[%s] wifi connected: %s ip=%s\n", NET_TAG, ssid, WiFi.localIP().toString().c_str());
+    Serial.printf("[%s] wifi connected: %s\n", NET_TAG, ssid);
     return true;
 }
 
@@ -315,16 +375,15 @@ bool net_pair_with_code(const char *six_digit_code)
         return false;
     }
 
-    static char resp[NET_RESP_BUF_SIZE];
     size_t resp_len = 0;
     nr_http_response_t parsed;
     /* 配对是明文请求：不加签、不加密 */
     bool ok = false;
     if (net_http_exchange(host, "POST", url, NULL, NULL, plain, strlen(plain),
-                          false, resp, sizeof resp, &resp_len, &parsed)) {
+                          false, &resp_len, &parsed)) {
         /* 响应信封的 payload 是明文 JSON 串（此时双方都还没有密钥） */
-        char inner[512];
-        int inner_len = nr_json_get_string(resp, resp_len, "payload", inner, sizeof inner);
+        char inner[384];
+        int inner_len = nr_json_get_string(g_resp, resp_len, "payload", inner, sizeof inner);
         if (inner_len > 0) {
             char secret_hex[NC_SECRET_LEN * 2 + 1] = { 0 };
             int slen = nr_json_get_string(inner, (size_t)inner_len, "device_secret",
@@ -352,7 +411,7 @@ bool net_profile_set(const char *edu_stage, int enrollment_year, int remaining_q
     if (edu_stage == NULL || edu_stage[0] == '\0') {
         return false;
     }
-    snprintf(g_profile.edu_stage, sizeof g_profile.edu_stage, "%s", edu_stage);
+    net_str_copy(g_profile.edu_stage, sizeof g_profile.edu_stage, edu_stage);
     g_profile.enrollment_year = enrollment_year;
     g_profile.device_remaining_quota = remaining_quota;
     g_remaining_quota = remaining_quota;
@@ -369,7 +428,7 @@ bool net_profile_load(NetProfileContext *out)
         memset(&g_profile, 0, sizeof g_profile);
         g_remaining_quota = -1;
     }
-    snprintf(out->edu_stage, sizeof out->edu_stage, "%s", g_profile.edu_stage);
+    net_str_copy(out->edu_stage, sizeof out->edu_stage, g_profile.edu_stage);
     out->enrollment_year = g_profile.enrollment_year;
     out->device_remaining_quota = g_profile.device_remaining_quota;
     return g_profile_loaded;
@@ -394,16 +453,21 @@ int net_profile_remaining_quota(void)
 
 /**
  * 阻塞式 HTTP 往返（只在 Core 0 的 `task_net_worker` 里调用）。
- * signed=true 时按 doc/05 §3.2 带设备签名头。
- * resp_buf 收到的是**原始响应字节**（验签必须用它）。
+ * need_sign=true 时按 doc/05 §3.2 带设备签名头；timestamp/signature 由调用方给出，
+ * **必须与组装信封时用的是同一份**，否则服务端复算的签名对不上。
+ * 响应体落在共享缓冲 g_resp，返回原始字节（验签必须用它）。
  */
 static bool net_http_exchange(const char *host, const char *method, const char *url,
                               const char *timestamp, const char *signature,
                               const char *body, size_t body_len,
-                              bool signed, char *resp_buf, size_t resp_cap,
-                              size_t *resp_len, nr_http_response_t *parsed)
+                              bool need_sign, size_t *resp_len, nr_http_response_t *parsed)
 {
-    if (resp_buf == NULL || resp_cap == 0 || parsed == NULL) {
+    if (resp_len == NULL || parsed == NULL) {
+        return false;
+    }
+    if (need_sign && (timestamp == NULL || signature == NULL ||
+                      timestamp[0] == '\0' || signature[0] == '\0')) {
+        Serial.printf("[%s] 缺少签名参数\n", NET_TAG);
         return false;
     }
     if (WiFi.status() != WL_CONNECTED) {
@@ -415,16 +479,9 @@ static bool net_http_exchange(const char *host, const char *method, const char *
         Serial.printf("[%s] 连接网关失败\n", NET_TAG);
         return false;
     }
-    client.setTimeout(NET_HTTP_TIMEOUT_MS);
-
-    /* 签名与时间戳由调用方给出 —— 必须与组装信封时用的是同一份，
-     * 否则服务端按 body 复算的签名与这里发出的对不上（doc/05 §3.2）。 */
-    if (signed && (timestamp == NULL || signature == NULL ||
-                   timestamp[0] == '\0' || signature[0] == '\0')) {
-        client.stop();
-        Serial.printf("[%s] 缺少签名参数\n", NET_TAG);
-        return false;
-    }
+    /* ⚠️ WiFiClient::setTimeout 收的是**秒**（core 2.0.17 的实现是 seconds * 1000），
+     * 传毫秒会被当成几小时 —— 这里显式换算。 */
+    client.setTimeout((uint32_t)(NET_HTTP_TIMEOUT_MS / 1000));
 
     client.print(method);
     client.print(" ");
@@ -436,7 +493,7 @@ static bool net_http_exchange(const char *host, const char *method, const char *
     client.print("X-Device-Id: ");
     client.print(net_device_id());
     client.print("\r\n");
-    if (signed) {
+    if (need_sign) {
         client.print("X-Timestamp: ");
         client.print(timestamp);
         client.print("\r\n");
@@ -462,12 +519,12 @@ static bool net_http_exchange(const char *host, const char *method, const char *
             if (c < 0) {
                 break;
             }
-            if (total + 1 >= resp_cap) {
+            if (total + 1 >= NET_RESP_BUF_SIZE) {
                 client.stop();
                 Serial.printf("[%s] 响应超出缓冲区\n", NET_TAG);
                 return false;
             }
-            resp_buf[total++] = (char)c;
+            g_resp[total++] = (char)c;
         }
         if (!client.connected()) {
             /* 服务端关连接不等于字节已收齐 —— 内核里可能还压着一段，
@@ -481,12 +538,12 @@ static bool net_http_exchange(const char *host, const char *method, const char *
         delay(2);
     }
     client.stop();
-    resp_buf[total] = '\0';
+    g_resp[total] = '\0';
     *resp_len = total;
     if (total == 0) {
         return false;
     }
-    if (nr_parse_http_response(resp_buf, total, parsed) != 0) {
+    if (nr_parse_http_response(g_resp, total, parsed) != 0) {
         Serial.printf("[%s] 响应解析失败\n", NET_TAG);
         return false;
     }
@@ -523,7 +580,7 @@ bool net_post_encrypted_json(const char *api_path, const char *plain_req_json,
     }
     size_t body_len = 0;
     char sig[NC_SIGNATURE_HEX_LEN + 1];
-    char ts[16];
+    char ts[24];
     time_t now = 0;
     time(&now);
     snprintf(ts, sizeof ts, "%ld", (long)now);
@@ -534,16 +591,14 @@ bool net_post_encrypted_json(const char *api_path, const char *plain_req_json,
         return false;
     }
 
-    static char resp[NET_RESP_BUF_SIZE];
     size_t resp_len = 0;
     nr_http_response_t parsed;
     bool ok = false;
-    int biz_code = 0;
+    int biz_code = -1;
     char *resp_plain = NULL;
 
     if (net_http_exchange(host, "POST", url, ts, sig, body, body_len, true,
-                          resp, sizeof resp, &resp_len, &parsed)) {
-        /* 响应头验签：用原始响应体字节 */
+                          &resp_len, &parsed)) {
         biz_code = nr_json_get_int(parsed.body, parsed.body_len, "code", -1);
         if (parsed.resp_signature[0] == '\0') {
             /* 没签名头 = 网关在鉴权阶段就拒了（那时 payload 必为空，不解密） */
@@ -615,7 +670,7 @@ bool net_study_solve(const char *session_id, const uint8_t *jpg_data, size_t jpg
     }
     nr_profile_t prof;
     memset(&prof, 0, sizeof prof);
-    snprintf(prof.edu_stage, sizeof prof.edu_stage, "%s", ctx.edu_stage);
+    net_str_copy(prof.edu_stage, sizeof prof.edu_stage, ctx.edu_stage);
     prof.enrollment_year = ctx.enrollment_year;
     prof.device_remaining_quota = ctx.device_remaining_quota;
 
@@ -649,7 +704,7 @@ bool net_study_voice(const char *context_page, const char *pack_id, const char *
     }
     nr_profile_t prof;
     memset(&prof, 0, sizeof prof);
-    snprintf(prof.edu_stage, sizeof prof.edu_stage, "%s", ctx.edu_stage);
+    net_str_copy(prof.edu_stage, sizeof prof.edu_stage, ctx.edu_stage);
     prof.enrollment_year = ctx.enrollment_year;
     prof.device_remaining_quota = ctx.device_remaining_quota;
 
