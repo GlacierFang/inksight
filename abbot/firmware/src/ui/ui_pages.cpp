@@ -24,6 +24,7 @@
 #include "ui_book_guard.h"
 #include "ui_data.h"
 #include "ui_ota_page.h"
+#include "ui_weather.h"
 #include "wifi_model.h"
 
 /* ===================== 颜色（中性骨架，落地前按 doc/03 §一 核对） ===================== */
@@ -113,6 +114,10 @@ static lv_obj_t *s_focus_value_label = NULL;
 
 /* 首页「今日课程」卡片 */
 static lv_obj_t *s_home_schedule_label = NULL;
+/* 首页天气标签（真实数据：服务端应答里的 temp + text；空态显示温和提示） */
+static lv_obj_t *s_home_weather_label = NULL;
+/* 设置页「所在城市」右侧的值标签 */
+static lv_obj_t *s_city_value_label = NULL;
 
 /* ===================== 学科卡片（doc/04 §四） ===================== */
 
@@ -430,7 +435,11 @@ void ui_pages_set_pair_state(int state)
     lv_label_set_text(s_oobe_state_label, text);
 }
 
-/* 1. 主仪表盘 (PAGE_HOME) */
+/* 1. 主仪表盘 (PAGE_HOME)
+ *
+ * 天气行是**真实数据**：由 src/ui/ui_router.cpp 在收到服务端心跳应答后写入
+ * （doc/05 §5.2 的 weather{temp,text}）。拿不到时显示温和提示，不显示假数据。
+ */
 static void ui_build_home(lv_obj_t *content)
 {
     lv_obj_t *card = ui_make_card(content);
@@ -438,6 +447,11 @@ static void ui_build_home(lv_obj_t *content)
     lv_obj_t *label = ui_make_label(card, "今日课程\n暂时读不到课表", false);
     lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
     s_home_schedule_label = label;
+
+    /* 天气：与服务端心跳应答同步；初始为空态（还没拿到数据） */
+    lv_obj_t *weather = ui_make_label(card, "暂时拿不到天气", false);
+    lv_obj_align(weather, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    s_home_weather_label = weather;
 
     static const char *items[] = {
         "> [ 拍题导学 ]      剩余 8 / 共 10",
@@ -558,7 +572,11 @@ static void ui_build_outbox(lv_obj_t *content)
     lv_obj_align(empty, LV_ALIGN_CENTER, 0, 0);
 }
 
-/* 8. 系统设置 (PAGE_SETTINGS) */
+/* 8. 系统设置 (PAGE_SETTINGS)
+ *
+ * 「所在城市」是真入口：短按进入候选城市列表，选中后落盘 TF 卡并随心跳上报
+ * （doc/05 §5.2）。右侧显示当前城市名（还没设置过时显示「未设置」）。
+ */
 static void ui_build_settings(lv_obj_t *content)
 {
     static const char *items[] = {
@@ -582,6 +600,100 @@ static void ui_build_settings(lv_obj_t *content)
         snprintf(buf, sizeof(buf), "%d 分钟", s_focus_minutes);
         lv_label_set_text(s_focus_value_label, buf);
     }
+    /* 第 8 项：所在城市（右侧显示当前城市；短按进列表选） */
+    lv_obj_t *city_row = ui_make_list_item_ex(content, "  所在城市", "", &s_city_value_label);
+    lv_obj_align(city_row, LV_ALIGN_TOP_LEFT, 0, 7 * 40);
+    if (s_city_value_label != NULL) {
+        lv_label_set_text(s_city_value_label, "未设置");
+    }
+}
+
+/* ===================== 13. 选择城市 (PAGE_CITY)
+ *
+ * 候选城市列表（虚拟键盘未落地时的入口）：上下移动光标，短按确认。
+ * 确认后：落盘 TF 卡（离线兜底）+ 写进 net 层缓存（随下一次心跳上报）。
+ * ===================================================== */
+#define CITY_VISIBLE_ROWS 8   /* 一屏能显示几行 */
+
+/* 「不登记进通用光标」的可选行（定义在下面的 Wi-Fi 段里，这里先前置声明） */
+static lv_obj_t *ui_make_row(lv_obj_t *parent, lv_obj_t **out_label);
+
+static lv_obj_t *s_city_rows[CITY_VISIBLE_ROWS];
+static lv_obj_t *s_city_labels[CITY_VISIBLE_ROWS];
+static int s_city_cursor = 0;    /* 选中的候选序号 */
+static int s_city_scroll = 0;     /* 列表滚动偏移 */
+
+/** 重画候选城市列表（带光标标记）。 */
+static void ui_city_render(void)
+{
+    int total = ui_weather_city_candidate_count();
+    int i;
+    for (i = 0; i < CITY_VISIBLE_ROWS; i++) {
+        int idx = s_city_scroll + i;
+        if (s_city_labels[i] == NULL) {
+            continue;
+        }
+        if (idx >= total) {
+            lv_obj_add_flag(s_city_rows[i], LV_OBJ_FLAG_HIDDEN);
+            continue;
+        }
+        lv_obj_clear_flag(s_city_rows[i], LV_OBJ_FLAG_HIDDEN);
+        const ui_city_candidate_t *c = ui_weather_city_candidate(idx);
+        char buf[40];
+        snprintf(buf, sizeof(buf), "%s%s", (idx == s_city_cursor) ? "> " : "  ",
+                 (c != NULL) ? c->zh : "");
+        lv_label_set_text(s_city_labels[i], buf);
+    }
+}
+
+void ui_pages_city_enter(void)
+{
+    s_city_cursor = 0;
+    s_city_scroll = 0;
+    ui_city_render();
+}
+
+int ui_pages_city_move(int delta)
+{
+    int total = ui_weather_city_candidate_count();
+    if (total <= 0) {
+        return -1;
+    }
+    int c = s_city_cursor + delta;
+    if (c < 0) {
+        c = 0;
+    }
+    if (c >= total) {
+        c = total - 1;
+    }
+    s_city_cursor = c;
+    /* 滚动：让光标始终在可见窗口里 */
+    if (c < s_city_scroll) {
+        s_city_scroll = c;
+    } else if (c >= s_city_scroll + CITY_VISIBLE_ROWS) {
+        s_city_scroll = c - CITY_VISIBLE_ROWS + 1;
+    }
+    ui_city_render();
+    return s_city_cursor;
+}
+
+const ui_city_candidate_t *ui_pages_city_selected(void)
+{
+    return ui_weather_city_candidate(s_city_cursor);
+}
+
+static void ui_build_city(lv_obj_t *content)
+{
+    lv_obj_t *title = ui_make_label(content, "选择所在城市", true);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
+
+    int i;
+    for (i = 0; i < CITY_VISIBLE_ROWS; i++) {
+        lv_obj_t *row = ui_make_row(content, &s_city_labels[i]);
+        lv_obj_align(row, LV_ALIGN_TOP_LEFT, 0, 44 + i * 36);
+        s_city_rows[i] = row;
+    }
+    ui_city_render();
 }
 
 /* ===================== 9. Wi-Fi 扫描列表 (PAGE_WIFI_SCAN)
@@ -1299,6 +1411,7 @@ static const ui_page_builder_t s_page_builders[PAGE_COUNT] = {
     [PAGE_OUTBOX]       = ui_build_outbox,
     [PAGE_KEYBOARD]     = ui_build_keyboard,
     [PAGE_OTA]          = ui_build_ota,
+    [PAGE_CITY]         = ui_build_city,
     [PAGE_POMODORO]     = ui_build_pomodoro,
 };
 
@@ -1324,6 +1437,7 @@ static const char *s_page_hints[PAGE_COUNT] = {
     [PAGE_OUTBOX]       = "上下选择 | 短按确定 | 长按退出",
     [PAGE_KEYBOARD]     = "上下选择 | 短按输入 | 长按退出",
     [PAGE_OTA]          = "上下选择 | 短按确定 | 长按退出",
+    [PAGE_CITY]         = "上下选择 | 短按确定 | 长按退出",
     [PAGE_POMODORO]     = "短按暂停/继续 | 长按结束退出",
 };
 
@@ -1725,6 +1839,36 @@ void ui_pages_refresh_home(void)
         snprintf(buf + pos, sizeof(buf) - pos, "……");
     }
     lv_label_set_text(s_home_schedule_label, buf);
+}
+
+/* ===================== 天气与城市（doc/05 §5.2） ===================== */
+
+/**
+ * 刷新首页的天气文案。
+ *
+ * `text` 是 ui_weather_display_text() 生成的成品文案（在线读数 / 缓存标注 / 空态）。
+ * 本函数**不做任何判断** —— 拿不到数据时的「暂时拿不到天气」也是它传进来的。
+ */
+void ui_pages_set_weather_text(const char *text)
+{
+    if (s_home_weather_label == NULL) {
+        return;
+    }
+    lv_label_set_text(s_home_weather_label, (text != NULL && text[0] != '\0') ? text
+                                                                     : "暂时拿不到天气");
+}
+
+/**
+ * 刷新设置页「所在城市」右侧的值。
+ *
+ * `zh` 是给用户看的中文名（候选表里的那一列）；没设置过时传 NULL → 显示「未设置」。
+ */
+void ui_pages_set_city_label(const char *zh)
+{
+    if (s_city_value_label == NULL) {
+        return;
+    }
+    lv_label_set_text(s_city_value_label, (zh != NULL && zh[0] != '\0') ? zh : "未设置");
 }
 
 /* ===================== 书架与阅读页（doc/07） ===================== */

@@ -63,6 +63,18 @@ typedef struct {
     int quota_used_count;
 } nr_profile_doc_t;
 
+/**
+ * 天气读数（doc/05 §5.2：`weather{temp, text}`）。
+ *
+ * `valid == false` 表示**暂时没有天气**：服务端回空对象、缺字段、缺 temp
+ * 都归到这一种（同一个空态），UI 不得显示 0℃ 或破折号。
+ */
+typedef struct {
+    bool valid;                       /* 有没有可用读数 */
+    int temp;                         /* 摄氏度（整数） */
+    char text[32];                    /* 中文天气描述，如「晴间多云」 */
+} nr_weather_t;
+
 /* ---------- HTTP 响应解析结果 ---------- */
 typedef struct {
     int status_code;             /* HTTP 状态码，未解析出时为 0 */
@@ -116,10 +128,17 @@ int nr_build_pair_plain(const char *device_id, const char *pair_code,
 int nr_build_register_plain(const char *device_id, const char *fw_version,
                             char *out, size_t out_cap);
 
-/** `POST /api/v1/sync/bootstrap` 明文（心跳同步，doc/05 §5）。 */
+/**
+ * `POST /api/v1/sync/bootstrap` 明文（心跳同步，doc/05 §5）。
+ *
+ * `city` 是**上报的城市名**（doc/05 §5.2）：服务端解密后读 `payload["city"]`，
+ * 写进自己的权威源并用它抓天气。传 NULL 或空串 = 不带这个字段
+ * （服务端不会因此清掉已有城市）。
+ */
 int nr_build_bootstrap_plain(const char *device_id, const char *fw_version,
                              int battery_pct, uint32_t schedule_updated_at,
                              const char *local_packs_json, const char *local_books_json,
+                             const char *city,
                              char *out, size_t out_cap);
 
 /**
@@ -221,6 +240,16 @@ int nr_json_get_string_trunc(const char *json, size_t len, const char *key,
  * 返回 0 成功（字段缺失时对应位置为空串 / 默认值），-1 入参非法。
  */
 int nr_parse_solve_result(const char *json, size_t len, nr_solve_result_t *out);
+
+/**
+ * 从 bootstrap 应答明文里取天气 -> `nr_weather_t`。
+ *
+ * 返回值：
+ *   0  取到可用读数（temp 与 text 都有）；
+ *   1  应答里没有可用天气（缺 `weather`、空对象、缺 temp、缺 text —— 全是同一个空态）；
+ *  -1  入参非法。
+ */
+int nr_parse_weather(const char *json, size_t len, nr_weather_t *out);
 
 int nr_json_get_int(const char *json, size_t len, const char *key, int fallback);
 int nr_json_get_bool(const char *json, size_t len, const char *key, bool fallback);

@@ -35,6 +35,7 @@ extern "C" {
 #define NET_OP_REGISTER  6 /* 自动登记（无码配对，doc/04 §1.2） */
 #define NET_OP_CARDS    7 /* 学科卡片包（本地解密 + 解析） */
 #define NET_OP_OTA_CHECK 8 /* 固件升级检查（doc/04 固件升级章节） */
+#define NET_OP_CITY     9 /* 设置城市（UI 核写入 net 层缓存，随下一次心跳上报） */
 
 /** 固件版本号（心跳上报与 OTA 比对用）。 */
 #define NET_FW_VERSION "1.0.0"
@@ -65,6 +66,12 @@ typedef struct {
     char edu_stage[16];    /* NET_OP_PROFILE：学段 */
     int enrollment_year;   /* NET_OP_PROFILE：入学年 */
     int remaining_quota;   /* NET_OP_PROFILE：本地估算的剩余配额（仅供对账） */
+    /*
+     * NET_OP_CITY：用户设置的城市名（doc/05 §5.2）。
+     * net 任务把它存进 net 层缓存，下一次心跳（bootstrap）明文里带上。
+     * 城市名**不是经纬度** —— 服务端自己解析地名。
+     */
+    char city[32];
     /*
      * 关联媒体文件在 TF 卡上的路径（如 `/outbox/task_12345.jpg`）。
      * 相机任务拍完就把 JPG 落到卡上（doc/04 §3.5 命名法），把这个路径带过来：
@@ -103,6 +110,21 @@ bool net_profile_set(const char *edu_stage, int enrollment_year, int remaining_q
 bool net_profile_update_quota(int effective_remaining_quota);
 /** 读取最近一次由网关覆盖的剩余配额（未联网过则返回 -1）。 */
 int net_profile_remaining_quota(void);
+
+/* ---------- 城市缓存（doc/05 §5.2） ---------- */
+/**
+ * 写入 net 层城市缓存（用户设置的城市名）。
+ *
+ * **为什么不是 net 层自己去读 TF 卡**：TF 卡由 `task_storage` 独占串行化访问
+ * （doc/02 §4.1），net 任务另开一路 SD 访问会与它抢总线。
+ * 因此由读卡的一侧（UI）解析后调本函数写入 net 层缓存，
+ * net 层只负责在组装心跳明文时带上（doc/05 §5.2）。
+ *
+ * 城市名**不是经纬度**：服务端拿它自己做地名解析。
+ */
+void net_set_city(const char *city);
+/** 取当前上报用的城市名（没设置过返回空串）。 */
+const char *net_get_city(void);
 
 /** 设备唯一标识（`esp32s3_xxxxxxxx`），心跳与配对用。 */
 const char *net_device_id(void);
@@ -216,6 +238,9 @@ bool net_sync_bootstrap(const char *bootstrap_req_json, int *out_biz_code, char 
 /**
  * 心跳同步（自组装请求明文）：设备标识、固件版本、电量、已装学科包与电子书列表
  * 全部由本层内部采集与填充，调用方不感知。
+ *
+ * 请求明文里带**上报城市**（doc/05 §5.2）：城市取自 net 层缓存（`net_set_city()`），
+ * 没设置过就不带这个字段。
  */
 bool net_sync_bootstrap_auto(int *out_biz_code, char **out_resp_json);
 /**

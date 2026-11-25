@@ -40,6 +40,8 @@ extern "C" {
 #define UI_DATA_MAX_SUBJECT    24
 #define UI_DATA_MAX_TIME       6
 #define UI_DATA_MAX_SUBJECT_LEN 24
+/* 城市名上限（字节；上报给服务端的英文地名） */
+#define UI_DATA_CITY_MAX       32
 
 /* doc/04 §2.1 目录树 */
 #define UI_DATA_PATH_SETTINGS  "/config/settings.json"
@@ -48,6 +50,8 @@ extern "C" {
 #define UI_DATA_PATH_BOOKMARKS "/records/bookmarks.json"
 /* 原子写留下的备份（主文件坏了就回退到它，doc/07 §2.3） */
 #define UI_DATA_PATH_BOOKMARKS_BAK "/records/bookmarks.json.bak"
+/* 本地气象快照（离线兜底；doc/04 §2.1 已列此路径，hal_storage 开机播种） */
+#define UI_DATA_PATH_WEATHER   "/cache/weather.json"
 #define UI_DATA_DIR_BOOKS      "/books"
 #define UI_DATA_DIR_SUBJECTS   "/subjects"   /* 学科包目录（每个子目录是一个包） */
 
@@ -190,6 +194,31 @@ int ui_data_parse_focus_minutes(const char *json, size_t len, int fallback);
 int ui_data_focus_minutes_get(int *out_minutes);
 /** 把专注时长写回 `/config/settings.json`（原子写，doc/04 §2.3）。 */
 int ui_data_focus_minutes_set(int minutes);
+
+/* ===================== 城市（doc/05 §5.2） ===================== */
+/**
+ * 读 `/config/settings.json` 里的城市名（上报用地名）。
+ *
+ * 读不到 / 没设过时 `out[0] = '\0'`（**不是错误** —— 设备还没设置过城市）。
+ */
+int ui_data_city_get(char *out, size_t cap);
+/**
+ * 把城市名写进 `/config/settings.json`（原子写，doc/04 §2.3）。
+ *
+ * **读-改-写**：保留文件里已有的其它字段（专注时长等），不能整文件覆盖。
+ */
+int ui_data_city_set(const char *city);
+
+/* ===================== 天气快照（离线兜底） ===================== */
+/**
+ * 读 `/cache/weather.json` 的原始文本（离线兜底用）。
+ *
+ * 存的是**服务端应答里的天气片段**（`{"weather":{"temp":4,"text":"晴"}}`），
+ * 读出来直接交给协议层解析。读不到时返回错误码，`out[0] = '\0'`。
+ */
+int ui_data_weather_cache_get(char *out, size_t cap, uint32_t *out_len);
+/** 把天气片段写进 `/cache/weather.json`（原子写，doc/04 §2.3）。 */
+int ui_data_weather_cache_set(const char *text, uint32_t len);
 
 /* ===================== 档案（离线降级用） ===================== */
 /** 读 `/config/profile.json` 里的配对标志。读不到时按未配对处理。 */

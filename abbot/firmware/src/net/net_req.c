@@ -347,7 +347,8 @@ int nr_build_register_plain(const char *device_id, const char *fw_version,
 
 static void fill_bootstrap_plain(nr_sb_t *sb, const char *device_id, const char *fw_version,
                                  int battery_pct, uint32_t schedule_updated_at,
-                                 const char *local_packs_json, const char *local_books_json)
+                                 const char *local_packs_json, const char *local_books_json,
+                                 const char *city)
 {
     sb_putc(sb, '{');
     sb_puts(sb, "\"device_id\":");
@@ -360,12 +361,19 @@ static void fill_bootstrap_plain(nr_sb_t *sb, const char *device_id, const char 
     sb_puts(sb, (local_packs_json != NULL) ? local_packs_json : "[]");
     sb_puts(sb, ",\"local_books\":");
     sb_puts(sb, (local_books_json != NULL) ? local_books_json : "[]");
+    /* 城市（doc/05 §5.2）：服务端解密后读 payload["city"]，写进自己的权威源。
+     * 为空就不带这个字段 —— 服务端不会把已有城市清掉。 */
+    if (city != NULL && city[0] != '\0') {
+        sb_puts(sb, ",\"city\":");
+        sb_json_str(sb, city);
+    }
     sb_putc(sb, '}');
 }
 
 int nr_build_bootstrap_plain(const char *device_id, const char *fw_version,
                              int battery_pct, uint32_t schedule_updated_at,
                              const char *local_packs_json, const char *local_books_json,
+                             const char *city,
                              char *out, size_t out_cap)
 {
     if (device_id == NULL || fw_version == NULL) {
@@ -375,13 +383,13 @@ int nr_build_bootstrap_plain(const char *device_id, const char *fw_version,
         nr_sb_t sb;
         sb_init(&sb, NULL, 0);
         fill_bootstrap_plain(&sb, device_id, fw_version, battery_pct, schedule_updated_at,
-                             local_packs_json, local_books_json);
+                             local_packs_json, local_books_json, city);
         return (int)(sb.len + 1);
     }
     nr_sb_t sb;
     sb_init(&sb, out, out_cap);
     fill_bootstrap_plain(&sb, device_id, fw_version, battery_pct, schedule_updated_at,
-                         local_packs_json, local_books_json);
+                         local_packs_json, local_books_json, city);
     if (sb.overflow) {
         return -2;
     }
@@ -994,6 +1002,96 @@ int nr_parse_solve_result(const char *json, size_t len, nr_solve_result_t *out)
     out->has_audio = (nr_json_get_bool(json, len, "has_audio", false) != 0);
     out->effective_remaining_quota = nr_json_get_int(json, len, "effective_remaining_quota", -1);
     return 0;
+}
+
+static bool nr_json_get_number(const char *json, size_t len, const char *key, int *out);
+
+int nr_parse_weather(const char *json, size_t len, nr_weather_t *out)
+{
+    if (json == NULL || out == NULL) {
+        return -1;
+    }
+    memset(out, 0, sizeof *out);
+
+    /* `weather` 是嵌套对象：先取它的内容片段，再在里面取 temp / text。 */
+    const char *body = NULL;
+    size_t body_len = 0;
+    if (nr_json_get_object(json, len, "weather", &body, &body_len) != 0) {
+        return 1;   /* 应答里根本没有 weather —— 空态 */
+    }
+    if (body == NULL || body_len == 0) {
+        return 1;   /* `weather: {}` —— 空态（不是故障） */
+    }
+
+    int temp = 0;
+    if (!nr_json_get_number(body, body_len, "temp", &temp)) {
+        return 1;   /* 没有温度 —— 空态 */
+    }
+    char text[sizeof out->text];
+    if (nr_json_get_string_trunc(body, body_len, "text", text, sizeof text) < 0) {
+        text[0] = '\0';
+    }
+    if (text[0] == '\0') {
+        /* 有温度但没有描述 —— 当成没有天气：UI 不该显示「25℃」配空白 */
+        return 1;
+    }
+    out->valid = true;
+    out->temp = temp;
+    memcpy(out->text, text, sizeof out->text);
+    return 0;
+}
+
+/**
+ * 取一个数字字段（整数或小数，小数四舍五入到整数）。
+ *
+ * 服务端给的是整数（`round()` 过的），但缓存文件里可能留着浮点 ——
+ * 所以这里两种都收。找到并能解析返回 true。
+ */
+static bool nr_json_get_number(const char *json, size_t len, const char *key, int *out)
+{
+    const char *p = nr_find_value(json, len, key);
+    if (p == NULL) {
+        return false;
+    }
+    int sign = 1;
+    if (*p == '-') {
+        sign = -1;
+        p++;
+    }
+    if (*p < '0' || *p > '9') {
+        return false;
+    }
+    long v = 0;
+    while (*p >= '0' && *p <= '9') {
+        v = v * 10 + (*p - '0');
+        if (v > 2147483647L) {
+            v = 2147483647L;
+        }
+        p++;
+    }
+    if (*p == '.' || *p == 'e' || *p == 'E') {
+        /* 小数：按浮点读再四舍五入（与服务端 round() 的口径一致） */
+        char tmp[64];
+        size_t n = 0;
+        const char *q = p;
+        while (*q != '\0' && n + 1 < sizeof tmp &&
+               (*q == '.' || *q == 'e' || *q == 'E' || *q == '+' || *q == '-' ||
+                (*q >= '0' && *q <= '9'))) {
+            tmp[n++] = *q++;
+        }
+        tmp[n] = '\0';
+        double d = (double)v + strtod(tmp, NULL);
+        if (d > 2147483647.0) {
+            d = 2147483647.0;
+        } else if (d < -2147483648.0) {
+            d = -2147483648.0;
+        }
+        v = (long)(d < 0 ? d - 0.5 : d + 0.5);
+    }
+    if (out != NULL) {
+        *out = (int)(sign * v);
+    }
+    return true;
 }
 
 int nr_json_get_int(const char *json, size_t len, const char *key, int fallback)

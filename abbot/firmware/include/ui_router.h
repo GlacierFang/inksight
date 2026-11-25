@@ -47,6 +47,7 @@ typedef enum {
     PAGE_KEYBOARD,          /* 文本输入（答案录入等） */
     PAGE_OTA,               /* 固件升级 */
     PAGE_POMODORO,          /* 番茄钟 */
+    PAGE_CITY,              /* 选择城市（设置页入口，doc/05 §5.2） */
     PAGE_COUNT
 } ui_page_t;
 

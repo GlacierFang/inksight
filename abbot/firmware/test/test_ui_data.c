@@ -529,6 +529,78 @@ static void test_date(void)
     (void)ui_data_today(NULL);
 }
 
+/* ---------- 城市读写（settings.json 的读-改-写） ---------- */
+
+static void test_city(void)
+{
+    char city[64];
+
+    /* 还没设置过城市时，读出来应是空串而不是报错 */
+    memset(city, 'x', sizeof(city));
+    CHECK(ui_data_city_get(city, sizeof(city)) == UI_DATA_OK, "未设置城市时读应成功");
+    CHECK(city[0] == '\0', "未设置城市时应读到空串，实际 \"%s\"", city);
+
+    /* 写入城市 */
+    CHECK(ui_data_city_set("Shanghai") == UI_DATA_OK, "写城市应成功");
+    memset(city, 0, sizeof(city));
+    CHECK(ui_data_city_get(city, sizeof(city)) == UI_DATA_OK, "读回城市应成功");
+    CHECK(strcmp(city, "Shanghai") == 0, "应读到 Shanghai，实际 \"%s\"", city);
+
+    /* 读-改-写不能把别的字段弄丢（专注时长要保住） */
+    int minutes = 0;
+    CHECK(ui_data_focus_minutes_get(&minutes) == UI_DATA_OK, "读专注时长应成功");
+    CHECK(minutes == 30, "写城市不应弄丢 focus_minutes，实际 %d", minutes);
+
+    /* 改城市：专注时长仍在 */
+    CHECK(ui_data_city_set("Beijing") == UI_DATA_OK, "改城市应成功");
+    memset(city, 0, sizeof(city));
+    CHECK(ui_data_city_get(city, sizeof(city)) == UI_DATA_OK, "读回新城市应成功");
+    CHECK(strcmp(city, "Beijing") == 0, "应读到 Beijing，实际 \"%s\"", city);
+    minutes = 0;
+    CHECK(ui_data_focus_minutes_get(&minutes) == UI_DATA_OK, "读专注时长应成功");
+    CHECK(minutes == 30, "改城市后 focus_minutes 应还在，实际 %d", minutes);
+
+    /* 空城市要拒绝（不能把已有城市抹成空） */
+    CHECK(ui_data_city_set("") == UI_DATA_ERR_INVALID, "空城市应被拒");
+    CHECK(ui_data_city_set(NULL) == UI_DATA_ERR_INVALID, "NULL 城市应被拒");
+    memset(city, 0, sizeof(city));
+    CHECK(ui_data_city_get(city, sizeof(city)) == UI_DATA_OK, "读城市应成功");
+    CHECK(strcmp(city, "Beijing") == 0, "被拒的写入不应改动原值，实际 \"%s\"", city);
+
+    /* 参数不合法 */
+    CHECK(ui_data_city_get(NULL, 10) == UI_DATA_ERR_INVALID, "NULL 缓冲应被拒");
+    CHECK(ui_data_city_get(city, 0) == UI_DATA_ERR_INVALID, "零容量应被拒");
+}
+
+/* ---------- 天气缓存（离线兜底） ---------- */
+
+static void test_weather_cache(void)
+{
+    char buf[256];
+    uint32_t len = 0;
+
+    /* 还没缓存过天气时，读应温和失败 */
+    CHECK(ui_data_weather_cache_get(buf, sizeof(buf), &len) != UI_DATA_OK,
+          "没有天气缓存时应失败而不是崩");
+
+    /* 写入服务端下发的天气片段 */
+    const char *frag = "{\"weather\":{\"temp\":8,\"text\":\"阴\"}}";
+    CHECK(ui_data_weather_cache_set(frag, (uint32_t)strlen(frag)) == UI_DATA_OK,
+          "写天气缓存应成功");
+
+    memset(buf, 0, sizeof(buf));
+    len = 0;
+    CHECK(ui_data_weather_cache_get(buf, sizeof(buf), &len) == UI_DATA_OK, "读天气缓存应成功");
+    CHECK(len == (uint32_t)strlen(frag), "长度应为 %u，实际 %u",
+          (unsigned)strlen(frag), (unsigned)len);
+    CHECK(strcmp(buf, frag) == 0, "内容应原样读回");
+
+    /* 空内容要拒绝 */
+    CHECK(ui_data_weather_cache_set(NULL, 4) == UI_DATA_ERR_INVALID, "NULL 内容应被拒");
+    CHECK(ui_data_weather_cache_set(frag, 0) == UI_DATA_ERR_INVALID, "零长度应被拒");
+    CHECK(ui_data_weather_cache_get(NULL, 10, &len) == UI_DATA_ERR_INVALID, "NULL 缓冲应被拒");
+}
+
 int main(void)
 {
     test_utf8_align();
@@ -562,6 +634,10 @@ int main(void)
         CHECK(ui_data_file_exists("/config/settings.json") == UI_DATA_OK, "存在的文件应 OK");
         CHECK(ui_data_is_mounted() == 1, "假卡应处于挂载态");
     }
+
+    /* ---------- 城市与天气缓存（依赖上面已建好的假 TF 卡） ---------- */
+    test_city();
+    test_weather_cache();
 
     printf("ui_data host tests: %d checks, %d failures\n", g_checks, g_fail);
     return (g_fail == 0) ? 0 : 1;

@@ -56,7 +56,7 @@
 ├── config/
 │   ├── profile.json            # 全局档案、学段锚点、每日配额、电子书宵禁与音量亮度
 │   ├── schedule.json           # 每周课表、节次起止时间及准点提醒规则
-│   └── settings.json           # 设备本地设置（当前：番茄钟专注时长 focus_minutes）
+│   └── settings.json           # 设备本地设置（番茄钟专注时长 focus_minutes + 所在城市 city）
 ├── subjects/
 │   ├── manifest.json           # 本地已安装学科包索引清单
 │   └── <pack_id>/              # 独立学科包目录（如 demo_pack、m7_geo）
@@ -74,7 +74,7 @@
 │   ├── queue.json              # 离线待问任务索引表（严格上限 <= 10 条，原子写入保护）
 │   └── task_<ts>.<jpg|pcm>     # 单条离线任务关联的压缩图像或原始 PCM 音频
 ├── cache/
-│   ├── weather.json            # 本地气象快照缓存（TTL = 2 小时）
+│   ├── weather.json            # 本地气象快照缓存（固件侧写入：最近一次在线读数，{"weather":{"temp":N,"text":"…"}}，供离线兜底显示）
 │   └── tts/                    # 云端下发的 16kHz WAV 语音缓存（<tts_cache_key>.wav，上限 50MB）
 └── logs/
     └── crash.log               # 最近一次异常复位原因与关键错误日志（上限 64KB 循环覆盖）
@@ -86,7 +86,7 @@
 **空白卡自愈不预置任何学科包** —— `/subjects/` 下是空的，学科包由网关经心跳下发后写入（`meta.json` 标记 `"key_type": "device"` 时用设备密钥 `device_secret[0:16]` 解密，标记 `"key_type": "demo"` 时用内置默认密钥 `STUDY_DEMO_KEY16` 解密）。设备端的「学科包」列表读的就是 `/subjects/` 下的真实目录。
 
 ### 2.3 防掉电原子写入契约（Atomic Write）
-所有核心 JSON 文件（包括 `profile.json`、`schedule.json`、`settings.json`、`progress.json`、`bookmarks.json`、`manifest.json` 及 **`/outbox/queue.json`**）在写入时必须严格执行四步原子替换协议：
+所有核心 JSON 文件（包括 `profile.json`、`schedule.json`、`settings.json`、`progress.json`、`bookmarks.json`、`manifest.json` 及 **`/outbox/queue.json`**、**`/cache/weather.json`**）在写入时必须严格执行四步原子替换协议：
 1. 先将完整新内容写入同目录临时文件 `<filename>.tmp` 并执行 `flush()`；
 2. 校验临时文件实际写入字节数与预期长度一致（若 TF 卡空间已满导致写入不全，立即删除 `.tmp` 并**保留原正式文件不覆盖**）；
 3. 若正式文件已存在，将其重命名为 `<filename>.bak`（先删除旧 `.bak`）；

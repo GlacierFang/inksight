@@ -16,10 +16,12 @@
 #include <string.h>
 
 #include "lvgl.h"
+#include "net_api.h"
 #include "net_req.h"
 #include "ui_data.h"
 #include "ui_pages.h"
 #include "ui_ota_page.h"
+#include "ui_weather.h"
 
 #include "hal_interfaces.h"   /* 背光、音频（Arduino.h 也从这里进来） */
 
@@ -52,8 +54,194 @@ static int s_pair_state = UI_PAIR_STATE_NONE;
 /* 已载入的学科卡片集（网络任务解好的明文，堆内存 —— 所有权在本层）。 */
 static card_pack_t *s_cards = NULL;
 
+/* ===================== 天气与城市（doc/05 §5.2） ===================== */
+
+/* 心跳节奏：开机先来一次（拿到天气），之后每 10 分钟一次。 */
+#define UI_HB_FIRST_DELAY_MS   15000u
+#define UI_HB_INTERVAL_MS      600000u
+/* 网络队列满时的重试间隔 */
+#define UI_HB_RETRY_MS           5000u
+/* 设完城市后的追一次心跳：服务端 ≤30 秒才重新抓天气，这里 60 秒后再问一次。 */
+#define UI_HB_FOLLOWUP_MS       60000u
+
+static uint32_t s_hb_due_ms = 0;      /* 下一次心跳的到期时刻 */
+static uint32_t s_hb_gap_ms = UI_HB_INTERVAL_MS;
+static int  s_hb_followups = 0;       /* 还剩几次「短间隔」心跳 */
+static bool s_hb_started = false;
+
+/* 天气状态：在线读数 / 本地快照 / 状态 */
+static nr_weather_t s_weather_live;
+static nr_weather_t s_weather_cached;
+static ui_weather_state_t s_weather_state = UI_WX_NONE;
+static bool s_weather_cache_valid = false;
+static bool s_weather_cache_written = false;
+static char s_weather_cache_text[UI_WEATHER_TEXT_MAX];  /* 已写进卡里的内容 */
+static int  s_weather_cache_temp = 0;
+
+/* 当前城市（上报用的英文地名）与同步标志 */
+static char s_city_current[UI_DATA_CITY_MAX];
+static bool s_city_synced = false;
+
 /* 读配对标志（定义在“页面动作”段） */
 static void ui_paired_refresh(void);
+
+/* ===================== 天气与城市（doc/05 §5.2） ===================== */
+
+/**
+ * 心跳（bootstrap）应答的识别与处理。
+ *
+ * **为什么靠 `weather` 字段识别**：net 层只有一条回包通路（kind=2），
+ * 拍题应答与心跳应答都走它。心跳应答顶层必有 `weather` 字段
+ * （doc/05 §5.2），拍题应答没有 —— 这是唯一可靠的区分方式。
+ *
+ * 心跳失败时 net 层会造一份带 `offline` 标记的空应答（见 net_dispatch.c），
+ * 固件据此切到 TF 卡上的本地快照兜底。
+ */
+static void ui_weather_handle_reply(const char *payload, uint32_t len)
+{
+    bool offline = (nr_json_get_bool(payload, len, "offline", false) != 0);
+    nr_weather_t w;
+    memset(&w, 0, sizeof w);
+    nr_parse_weather(payload, len, &w);
+
+    if (offline) {
+        /* 没连上服务端：本地有快照就显示快照（标明是缓存），没有就空态 */
+        s_weather_state = s_weather_cache_valid ? UI_WX_CACHE : UI_WX_NONE;
+    } else if (w.valid) {
+        s_weather_live = w;
+        s_weather_state = UI_WX_LIVE;
+        ui_weather_save_cache(&w);
+    } else {
+        /* 服务端回了但暂时没数据（空对象 / 缺字段）—— 同一个空态，不当故障 */
+        s_weather_state = UI_WX_EMPTY;
+    }
+    ui_weather_refresh_display();
+}
+
+/** 心跳应答（含 `weather` 字段）？ */
+static bool ui_reply_is_weather(const char *payload, uint32_t len)
+{
+    if (payload == NULL || len == 0) {
+        return false;
+    }
+    const char *obj = NULL;
+    size_t obj_len = 0;
+    return nr_json_get_object(payload, len, "weather", &obj, &obj_len) == 0;
+}
+
+/* ---- 天气状态的读写 ---- */
+
+/** 把最近一次在线读数落盘（TF 卡 /cache/weather.json）：离线时的兜底快照。 */
+static void ui_weather_save_cache(const nr_weather_t *w)
+{
+    if (w == NULL || !w->valid) {
+        return;
+    }
+    /* 内容没变就不写（避免反复磨卡） */
+    char text[UI_WEATHER_TEXT_MAX];
+    snprintf(text, sizeof(text), "%s", w->text);
+    if (s_weather_cache_written && strcmp(s_weather_cache_text, text) == 0 &&
+        s_weather_cache_temp == w->temp) {
+        return;
+    }
+    /* 天气描述来自服务端（中文短语），不含引号与控制字符 */
+    static char buf[160];
+    int n = snprintf(buf, sizeof(buf),
+                     "{\"weather\":{\"temp\":%d,\"text\":\"%s\"}}",
+                     w->temp, w->text);
+    if (n <= 0 || (size_t)n >= sizeof(buf)) {
+        return;
+    }
+    if (ui_data_weather_cache_set(buf, (uint32_t)n) == UI_DATA_OK) {
+        snprintf(s_weather_cache_text, sizeof(s_weather_cache_text), "%s", w->text);
+        s_weather_cache_temp = w->temp;
+        s_weather_cache_written = true;
+        s_weather_cache_valid = true;
+    }
+}
+
+/** 读本地天气快照（离线兜底）。 */
+static void ui_weather_load_cache(void)
+{
+    static char buf[512];
+    uint32_t n = 0;
+    if (ui_data_weather_cache_get(buf, sizeof(buf), &n) != UI_DATA_OK || n == 0) {
+        return;
+    }
+    nr_weather_t w;
+    memset(&w, 0, sizeof w);
+    if (nr_parse_weather(buf, (size_t)n, &w) == 0 && w.valid) {
+        s_weather_cached = w;
+        s_weather_cache_valid = true;
+        snprintf(s_weather_cache_text, sizeof(s_weather_cache_text), "%s", w.text);
+        s_weather_cache_temp = w.temp;
+        s_weather_cache_written = true;
+    }
+}
+
+/** 刷新首页上的天气文案。 */
+static void ui_weather_refresh_display(void)
+{
+    char buf[64];
+    ui_weather_display_text(s_weather_state, &s_weather_live, &s_weather_cached,
+                            buf, sizeof(buf));
+    ui_pages_set_weather_text(buf);
+}
+
+/* ---- 城市 ---- */
+
+/** 把城市写进 net 层缓存（经网络队列，跨核不乱写共享内存）。 */
+static void ui_city_post_to_net(const char *wire)
+{
+    if (wire == NULL || wire[0] == '\0') {
+        return;
+    }
+    net_request_t req = {};
+    req.op = NET_OP_CITY;
+    snprintf(req.city, sizeof(req.city), "%s", wire);
+    if (hal_net_request_queue() == NULL ||
+        xQueueSend(hal_net_request_queue(), &req, 0) != pdTRUE) {
+        /* 网络队列满：下次心跳前再试一次 */
+        s_city_synced = false;
+    }
+}
+
+/** 把 TF 卡上保存的城市灌进 net 层缓存（开机 / 重启后恢复）。 */
+static void ui_city_sync_from_card(void)
+{
+    if (s_city_synced) {
+        return;
+    }
+    char city[UI_DATA_CITY_MAX];
+    city[0] = '\0';
+    if (ui_data_city_get(city, sizeof(city)) != UI_DATA_OK || city[0] == '\0') {
+        return;   /* 还没设置过城市 */
+    }
+    snprintf(s_city_current, sizeof(s_city_current), "%s", city);
+    s_city_synced = true;
+    ui_city_post_to_net(city);
+    /* 设置页右侧显示中文名（候选表里查得到就显示中文） */
+    const ui_city_candidate_t *c = ui_weather_city_find_by_wire(city);
+    ui_pages_set_city_label((c != NULL) ? c->zh : city);
+}
+
+/* ---- 心跳 ---- */
+
+/** 投递一次心跳（bootstrap）：天气、课表、待同步清单都靠它。 */
+static void ui_heartbeat_post(void)
+{
+    net_request_t req = {};
+    req.op = NET_OP_BOOTSTRAP;
+    if (hal_net_request_queue() == NULL ||
+        xQueueSend(hal_net_request_queue(), &req, 0) != pdTRUE) {
+        /* 网络忙：下个周期再试（不弹提示，后台同步不打扰用户） */
+        s_hb_due_ms = (uint32_t)millis() + UI_HB_RETRY_MS;
+    }
+}
+
+/* 前置声明（定义在“天气与城市”段） */
+static void ui_weather_refresh_display(void);
+static void ui_heartbeat_post(void);
 
 /* ===================== 浮层 ===================== */
 
@@ -156,6 +344,10 @@ void ui_router_go(ui_page_t page)
     case PAGE_WIFI_SCAN:
         /* 进页就请求一次真扫描（真正的扫描在网络任务里做，UI 不阻塞） */
         ui_pages_wifi_scan_enter((uint32_t)millis());
+        break;
+    case PAGE_CITY:
+        /* 候选城市列表：光标复位（从第一项开始） */
+        ui_pages_city_enter();
         break;
     default:
         break;
@@ -264,12 +456,44 @@ static void ui_page_action(ui_page_t page)
         case 0: ui_router_go(PAGE_WIFI_SCAN); break;
         case 3: ui_router_go(PAGE_OTA); break;
         case 6: ui_toast("用左右键调整专注时长"); break;
+        /* 「所在城市」：进候选城市列表（doc/05 §5.2） */
+        case 7: ui_router_go(PAGE_CITY); break;
         default: ui_toast("这个设置还在准备中"); break;
         }
         break;
     case PAGE_POMODORO:
         /* 短按 = 暂停/继续（已完成后再按 = 重新开始） */
         ui_pages_pomodoro_toggle();
+        break;
+    case PAGE_CITY:
+        /* 短按 = 确认选中的城市：落盘 TF 卡 + 写进 net 层缓存（随心跳上报） */
+        {
+            const ui_city_candidate_t *c = ui_pages_city_selected();
+            if (c == NULL) {
+                ui_toast("这里还没有可选的城市");
+                break;
+            }
+            /* 校验能不能直接给服务端用（不是经纬度，是地名） */
+            if (ui_weather_validate_city(c->en) != 0) {
+                ui_toast("这个城市名暂时用不了");
+                break;
+            }
+            /* 先落盘（离线兜底 + 重启后还在），再上报 */
+            if (ui_data_city_set(c->en) != UI_DATA_OK) {
+                ui_toast("没能保存，稍后再试");
+                break;
+            }
+            snprintf(s_city_current, sizeof(s_city_current), "%s", c->en);
+            s_city_synced = true;
+            ui_city_post_to_net(c->en);
+            ui_pages_set_city_label(c->zh);
+            /* 立刻发一次心跳：服务端 ≤30 秒后重新抓取该城市天气 */
+            s_hb_followups = 1;
+            s_hb_due_ms = (uint32_t)millis() + 1000;
+            ui_heartbeat_post();
+            ui_toast("已保存，稍等就显示当地天气");
+            ui_router_go(PAGE_SETTINGS);
+        }
         break;
     case PAGE_OOBE:
         switch (idx) {
@@ -384,6 +608,11 @@ static void ui_page_nav(ui_page_t page, int delta)
     if (page == PAGE_KEYBOARD) {
         /* 键盘：上下换行 */
         ui_pages_keyboard_move(0, delta, (uint32_t)millis());
+        return;
+    }
+    if (page == PAGE_CITY) {
+        /* 城市列表：上下移动光标（列表自己管滚动） */
+        ui_pages_city_move(delta);
         return;
     }
     ui_pages_cursor_move(page, delta);
@@ -700,6 +929,31 @@ void ui_router_tick(void)
         ui_router_go(PAGE_WIFI_SCAN);
     }
 
+    /* 心跳（bootstrap）：天气、课表、待同步清单都靠它（doc/05 §5.2）。
+     * 开机先来一次（拿到天气），之后每 10 分钟一次；
+     * 刚设完城市时追一次短间隔的（服务端 ≤30 秒才重新抓取天气）。 */
+    if (!s_hb_started) {
+        s_hb_started = true;
+        s_hb_due_ms = now + UI_HB_FIRST_DELAY_MS;
+        /* 开机就把 TF 卡上保存的城市灌进 net 层缓存：
+         * 断网时用的就是它，恢复联网后随下一次心跳上报 */
+        ui_city_sync_from_card();
+        /* 本地天气快照（离线兜底） */
+        ui_weather_load_cache();
+        ui_weather_refresh_display();
+    } else if ((int32_t)(now - s_hb_due_ms) >= 0) {
+        ui_city_sync_from_card();
+        ui_heartbeat_post();
+        if (s_hb_followups > 0) {
+            /* 追一次：服务端重抓完天气后再问一次 */
+            s_hb_followups--;
+            s_hb_gap_ms = UI_HB_FOLLOWUP_MS;
+        } else {
+            s_hb_gap_ms = UI_HB_INTERVAL_MS;
+        }
+        s_hb_due_ms = now + s_hb_gap_ms;
+    }
+
     /* 阅读计时（doc/07 §2.4）：只有阅读页在前台、无浮层遮挡、屏幕点亮时
      * 才累计当日阅读时长 —— 菜单页 / 目录页 / 提醒弹窗 / 息屏一律暂停。 */
     bool reading_active = s_in_book && (s_current_book == PAGE_READER) &&
@@ -722,6 +976,14 @@ void ui_router_handle_net_reply(int32_t biz_code, char *payload, uint32_t len)
     if (payload != NULL) {
         s_last_reply = payload;
         s_last_reply_len = len;
+    }
+
+    /* 心跳（bootstrap）应答：顶层有 weather 字段 —— 走天气分支，不弹提示。
+     * 心跳失败时 net 层会造一份带 offline 标记的空应答（见 net_dispatch.c），
+     * 固件据此切到 TF 卡上的本地快照兜底。 */
+    if (ui_reply_is_weather(s_last_reply, s_last_reply_len)) {
+        ui_weather_handle_reply(s_last_reply, s_last_reply_len);
+        return;
     }
 
     /* 文案一律由 UI 层出（doc/03 §四）：HAL / net 层不拼面向用户的中文 */

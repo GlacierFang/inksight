@@ -249,6 +249,55 @@ static void test_register_plain(void)
     CHECK(nr_build_register_plain("", "1.0.0", NULL, 0) < 0, "空 device_id 被拒");
 }
 
+static void test_bootstrap_plain(void)
+{
+    printf("[5c] bootstrap 明文组装（心跳，doc/05 §5.2）\n");
+
+    /* 不带城市：不应该出现 city 字段（服务端不会因此清掉已有城市） */
+    int need = nr_build_bootstrap_plain("esp32s3_a1b2c3d4", "1.0.0", 80, 0,
+                                        "[]", "[]", NULL, NULL, 0);
+    CHECK(need > 0, "能算出所需长度");
+    char *buf = (char *)malloc((size_t)need);
+    if (buf == NULL) {
+        CHECK(0, "分配缓冲区");
+        return;
+    }
+    nr_build_bootstrap_plain("esp32s3_a1b2c3d4", "1.0.0", 80, 0,
+                             "[]", "[]", NULL, buf, (size_t)need);
+    CHECK_STR(buf,
+              "{\"device_id\":\"esp32s3_a1b2c3d4\",\"fw_version\":\"1.0.0\","
+              "\"battery_pct\":80,\"schedule_updated_at\":0,"
+              "\"local_packs\":[],\"local_books\":[]}",
+              "bootstrap 明文（无城市）");
+    free(buf);
+
+    /* 带城市：城市名要在心跳明文里（服务端解密后读 payload["city"]） */
+    need = nr_build_bootstrap_plain("esp32s3_a1b2c3d4", "1.0.0", 80, 0,
+                                    "[]", "[]", "Shanghai", NULL, 0);
+    buf = (char *)malloc((size_t)need);
+    if (buf == NULL) {
+        CHECK(0, "分配缓冲区（带城市）");
+        return;
+    }
+    nr_build_bootstrap_plain("esp32s3_a1b2c3d4", "1.0.0", 80, 0,
+                             "[]", "[]", "Shanghai", buf, (size_t)need);
+    CHECK(strstr(buf, "\"city\":\"Shanghai\"") != NULL, "心跳明文里应带上报城市");
+    free(buf);
+
+    /* 城市名为空串 = 不带这个字段 */
+    need = nr_build_bootstrap_plain("esp32s3_a1b2c3d4", "1.0.0", 80, 0,
+                                    "[]", "[]", "", NULL, 0);
+    buf = (char *)malloc((size_t)need);
+    if (buf == NULL) {
+        CHECK(0, "分配缓冲区（空城市）");
+        return;
+    }
+    nr_build_bootstrap_plain("esp32s3_a1b2c3d4", "1.0.0", 80, 0,
+                             "[]", "[]", "", buf, (size_t)need);
+    CHECK(strstr(buf, "city") == NULL, "空城市不应带上 city 字段");
+    free(buf);
+}
+
 static void test_json_get(void)
 {
     printf("[6] JSON 取值\n");
@@ -472,6 +521,7 @@ int main(void)
     test_voice_plain();
     test_pair_plain();
     test_register_plain();
+    test_bootstrap_plain();
     test_json_get();
     test_http_response();
     test_solve_result();

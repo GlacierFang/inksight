@@ -81,6 +81,9 @@ static nr_profile_t g_profile;
 static int  g_remaining_quota = -1;   /* 网关下发的剩余配额；-1 = 尚未联网同步过 */
 static bool g_profile_loaded = false;
 
+/* 上报用的城市名（doc/05 §5.2）。空串 = 没设置过，心跳明文里不带这个字段。 */
+static char g_city[32] = { 0 };
+
 /* 共享响应缓冲：只由 net 任务串行使用，不做重入保护 */
 static char g_resp[NET_RESP_BUF_SIZE];
 
@@ -670,6 +673,20 @@ bool net_profile_set(const char *edu_stage, int enrollment_year, int remaining_q
     g_remaining_quota = remaining_quota;
     g_profile_loaded = true;
     return true;
+}
+
+void net_set_city(const char *city)
+{
+    if (city == NULL) {
+        g_city[0] = '\0';
+        return;
+    }
+    net_str_copy(g_city, sizeof g_city, city);
+}
+
+const char *net_get_city(void)
+{
+    return g_city;
 }
 
 bool net_profile_load(NetProfileContext *out)
@@ -1525,8 +1542,11 @@ bool net_sync_bootstrap_auto(int *out_biz_code, char **out_resp_json)
     /* 本地已装学科包 / 电子书清单：TF 卡目录树归 task_storage 独占串行化访问，
      * net 任务不得直接扫盘（doc/02 §4.2），故这里报空数组 ——
      * 服务端据此下发全部待同步项，语义正确。 */
+    /* 上报城市（doc/05 §5.2）：取 net 层缓存（由 UI 侧写卡后投递）。
+     * 没设置过就不带这个字段，服务端不会因此清掉已有城市。 */
+    const char *city = net_get_city();
     int need = nr_build_bootstrap_plain(net_device_id(), NET_FW_VERSION, (int)soc, 0,
-                                        "[]", "[]", NULL, 0);
+                                        "[]", "[]", city, NULL, 0);
     if (need <= 0) {
         return false;
     }
@@ -1535,7 +1555,7 @@ bool net_sync_bootstrap_auto(int *out_biz_code, char **out_resp_json)
         return false;
     }
     if (nr_build_bootstrap_plain(net_device_id(), NET_FW_VERSION, (int)soc, 0,
-                                 "[]", "[]", plain, (size_t)need) < 0) {
+                                 "[]", "[]", city, plain, (size_t)need) < 0) {
         free(plain);
         return false;
     }

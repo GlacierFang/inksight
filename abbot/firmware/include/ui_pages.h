@@ -14,6 +14,7 @@
 #include "cards.h"
 #include "lvgl.h"
 #include "ui_router.h"
+#include "ui_weather.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -68,6 +69,26 @@ void ui_pages_pomodoro_stop(void);
 /* ---------- 本地内容（读 TF 卡，doc/04 §二） ---------- */
 /** 刷新首页「今日课程」（读 `/config/schedule.json`）。读不到时出温和空态。 */
 void ui_pages_refresh_home(void);
+/**
+ * 刷新首页天气文案（doc/05 §5.2）。
+ *
+ * `text` 是 ui_weather_display_text() 生成的成品文案：在线读数 / 缓存标注 / 空态。
+ * 本函数不做判断 —— 空态那句「暂时拿不到天气」也是调用方传进来的。
+ */
+void ui_pages_set_weather_text(const char *text);
+/**
+ * 刷新设置页「所在城市」右侧的值（给用户看的中文名）。
+ * 没设置过时传 NULL → 显示「未设置」。
+ */
+void ui_pages_set_city_label(const char *zh);
+
+/* ---------- 选择城市页（doc/05 §5.2） ---------- */
+/** 进入城市页：光标复位并重画。 */
+void ui_pages_city_enter(void);
+/** 上下移动光标（-1 上一项 / +1 下一项）。返回移动后的候选序号。 */
+int ui_pages_city_move(int delta);
+/** 当前选中的候选城市（NULL = 没有候选）。 */
+const ui_city_candidate_t *ui_pages_city_selected(void);
 /** 刷新书架列表（读 `/books/` 下的真实书籍）。 */
 void ui_pages_refresh_bookshelf(void);
 /** 书架光标移动（-1 上一项 / +1 下一项）。返回移动后的索引。 */

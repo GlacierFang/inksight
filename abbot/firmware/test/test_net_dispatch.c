@@ -40,6 +40,7 @@ typedef enum {
     CALL_PROFILE,
     CALL_REGISTER,
     CALL_ENQUEUE,
+    CALL_CITY,
 } call_t;
 
 static call_t g_last_call = CALL_NONE;
@@ -51,6 +52,7 @@ static char g_last_card[24];
 static char g_last_code[8];
 static char g_last_media[72];   /* 媒体路径（TF 卡路径上限 72） */
 static char g_last_stage[16];
+static char g_last_city[32];
 static int g_last_year = 0;
 static int g_last_quota = 0;
 static int g_last_hint = 0;
@@ -172,6 +174,18 @@ bool net_profile_set(const char *edu_stage, int enrollment_year, int remaining_q
     return true;
 }
 
+/* 城市缓存（心跳时带上上报的城市） */
+void net_set_city(const char *city)
+{
+    g_last_call = CALL_CITY;
+    snprintf(g_last_city, sizeof g_last_city, "%s", city ? city : "");
+}
+
+const char *net_get_city(void)
+{
+    return g_last_city;
+}
+
 /* ---------- 用例 ---------- */
 
 static void reset(void)
@@ -183,6 +197,7 @@ static void reset(void)
     g_last_card[0] = '\0';
     g_last_code[0] = '\0';
     g_last_stage[0] = '\0';
+    g_last_city[0] = '\0';
     g_last_year = 0;
     g_last_quota = 0;
     g_last_hint = 0;
@@ -309,6 +324,19 @@ int main(void)
     CHECK(g_last_year == 2026, "入学年原样传下去");
     CHECK(g_last_quota == 8, "剩余配额原样传下去");
     CHECK(rc == 0, "档案同步成功返回 0");
+    free(resp);
+    resp = NULL;
+
+    /* 6b. 设置城市：写进 net 层缓存（随下一次心跳上报） */
+    reset();
+    memset(&req, 0, sizeof req);
+    req.op = NET_OP_CITY;
+    snprintf(req.city, sizeof req.city, "Shanghai");
+    rc = net_dispatch(&req, &resp);
+    CHECK(g_last_call == CALL_CITY, "op=设置城市 路由到 net_set_city");
+    CHECK(strcmp(g_last_city, "Shanghai") == 0, "城市名原样传下去");
+    CHECK(rc == 0, "设置城市成功返回 0");
+    CHECK(resp == NULL, "设置城市不产生业务明文");
     free(resp);
     resp = NULL;
 

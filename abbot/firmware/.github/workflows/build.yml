@@ -119,6 +119,11 @@ jobs:
               test/test_ota.c src/net/ota_client.c src/net/net_client.c \
               -o /tmp/test_ota -lmbedtls -lmbedcrypto
           /tmp/test_ota
+          # 天气显示 + 设置城市入口（显示策略 / 城市名校验 / 候选城市）—— 纯 C，主机侧可测
+          gcc -Wall -Wextra -Werror -I include -I src \
+              test/test_ui_weather.c src/ui/ui_weather.c src/net/net_req.c src/net/net_client.c \
+              -o /tmp/test_ui_weather -lmbedtls -lmbedcrypto
+          /tmp/test_ui_weather
           bash test/host_check_arduino.sh
 
       - name: 编译固件

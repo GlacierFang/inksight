@@ -1170,13 +1170,135 @@ int ui_data_focus_minutes_set(int minutes)
     if (minutes > UI_DATA_FOCUS_MAX) {
         minutes = UI_DATA_FOCUS_MAX;
     }
-    char text[128];
-    int n = snprintf(text, sizeof(text),
+    /* 读-改-写：settings.json 里可能还有城市等字段，不能整文件覆盖。 */
+    static char old[256];
+    uint32_t old_len = 0;
+    char city[UI_DATA_CITY_MAX];
+    city[0] = '\0';
+    /* 注意：ui_data_read_text() 成功时返回的是**读到的字节数**（>0），
+     * 不是 UI_DATA_OK(0)。这里原来判 `== UI_DATA_OK` → 永远不成立 →
+     * 读不到旧文件 → 写专注时长时把城市静默丢掉。 */
+    if (ui_data_read_text(UI_DATA_PATH_SETTINGS, old, (uint32_t)sizeof(old), &old_len) > 0 &&
+        old_len > 0) {
+        size_t vlen = 0;
+        const char *v = ui_json_find_value(old, 0, old_len, "city", &vlen);
+        if (v != NULL) {
+            ui_json_copy_string(v, vlen, city, sizeof(city));
+        }
+    }
+    char text[320];
+    int n;
+    if (city[0] != '\0') {
+        n = snprintf(text, sizeof(text),
+                     "{\n  \"schema_version\": 1,\n  \"focus_minutes\": %d,\n  \"city\": \"%s\"\n}\n",
+                     minutes, city);
+    } else {
+        n = snprintf(text, sizeof(text),
                      "{\n  \"schema_version\": 1,\n  \"focus_minutes\": %d\n}\n", minutes);
-    if (n <= 0) {
+    }
+    if (n <= 0 || (size_t)n >= sizeof(text)) {
         return UI_DATA_ERR_INVALID;
     }
     return ui_data_write_text(UI_DATA_PATH_SETTINGS, text, (uint32_t)n);
+}
+
+/* ============================================================
+ * 城市（doc/05 §5.2）
+ * ============================================================ */
+
+int ui_data_city_get(char *out, size_t cap)
+{
+    if (out == NULL || cap == 0) {
+        return UI_DATA_ERR_INVALID;
+    }
+    out[0] = '\0';
+
+    static char buf[256];
+    uint32_t n = 0;
+    int rc = ui_data_read_text(UI_DATA_PATH_SETTINGS, buf, (uint32_t)sizeof(buf), &n);
+    if (rc < 0 || n == 0) {
+        /* 没有设置文件 = 还没设置过城市，不算错 */
+        return UI_DATA_OK;
+    }
+    size_t vlen = 0;
+    const char *v = ui_json_find_value(buf, 0, n, "city", &vlen);
+    if (v == NULL) {
+        return UI_DATA_OK;
+    }
+    if (!ui_json_copy_string(v, vlen, out, cap)) {
+        out[0] = '\0';
+    }
+    return UI_DATA_OK;
+}
+
+int ui_data_city_set(const char *city)
+{
+    if (city == NULL || city[0] == '\0') {
+        return UI_DATA_ERR_INVALID;
+    }
+    /* 读-改-写：保留 settings.json 里已有的其它字段（专注时长）。 */
+    static char old[256];
+    uint32_t old_len = 0;
+    int focus = UI_DATA_FOCUS_DEFAULT;
+    char old_city[UI_DATA_CITY_MAX];
+    old_city[0] = '\0';
+    /* 同上：成功返回值是字节数（>0），不是 UI_DATA_OK(0)。
+     * 原来判 `== UI_DATA_OK` → 读不到旧文件 → 写城市时把专注时长冲回默认 25。 */
+    if (ui_data_read_text(UI_DATA_PATH_SETTINGS, old, (uint32_t)sizeof(old), &old_len) > 0 &&
+        old_len > 0) {
+        focus = ui_data_parse_focus_minutes(old, (size_t)old_len, UI_DATA_FOCUS_DEFAULT);
+        size_t vlen = 0;
+        const char *v = ui_json_find_value(old, 0, old_len, "city", &vlen);
+        if (v != NULL) {
+            ui_json_copy_string(v, vlen, old_city, sizeof(old_city));
+        }
+    }
+    char text[320];
+    int n = snprintf(text, sizeof(text),
+                     "{\n  \"schema_version\": 1,\n  \"focus_minutes\": %d,\n  \"city\": \"%s\"\n}\n",
+                     focus, city);
+    if (n <= 0 || (size_t)n >= sizeof(text)) {
+        return UI_DATA_ERR_INVALID;
+    }
+    return ui_data_write_text(UI_DATA_PATH_SETTINGS, text, (uint32_t)n);
+}
+
+/* ============================================================
+ * 天气快照（离线兜底）
+ * ============================================================ */
+
+int ui_data_weather_cache_get(char *out, size_t cap, uint32_t *out_len)
+{
+    if (out == NULL || cap == 0) {
+        return UI_DATA_ERR_INVALID;
+    }
+    out[0] = '\0';
+    if (out_len != NULL) {
+        *out_len = 0;
+    }
+    static char buf[512];
+    uint32_t n = 0;
+    int rc = ui_data_read_text(UI_DATA_PATH_WEATHER, buf, (uint32_t)sizeof(buf), &n);
+    if (rc < 0 || n == 0) {
+        return rc < 0 ? rc : UI_DATA_ERR_NOT_FOUND;
+    }
+    if ((size_t)n >= cap) {
+        n = (uint32_t)(cap - 1);
+    }
+    memcpy(out, buf, n);
+    out[n] = '\0';
+    if (out_len != NULL) {
+        *out_len = n;
+    }
+    return UI_DATA_OK;
+}
+
+int ui_data_weather_cache_set(const char *text, uint32_t len)
+{
+    if (text == NULL || len == 0) {
+        return UI_DATA_ERR_INVALID;
+    }
+    return ui_data_write_text(UI_DATA_PATH_WEATHER, text, len);
 }
 
 /* ============================================================

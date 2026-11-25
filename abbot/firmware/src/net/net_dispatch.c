@@ -11,6 +11,7 @@
 
 #include "net_api.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -49,7 +50,26 @@ int net_dispatch(const net_request_t *req, char **out_resp_json)
         if (ok && resp != NULL) {
             /* 心跳应答里的待下载清单：拉取并落盘（课表 / 学科包 / 电子书） */
             net_sync_pending_assets(resp, strlen(resp));
+        } else {
+            /*
+             * 心跳没通（断网 / 未配对）：给 UI 一份**带 offline 标记的空应答**。
+             * UI 据此切到 TF 卡上的本地快照兜底（而不是把空数据当新数据）。
+             * 标记是固件内部的约定，服务端不会返回这个字段。
+             */
+            free(resp);
+            resp = (char *)malloc(32);
+            if (resp != NULL) {
+                snprintf(resp, 32, "{\"weather\":{},\"offline\":true}");
+            }
+            biz = 0;
         }
+        break;
+    case NET_OP_CITY:
+        /* 设置城市：写进 net 层缓存，下一次心跳明文里带上（doc/05 §5.2）。
+         * 真正的落盘（TF 卡）在 UI 侧做 —— net 任务不得直接扫盘。 */
+        net_set_city(req->city);
+        ok = true;
+        biz = 0;
         break;
     case NET_OP_PAIR:
         ok = net_pair_with_code(req->pair_code);
