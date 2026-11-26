@@ -37,3 +37,6 @@ abbot/doc.bak.*/
 abbot/*.log
 abbot/server/.env
 abbot/server/storage/
+
+# 密钥类文件不入库（2026-11-26：ai_tagger.env 曾含活跃 MINIMAX_API_KEY 被推到公开仓）
+skills/gallery/ai_tagger.env
